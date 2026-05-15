@@ -1,0 +1,19 @@
+[package]
+name = "cb-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cb"
+path = "src/main.rs"
+
+[dependencies]
+cb-frontend = { path = "../cb-frontend" }
+cb-ir = { path = "../cb-ir" }
+cb-backend-interp = { path = "../cb-backend-interp" }
+cb-backend-llvm = { path = "../cb-backend-llvm" }
+
+[lints]
+workspace = true
