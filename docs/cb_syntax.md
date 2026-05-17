@@ -1,0 +1,897 @@
+# CoolBasic Syntax Reference
+
+This document is the **authoritative reference for the CoolBasic dialect this compiler implements**.
+When the lexer, parser, or semantic analyzer needs to know how a construct should behave, the answer goes here first — then the implementation follows.
+
+## 1. Lexical structure
+
+### 1.1 Source encoding and lines
+
+Files are UTF-8. A UTF-8 BOM at the start of a file is permitted and discarded. Both `\n` (LF) and `\r\n` (CRLF) line endings are accepted; a bare `\r` is treated as a line ending too.
+
+A line ending terminates the current statement. To continue a statement across lines, end the line with `\`. Any spaces or tabs are allowed between `\` and the line ending.
+
+```cb
+total = a + b + c + \
+        d + e + f
+```
+
+A line that contains only whitespace and/or a comment does not terminate a statement (i.e. an empty/comment-only line is not a statement).
+
+### 1.2 Whitespace and comments
+
+Space and tab characters are whitespace.
+
+**Inline comments** start with `REM` or `//` and run to end of line:
+
+```cb
+x = 1 // assign one
+REM this is a comment
+```
+
+**Block comments** are delimited by `/*` and `*/` and nest: every `/*` must be matched by a `*/` before the comment is considered closed.
+
+```cb
+/* outer /* inner */ still in outer */ code resumes here
+not comment /* comment /* comment */ comment */ not comment
+```
+
+Unterminated block comments are a compile error.
+
+### 1.3 Identifiers
+
+An identifier follows the Unicode UAX #31 definition (the same character set Rust accepts):
+
+- The first character must be `XID_Start` (which includes ASCII letters and most Unicode letters) or `_`.
+- Subsequent characters must be `XID_Continue` (letters, digits, and combining marks) or `_`.
+
+Identifiers are **case-insensitive**, compared using Unicode simple case folding. `myVar`, `MYVAR`, and `MyVar` all refer to the same name.
+
+An identifier that exactly matches a keyword (§1.5) is reserved; identifiers can also carry a trailing type sigil (§1.4), in which case the sigil is **not** part of the name (`x%` and `x#` both refer to `x`, but their declared type must match — see §1.4).
+
+```cb
+foo            // valid
+_total         // valid
+résumé2        // valid (non-ASCII letters allowed)
+2cool          // ERROR: must not start with a digit
+my-var         // ERROR: '-' is not an identifier character
+```
+
+### 1.4 Type sigils
+
+Type sigils annotate an identifier with a built-in type at its declaration or first reference:
+
+| Sigil | Type    |
+| ----- | ------- |
+| `%`   | Integer |
+| `#`   | Float   |
+| `$`   | String  |
+| `!`   | Bool    |
+
+Sigils exist **only** for these four common types. `Byte`, `Short`, `UInt`/`UInteger`, `Long`, `ULong`, user-defined types, and arrays must use `As` syntax.
+
+A variable's type is fixed at its first reference and cannot change later. If a sigil and an `As Type` clause are both given, they must agree:
+
+```cb
+Dim count% As Integer    // OK: sigil and As agree
+Dim count% As Float      // ERROR: % is Integer, As says Float
+```
+
+Once `x%` is declared, `x` and `x%` refer to the same variable; writing `x#` later is an error.
+
+### 1.5 Keywords
+
+Reserved words. Case-insensitive like all identifiers.
+
+```
+And, As
+BinAnd, BinNot, BinOr, BinXor, Bool, Break, Byte
+Case, Const, Continue
+Default, Dim
+Each, Else, ElseIf, End, EndFunction, EndIf, EndSelect, EndStruct, EndType
+False, Field, Float, For, Forever, Function
+Global, Goto
+If, Include, Int, Integer
+Long
+Mod
+New, Next, Not, Null
+Or
+Redim, REM, Repeat, Return
+Sar, Select, Shl, Short, Shr, Step, String, Struct
+Then, To, True, Type
+UInt, UInteger, ULong
+Wend, While
+Xor
+```
+
+Any `End <Keyword>` pair may also be written as a single token: `End If` == `EndIf`, `End Function` == `EndFunction`, etc.
+`ElseIf` can also be written as `Else If`.
+
+`REM` is recognised as the start of a line comment (§1.2) rather than as a value-producing keyword.
+
+### 1.6 Literals
+
+#### Integer literals
+
+```
+0           // decimal
+12304       // decimal
+5_342_100   // underscores allowed as digit separators
+$2f4E4      // hexadecimal (classic CB syntax)
+$dead_beef  // hexadecimal, underscores allowed
+%1010       // binary
+```
+
+Hexadecimal digits and the `b` in `0b` are case-insensitive. Underscores may appear between digits but not adjacent to the prefix (`$_ff`, `0b_10`, `1__000` are all errors). An integer literal that overflows the inferred type is a compile error (see §3.4 for inference).
+
+`%` introduces a binary literal only at the start of a number; after an identifier, `%` is the Integer sigil (§1.4). The lexer disambiguates by context: `x%` is `x` with the Integer sigil; `%10` is the binary literal `2`.
+
+#### Float literals
+
+```
+0.23
+23.205421
+12.4e23
+1.0e-7
+6.022e+23
+1_000.5      // underscores allowed
+```
+
+A float literal must contain a decimal point or an exponent (or both). A leading or trailing dot is **not** allowed: write `0.5` and `5.0`, not `.5` or `5.`. The exponent letter `e` is case-insensitive; the exponent itself is a decimal integer with an optional `+`/`-` sign.
+
+#### String literals
+
+Single-line strings use `"…"` and process C-style escapes:
+
+| Escape   | Meaning                          |
+| -------- | -------------------------------- |
+| `\\`     | backslash                        |
+| `\"`     | double quote                     |
+| `\n`     | newline (LF)                     |
+| `\r`     | carriage return                  |
+| `\t`     | tab                              |
+| `\0`     | null character                   |
+| `\xNN`   | byte from 2 hex digits           |
+| `\uNNNN` | Unicode code point (4 hex digits)|
+
+A literal newline inside a `"…"` string is a compile error — use `\n` or a multi-line string.
+
+**Multi-line strings** use triple double-quotes `"""…"""` and are **raw**: no escape processing, no interpolation. The closing delimiter must appear on its own line, and the common leading whitespace of the content lines is stripped:
+
+```cb
+msg$ = """
+    Line one with a literal \n (not an escape)
+    Line two with "quotes" inside
+    """
+// msg = "Line one with a literal \n (not an escape)\nLine two with \"quotes\" inside\n"
+```
+
+If a line in the content block has less indentation than the closing `"""`, that is a compile error.
+
+#### Bool and Null literals
+
+```
+True
+False
+Null      // valid value for any reference-typed variable (arrays, Type, Function pointers)
+```
+
+### 1.7 Operators and punctuation
+
+Arithmetic (binary): `+`, `-`, `*`, `/`, `\`, `**`, `Mod`
+- `/` is division. If either operand is Float, the both are promoted to Float type.
+- `**` is exponentiation, right-associative.
+- `Mod` is signed remainder; the sign of the result matches the dividend.
+
+Bitwise (binary): `BinAnd`, `BinOr`, `BinXor`, `Shl`, `Shr`, `Sar`
+- `Shl`/`Shr`/`Sar` shift by an integer count. `Shr` is logical right shift, `Sar` is arithmetic shift.
+
+Comparison: `=`, `<>`, `<`, `>`, `<=`, `>=`
+- Defined for all numeric types, `Bool`, `String` (lexicographic by Unicode code point), and reference types (`=`/`<>` only, by identity).
+
+Logical: `And`, `Or`, `Xor`, `Not`
+- `And` and `Or` short-circuit (§5.2). `Xor` evaluates both operands.
+
+Unary: `+`, `-`, `Not`, `BinNot`
+
+String concatenation uses `+`. Numeric operands on either side of a string `+` are implicitly converted to String (§3.4).
+
+Postfix/access: `()` (call), `[]` (index), `.` (member access).
+
+Assignment is `=` (§6.1). Statement separator is the line ending (§1.1).
+
+## 2. Program structure
+
+### 2.1 Top-level form
+
+All statements may appear at top level. Execution begins at the first statement of the main file passed to the compiler. Function and Type/Struct definitions placed at top level are hoisted: they are visible everywhere in the program regardless of textual position (§7.3).
+
+### 2.2 Includes
+
+`Include "path"` brings another source file into the program. It is a **top-level-only** statement; `Include` inside a function, block, or loop is a compile error.
+
+- Paths are resolved **relative to the file doing the include**. Absolute paths are also accepted.
+- Each file is included **at most once** per compilation. Repeated includes (direct or cyclic) are silently ignored after the first.
+
+```cb
+// main.cb
+Include "utils.cb"
+Include "graphics/sprite.cb"
+```
+
+### 2.3 Entry point
+
+Implicit. Compilation starts from the main file given on the command line; execution starts at that file's first statement. There is no `Main` function.
+
+## 3. Types
+
+### 3.1 Primitive types
+
+| Type             | Width        | Signedness | Sigil |
+| ---------------- | ------------ | ---------- | ----- |
+| `Byte`           | 8-bit        | unsigned   | —     |
+| `Short`          | 16-bit       | unsigned   | —     |
+| `Int`/`Integer`  | 32-bit       | signed     | `%`   |
+| `UInt`/`UInteger`| 32-bit       | unsigned   | —     |
+| `Long`           | 64-bit       | signed     | —     |
+| `ULong`          | 64-bit       | unsigned   | —     |
+| `Float`          | 64-bit IEEE  | —          | `#`   |
+| `Bool`           | 1 bit (bool) | —          | `!`   |
+| `String`         | UTF-8 string | —          | `$`   |
+
+`Int` and `Integer` are exact aliases; same for `UInt`/`UInteger`. There is **no 32-bit float type** in the language — `Float` is always 64-bit. A future `Single` type can be added without changing this.
+
+### 3.2 Arrays
+
+Arrays are reference-typed and 0-indexed. Their element type goes before `[]`; one comma per additional dimension:
+
+```cb
+Dim a As Integer[]       // 1-D, currently 0 elements (Null-like)
+Dim b As Float[,]        // 2-D, currently 0 elements
+Dim c As String[,,]      // 3-D, currently 0 elements
+
+a = New Integer[10]      // 1-D, length 10, indices 0..9
+b = New Float[4, 8]      // 2-D, 4*8 = 32 elements
+```
+
+A newly declared array has **length 0** until assigned. A `New T[…]` array's elements are zero-initialised (numerics = 0, Bool = False, String = "", reference types = Null).
+
+Indexing uses one bracketed expression with comma-separated indices per dimension:
+
+```cb
+a[3] = 42
+b[i, j] = 1.5
+```
+
+An index outside the valid range traps at runtime (§9.2).
+
+Assignment between array variables copies the **reference**, not the contents:
+
+```cb
+Dim arr As Float[] = New Float[10]
+Dim arr2 As Float[]
+arr2 = arr       // arr2 now references the same array as arr
+arr2[0] = 1.0    // arr[0] is now 1.0 as well
+```
+
+To resize an array variable (replacing whatever it referenced), use `Redim`:
+
+```cb
+Redim arr2 As Float[100]   // arr2 now references a fresh 100-element array
+```
+
+`Redim` preserves previous contents.
+
+Functions taking or returning arrays do not pin a length; the size is part of the runtime value:
+
+```cb
+Function sum#(arr As Float[]) As Float
+    Dim total As Float = 0.0
+    For i = 0 To Len(arr) - 1
+        total = total + arr[i]
+    Next i
+    Return total
+EndFunction
+```
+
+`Len(arr)` returns the length of dimension 0; `Len(arr, n)` returns the length of dimension `n` (0-indexed). These are compiler intrinsics.
+
+### 3.3 User-defined types
+
+There are two user-defined types, with different memory models:
+
+#### `Type … EndType` — heap-allocated linked-list node
+
+A `Type` defines a record that is always allocated on the heap, accessed through a reference, and **automatically threaded into a global linked list** of all live instances of that type. Type variables are reference-typed; assigning between them copies the reference, not the fields. The literal `Null` is a valid value of any `Type`.
+
+```cb
+Type MyType
+    Field field1 As Integer
+    Field asd$
+    Field something As MyType
+EndType
+
+Dim var As MyType = New MyType    // appended to the MyType list
+var.field1 = 23
+var.asd = "hello"
+
+Dim second As MyType = New MyType  // also appended; comes after var
+```
+
+**Built-ins for `Type` linked lists:**
+
+| Built-in            | Returns                                       |
+| ------------------- | --------------------------------------------- |
+| `First(MyType)`     | First live instance, or `Null` if list empty  |
+| `Last(MyType)`      | Last live instance, or `Null` if list empty   |
+| `Next(node)`        | Next instance, or `Null` at the end           |
+| `Previous(node)`    | Previous instance, or `Null` at the start     |
+| `Delete node`       | Removes `node` from its list and frees it     |
+
+
+Iteration with `For Each` (§6.3) is the idiomatic loop:
+
+```cb
+For n = Each MyType
+    Print n.field1
+Next n
+```
+
+Two `Type` references compare by **identity** (same node = equal); fields are not compared:
+
+```cb
+If var = second Then
+    // True only if var and second reference the same node
+EndIf
+```
+
+#### `Delete` semantics
+
+`Delete` removes a node from its `Type`'s linked list and frees it. The exact behaviour depends on whether the operand is an **lvalue** (variable, field, or array element) or an **rvalue** expression.
+
+**`Delete v` where `v` is an lvalue:**
+
+1. If `v` is `Null` or `v` is already in the deleted state (defined below), trap (§9.2).
+2. Capture `prev = v.prev` — the node immediately before `v` in the list, or the internal list-head sentinel if `v` was first.
+3. Unlink the node from the list, release its fields, and free its memory.
+4. Reassign `v` to `prev` and mark `v`'s variable slot as **deleted**.
+
+The deleted mark on a variable slot:
+
+- is cleared by any subsequent assignment to that variable (`v = Next(v)`, `v = someOther`, `v = Null`, …);
+- causes any field access through `v` (e.g. `v.field1`) to trap (§9.2);
+- causes a second `Delete v` to trap as double-delete (§9.2);
+- is **transparent** to `Next(v)` and `Previous(v)`: they walk from `v`'s underlying pointer — which is now the previous node (or the sentinel) — so `Next(v)` returns the live node that *was* after the deleted one (or `Null` if there was none), and `Previous(v)` returns the live node before that.
+
+**`Delete e` where `e` is an rvalue expression** (e.g. `Delete First(MyType)`, `Delete n.something`):
+
+Steps 1 and 3 only; no rewind, no mark (there is no variable slot to update). Any CB variable or field still holding the freed reference now dangles — see "Aliasing and dangling references" below.
+
+**The head sentinel.** Each `Type` maintains an internal head sentinel so that deleting the *first* real node has a well-defined rewind target. The sentinel is never returned to CB code: `First(MyType)` returns its successor (or `Null` for an empty list), and `Previous` on the first real node returns `Null`.
+
+**`Next(Null)` and `Previous(Null)`** both return `Null`. This makes `While n <> Null … Wend` walk the list to completion without an explicit guard.
+
+**`For Each` desugaring.** A `For Each` loop over a `Type` is exactly:
+
+```cb
+n = First(MyType)
+While n <> Null
+    // body — may Delete n
+    n = Next(n)           // if Delete rewound n, Next yields the post-deleted-position node
+Wend
+```
+
+No special compiler support for `Delete` inside `For Each` is needed — the lvalue-rewind rule makes the loop pattern work uniformly.
+
+**Worked examples.**
+
+```cb
+// Canonical loop pattern — works:
+For n = Each MyType
+    If n.dead Then Delete n
+Next n
+
+// Delete outside a loop — Next on the same variable is still defined:
+Dim x As MyType = First(MyType)
+Delete x
+Dim after As MyType = Next(x)     // = the node that was after x, or Null
+
+// Field access after Delete on the same variable — traps:
+Dim y As MyType = First(MyType)
+Delete y
+Print y.field1                    // RUNTIME TRAP (variable in deleted state)
+
+// Double-delete via the same variable — traps:
+Dim z As MyType = First(MyType)
+Delete z
+Delete z                          // RUNTIME TRAP
+
+// Delete on an rvalue — no rewind possible:
+Delete First(MyType)              // first real node freed; any aliases dangle
+```
+
+**Aliasing and dangling references.**
+
+Only the variable named in `Delete v` is rewound and marked. Other variables, parameters, or fields that held the same reference still hold the *freed* pointer:
+
+```cb
+Dim a As MyType = First(MyType)
+Dim b As MyType = a               // b aliases a's node
+Delete a                          // a is rewound and marked; b is untouched
+Print b.field1                    // UNDEFINED — b is dangling
+
+Function kill(t As MyType)
+    Delete t                      // rewinds t (this function's local)
+EndFunction
+Dim n As MyType = First(MyType)
+kill(n)                           // caller's n is NOT rewound
+Print Next(n)                     // UNDEFINED — caller's n is dangling
+```
+
+The language treats these reads as undefined behaviour. The interpreter backend (`cb-backend-interp`), as the reference implementation, traps on use of a known-freed reference with a clear diagnostic. The LLVM backend may exhibit any behaviour here, especially under optimisation.
+
+#### `Struct … EndStruct` — statically allocated value type
+
+A `Struct` is a value type with a static layout, similar to a C struct. It is **copied** on assignment and on parameter passing. Structs are not threaded into any list and have no `New`/`Delete`; declaring one allocates it in place.
+
+```cb
+Struct Vec2
+    Field x As Float
+    Field y As Float
+EndStruct
+
+Dim p As Vec2          // zero-initialised in place: {0.0, 0.0}
+p.x = 1.5
+p.y = -3.0
+
+Dim q As Vec2 = p      // full copy; mutating q does not affect p
+q.x = 99.0
+Print p.x              // 1.5
+```
+
+Structs may contain other Structs by value, arrays by reference, and Type references. A Struct cannot contain itself by value (that would be infinite size), but it can contain a `Type` reference to itself.
+
+### 3.4 Type conversions
+
+#### Implicit conversions
+
+- Numeric widening between integer types: always implicit (`Byte` → `Short` → `Int` → `Long`, and the unsigned chain `Byte` → `Short` → `UInt` → `ULong`).
+- Same-width signed↔unsigned: implicit, reinterprets the bit pattern.
+- Integer → Float: implicit.
+- Float → Integer: implicit, truncates toward zero. The compiler emits a **narrowing-conversion warning** at the implicit conversion site; suppress by writing `Int(x)` explicitly.
+- Long → Int, Int → Byte/Short, etc.: implicit but **warned** as a narrowing conversion.
+- Any numeric → String: implicit when used as a `+` operand on a String. Float → String uses the shortest decimal representation that round-trips, switching to scientific notation outside a sensible range. Integer → String uses decimal.
+- `Bool` → numeric: implicit, False = 0, True = 1.
+- Numeric → `Bool`: implicit, 0 = False, anything else = True.
+
+`Null` is implicitly assignable to any reference type.
+
+#### Explicit conversions
+
+The compiler-intrinsic conversion functions are:
+
+```cb
+Int(val)         // to Integer (32-bit signed)
+Float(val)       // to Float
+Str(val)         // to String
+Bool(val)        // to Bool
+```
+
+`Int("123")` returns 123. `Float("1.5e2")` returns 150.0. A `Str`-to-numeric conversion that fails to parse returns 0 (or 0.0) — it does not throw. To distinguish "0" from "parse failed", parse and check explicitly via runtime-library helpers.
+
+## 4. Variables and scope
+
+### 4.1 Declaration
+
+**Explicit declaration with `Dim`:**
+
+```cb
+Dim x As Integer
+Dim name$ As String           // sigil + As must agree
+Dim total# = 0.0              // explicit type via sigil, with initialiser
+Dim point As Vec2             // value-type Struct, zero-initialised in place
+Dim node As MyType = Null     // reference-type Type, starts Null
+```
+
+**Implicit declaration** at the first assignment:
+
+```cb
+x = 213                       // x is Integer (default for no sigil/As)
+y# = 23.04                    // y is Float (via sigil)
+z As String = "asd"           // z is String (via As, no sigil needed)
+```
+
+If the first reference has neither a sigil nor an `As` clause, the variable is `Integer`.
+
+### 4.2 Scope rules
+
+Variables are **function-scoped**. The whole top-level forms one main scope; each `Function` body is its own scope. There is no block scoping inside `If`, `For`, `While`, `Repeat`, or `Select` — a variable introduced inside a block is visible until the end of the enclosing function (or end of file at top level).
+
+```cb
+If condition Then
+    Dim temp = 10
+EndIf
+Print temp     // OK: temp lives until end of the enclosing scope
+```
+
+Within a function, only `Global`-declared variables from the main scope are visible; ordinary main-scope variables are not.
+
+### 4.3 Globals
+
+`Global` makes a variable available in every function:
+
+```cb
+Global score As Integer = 0
+
+Function addScore(n As Integer)
+    score = score + n          // visible because of Global
+EndFunction
+```
+
+`Global` may appear only at top level.
+
+### 4.4 Constants
+
+`Const` introduces a name bound to a constant expression of a built-in type:
+
+```cb
+Const Pi# = 3.14159
+Const MaxItems = 100
+Global Const Version$ = "1.0.0"
+```
+
+The value must be set at the declaration and cannot be reassigned. Constant expressions may use literals, other constants, and the operators in §5 — they're evaluated at compile time.
+
+## 5. Expressions
+
+### 5.1 Precedence and associativity
+
+Listed highest precedence (binds tightest) at the top.
+
+| Level | Operators                          | Associativity |
+| ----- | ---------------------------------- | ------------- |
+|  1    | `()` `[]` `.` (call, index, field) | left          |
+|  2    | unary `+` `-` `Not` `BinNot`       | right         |
+|  3    | `**`                               | **right**     |
+|  4    | `*` `/` `\` `Mod`                  | left          |
+|  5    | `+` `-`                            | left          |
+|  6    | `Shl` `Shr`                        | left          |
+|  7    | `BinAnd`                           | left          |
+|  8    | `BinXor`                           | left          |
+|  9    | `BinOr`                            | left          |
+| 10    | `=` `<>` `<` `>` `<=` `>=`         | left, non-chaining |
+| 11    | `And`                              | left, short-circuit |
+| 12    | `Xor`                              | left          |
+| 13    | `Or`                               | left, short-circuit |
+
+Examples:
+
+```cb
+2 ** 3 ** 2          // = 2 ** (3 ** 2) = 512        (** is right-assoc)
+-2 ** 2              // = -(2 ** 2) = -4             (unary tighter than **)
+a + b BinAnd mask    // = (a + b) BinAnd mask        (bitwise below arithmetic)
+a = b And c = d      // = (a = b) And (c = d)        (comparison tighter than And)
+```
+
+Comparison operators do **not chain**: `1 < x < 10` parses as `(1 < x) < 10`, comparing a `Bool` to `10`, which is a type warning (Bool→Int implicit) and almost certainly a bug. Use `x > 1 And x < 10` instead.
+
+### 5.2 Short-circuit evaluation
+
+`And` and `Or` short-circuit: the right-hand operand is only evaluated when the left does not already determine the result.
+
+```cb
+If p <> Null And p.field > 0 Then        // safe: p.field never accessed when p is Null
+    ...
+EndIf
+```
+
+`Xor` does **not** short-circuit (it can't — both operands are needed). `Not` is a unary operator and the question doesn't arise.
+
+### 5.3 String operations
+
+- Concatenation with `+`. Numeric operands on either side are implicitly converted to `String`:
+
+  ```cb
+  msg$ = "Score: " + score      // score is Integer, auto-converted
+  ```
+
+- Comparison: `=`, `<>`, `<`, `>`, `<=`, `>=` compare lexicographically by Unicode code point.
+
+- Indexing strings with `[]` is **not** part of the language; use runtime-library functions (`Mid`, `Left`, `Right`, etc.) provided by the runtime.
+
+## 6. Statements
+
+### 6.1 Assignment
+
+Assignment uses `=`:
+
+```cb
+x = 10
+arr[i, j] = compute()
+node.field = value
+```
+
+Because comparison also uses a single `=`, an expression like `a = b = c` parses as `a = (b = c)` — assigning to `a` the Bool result of comparing `b` and `c`. **Assignment is not chainable**:
+
+```cb
+a = b = 5            // a := (b = 5), i.e. a is Bool, b is unchanged — NOT a chain
+```
+
+There are no compound-assignment operators (`+=`, `-=`, …); write the operation out:
+
+```cb
+total = total + delta
+```
+
+### 6.2 Conditionals
+
+Block `If`:
+
+```cb
+If x > 0 Then
+    Print "positive"
+ElseIf x = 0 Then
+    Print "zero"
+Else
+    Print "negative"
+EndIf
+```
+
+Single-line `If`:
+
+```cb
+If x > 0 Then Print "positive"
+If ready Then start() Else stop()      // single-line Else is allowed
+```
+
+A single-line `If` ends at the end of the line; it cannot contain `ElseIf` and cannot span multiple lines.
+
+#### `Select`
+
+`Select` supports all built-in types. Every `Case` value must be a constant expression and implicitly convertible to the type of the `Select` value. Cases **do not fall through** by default; use `Continue` inside a case body to fall through to the next case.
+
+```cb
+Select val
+    Case 10
+        Print "ten"
+
+    Case 30
+        Print "thirty"
+        Continue              // explicit fall-through into Case 40
+    Case 40
+        Print "thirty or forty"
+
+    Default
+        Print "something else"
+EndSelect
+```
+
+`Default` is optional and may appear in any position; when present it matches when no `Case` does.
+
+### 6.3 Loops
+
+#### Forever loop
+
+Runs until `Break` or `Return` exits it.
+
+```cb
+Repeat
+    line$ = readLine()
+    If line = "" Then Break
+    process(line)
+Forever
+```
+
+#### Repeat-While (condition at the end)
+
+```cb
+Repeat
+    work()
+While moreToDo()              // condition checked here; Continue jumps to this check
+```
+
+The body always runs at least once. `Continue` jumps to the condition check.
+
+#### While-Wend (condition at the start)
+
+```cb
+While moreToDo()              // condition checked here; Continue jumps to this check
+    work()
+Wend
+```
+
+The body may run zero times. `Continue` jumps to the condition check.
+
+#### Iterative For
+
+Inclusive on both ends. `Step` is optional and defaults to `1`. If `Step` is positive the loop runs while `i <= To`; if negative, while `i >= To`. `Step` may be a Float when `i` is a Float variable.
+
+```cb
+For i = 0 To 10 Step 2
+    Print i              // 0, 2, 4, 6, 8, 10
+Next i
+
+For i = 10 To 0 Step -1
+    Print i
+Next
+```
+
+The variable name after `Next` is optional, but if given it must match the loop variable. `Continue` jumps to the end-of-iteration step (increment + condition check).
+
+#### For Each (over an array or Type list)
+
+```cb
+For val = Each scores         // scores is Float[] or Float[,] etc.
+    Print val
+Next val
+
+For node = Each MyType        // iterates the global MyType linked list
+    Print node.field1
+Next node
+```
+
+Multi-dimensional arrays iterate in **row-major order** (last index varies fastest).
+
+`For Each <var> = Each <Type>` is safe to combine with `Delete <var>` in the body — the `Delete`-rewind rule (§3.3) ensures the loop's subsequent `Next(<var>)` step yields the correct next live node.
+
+#### Break
+
+`Break` exits the innermost enclosing loop. `Break n` (where `n` is a constant positive integer literal) exits `n` nested loops:
+
+```cb
+For i = 0 To 9
+    For j = 0 To 9
+        If grid[i, j] = target Then Break 2     // exits both loops
+    Next j
+Next i
+```
+
+### 6.4 Goto and labels
+
+A label is `name:` on a line by itself (any indentation):
+
+```cb
+    Goto cleanup
+
+cleanup:
+    closeFile(f)
+```
+
+`Goto` may jump **only within the current function** (or within top-level code, treated as one scope). Crossing function boundaries is a compile error. Jumping into the middle of a `For` block from outside is also a compile error, since the loop variable would not be initialised.
+
+## 7. Subroutines and functions
+
+### 7.1 Function
+
+Functions are introduced with `Function`:
+
+```cb
+Function myFunc(a, b, c) As Integer
+    Return a + b + c
+EndFunction
+```
+
+If a function does not declare a return type, it is a **subroutine** and may be called without parentheses (statement form). A function with a return type must be called with parentheses (expression form).
+
+```cb
+Function MySub(a#, b$, c As String)
+    Print a, b, c
+EndFunction
+
+MySub 0.42, "Hello", "World"         // statement call, no parens
+MySub(0.42, "Hello", "World")        // also OK
+```
+
+Recursion is allowed.
+
+### 7.2 Parameters and return type
+
+Parameters use the same declaration syntax as variables — sigil or `As`, optionally with a default:
+
+```cb
+Function f(a As Integer, b As Float, c As String) As String
+Function step(distance#, count = 1) As Float    // count defaults to 1
+```
+
+Return types can use either sigil or `As`:
+
+```cb
+Function area#(r As Float)
+Function name() As String
+```
+
+**Default values** are allowed only on trailing parameters. A call may omit defaulted arguments from the right:
+
+```cb
+step(2.5)        // count = 1
+step(2.5, 4)     // count = 4
+```
+
+There is **no function overloading**: each function name is bound to exactly one definition.
+
+**Parameter passing rules:**
+
+| Argument type            | Default mode |
+| ------------------------ | ------------ |
+| Primitives (Int, Float, …)| by value     |
+| `Struct`                 | by value (full copy) |
+| Arrays                   | by reference |
+| `Type` references        | by reference (it's a reference type) |
+| `String`                 | by value (logically); implementation may copy-on-write |
+
+Mutating a parameter that was passed by value does not affect the caller. Mutating an array element or a Type's field through a parameter does affect the caller, because the parameter is a reference to the same array/node.
+
+### 7.3 Forward declarations and ordering
+
+Functions, `Type`s, and `Struct`s have global scope and are visible everywhere regardless of definition order — there are no forward declarations and none are needed.
+
+### 7.4 First-class functions
+
+Function pointer types use `Function(paramTypes) [As ReturnType]`:
+
+```cb
+Dim fnPointer As Function(Integer, Float, String)
+Dim fnPointer2 As Function(text As String, length As Float) As String
+```
+
+To take the address of a function, use its bare name in a value context:
+
+```cb
+fnPointer = MySub               // takes address of MySub
+fnPointer(0.42, "Hello", "x")   // calls through the pointer
+```
+
+The compiler decides "address-of" vs "call" by the expression's expected type and the absence/presence of `()`. Because there is no overloading (§7.2), `MySub` always names exactly one function, so this is unambiguous.
+
+Functions cannot capture non-global variables, so a function pointer is always a plain typed pointer — never a closure.
+
+A null function pointer call traps at runtime (§9.2).
+
+## 8. Standard library surface
+
+**The compiler itself ships only the language**, including these compiler-known intrinsics:
+
+- Conversion: `Int`, `Float`, `Str`, `Bool`
+- Array operations: `Len`, `New`, `Redim`
+- `Type` linked-list operations: `First`, `Last`, `Next`, `Previous`, `New`, `Delete`
+
+Everything else — `Print`, math functions, string manipulation, file I/O, graphics, input, audio — comes from a **separately built runtime crate** that the program links against. The runtime is intentionally pluggable: a different runtime can be supplied without changing the compiler.
+
+This means a "language-only" program built without a runtime can still compile and run, but it has no way to perform I/O. The interpreter backend (`cb-backend-interp`) and the LLVM backend (`cb-backend-llvm`) both load the same runtime interface; if the two disagree on a runtime call's behaviour, the interpreter is the reference.
+
+## 9. Error model
+
+### 9.1 Compile-time diagnostics
+
+Diagnostics start with `file:line:col`, an error code, and a one-line summary, then expand with context and pointers to related locations:
+
+```
+code_file.cb:32:4 error(E3202): Function cannot be defined inside a function
+
+Functions can only be defined at top level.
+Function definition is inside another Function definition that starts at code_file.cb:10:0.
+```
+
+Warnings use `warning(Wxxxx)` instead of `error(Exxxx)`. Narrowing implicit conversions (§3.4) are warnings, not errors.
+
+### 9.2 Runtime errors
+
+The interpreter traps and clearly reports all of the following with `file:line:col`:
+
+- Integer division by zero (`/` between integer types, `\`, or `Mod` with a zero divisor).
+- Float division by zero produces ±∞ / NaN per IEEE 754; not a trap.
+- Null `Type` dereference: field access or method call on a `Null` Type reference.
+- Field access through a variable in the deleted state — the variable was the operand of a `Delete` and has not been reassigned since (§3.3).
+- `Delete` on a `Null` Type reference.
+- `Delete` on a variable already in the deleted state (double-delete — §3.3).
+- Null function pointer call.
+- Array index out of bounds (any dimension).
+- Failed runtime `Type` cast (where applicable to future features that introduce dynamic type checks).
+
+The LLVM backend produces equivalent traps. A future CLI flag may opt out of bounds checks for release builds; this would explicitly diverge from the interpreter's behaviour and would not be the default.
+
+## 10. Open questions
+
+A scratch list of language questions that have come up but aren't answered yet. Resolve and move into the relevant section above as they're decided.
+
+- _(none yet)_
