@@ -1,6 +1,7 @@
 # FD-001: Lexer
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-05-17
 **Priority:** High
 **Effort:** High (> 4 hours)
 **Impact:** First stage of the compiler frontend — turns CoolBasic source text into a token stream consumable by the parser. Nothing else in the frontend can land until this exists.

@@ -8,13 +8,13 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-001](FD-001_LEXER.md) | Lexer | Pending Verification | High | High |
+| - | - | - | - | No active features |
 
 ## Completed
 
 | FD | Title | Completed | Notes |
 |----|-------|-----------|-------|
-| - | - | - | No completed features yet |
+| [FD-001](archive/FD-001_LEXER.md) | Lexer | 2026-05-17 | Hand-written recovering lexer + `cb-diagnostics` crate |
 
 ## Deferred / Closed
 
