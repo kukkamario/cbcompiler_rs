@@ -3,7 +3,7 @@
 //! Backend-agnostic. Lowering to IR happens in [`cb_ir`].
 
 pub mod keywords;
-pub mod lexer; // populated in Phase 1.3
+pub mod lexer;
 pub mod span;
 pub mod token;
 
