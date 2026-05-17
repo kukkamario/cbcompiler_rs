@@ -1,0 +1,13 @@
+---
+source: crates/cb-frontend/tests/lexer_snapshots.rs
+expression: "snapshot_fixture(\"comments\")"
+---
+Newline @ 17..18  "⏎"
+Newline @ 42..43  "⏎"
+Newline @ 71..72  "⏎"
+Newline @ 107..108  "⏎"
+Ident { sigil: None } @ 108..109  "x"
+Op(Eq) @ 110..111  "="
+IntLit(1) @ 112..113  "1"
+Newline @ 113..114  "⏎"
+Eof @ 114..114  ""

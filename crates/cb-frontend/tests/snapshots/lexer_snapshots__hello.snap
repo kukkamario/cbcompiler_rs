@@ -1,0 +1,9 @@
+---
+source: crates/cb-frontend/tests/lexer_snapshots.rs
+expression: "snapshot_fixture(\"hello\")"
+---
+Newline @ 19..20  "⏎"
+Ident { sigil: None } @ 20..25  "Print"
+StrLit(Plain) @ 26..41  "\"Hello, world!\""
+Newline @ 41..42  "⏎"
+Eof @ 42..42  ""

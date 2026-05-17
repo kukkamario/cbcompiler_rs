@@ -1,0 +1,3 @@
+a$ = "unterminated
+b = 1__000
+/* unclosed

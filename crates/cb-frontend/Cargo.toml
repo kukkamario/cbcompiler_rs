@@ -5,5 +5,14 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+cb-diagnostics.workspace = true
+phf.workspace = true
+unicode-ident.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+
 [lints]
 workspace = true

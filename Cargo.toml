@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/cb-frontend",
-    "crates/cb-ir",
     "crates/cb-backend-interp",
     "crates/cb-backend-llvm",
+    "crates/cb-diagnostics",
     "crates/cb-driver",
+    "crates/cb-frontend",
+    "crates/cb-ir",
 ]
 
 [workspace.package]
@@ -16,3 +17,18 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+[workspace.dependencies]
+# External crates
+codespan-reporting = "0.11"
+insta = "1"
+phf = { version = "0.11", features = ["macros"] }
+proptest = "1"
+unicode-ident = "1"
+
+# Internal crates (path entries so other crates can switch to `workspace = true`)
+cb-backend-interp = { path = "crates/cb-backend-interp" }
+cb-backend-llvm = { path = "crates/cb-backend-llvm" }
+cb-diagnostics = { path = "crates/cb-diagnostics" }
+cb-frontend = { path = "crates/cb-frontend" }
+cb-ir = { path = "crates/cb-ir" }

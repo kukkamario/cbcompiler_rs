@@ -1,0 +1,17 @@
+---
+source: crates/cb-frontend/tests/lexer_snapshots.rs
+expression: "snapshot_fixture(\"strings\")"
+---
+Ident { sigil: Some(String) } @ 0..2  "a$"
+Op(Eq) @ 3..4  "="
+StrLit(Plain) @ 5..19  "\"plain string\""
+Newline @ 19..20  "⏎"
+Ident { sigil: Some(String) } @ 20..22  "b$"
+Op(Eq) @ 23..24  "="
+StrLit(Escaped) @ 25..42  "\"escaped\\nstring\""
+Newline @ 42..43  "⏎"
+Ident { sigil: Some(String) } @ 43..45  "c$"
+Op(Eq) @ 46..47  "="
+StrLit(Raw) @ 48..85  "\"\"\"⏎    line one⏎    line two⏎    \"\"\""
+Newline @ 85..86  "⏎"
+Eof @ 86..86  ""

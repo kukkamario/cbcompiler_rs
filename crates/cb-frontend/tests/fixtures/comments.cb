@@ -1,0 +1,5 @@
+// a line comment
+REM another line comment
+/* a simple block comment */
+/* outer /* inner */ still outer */
+x = 1

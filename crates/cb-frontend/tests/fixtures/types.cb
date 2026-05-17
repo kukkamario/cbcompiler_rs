@@ -1,0 +1,10 @@
+Type MyType
+    Field count As Integer
+    Field name$
+    Field link As MyType
+EndType
+
+Struct Vec2
+    Field x As Float
+    Field y As Float
+EndStruct

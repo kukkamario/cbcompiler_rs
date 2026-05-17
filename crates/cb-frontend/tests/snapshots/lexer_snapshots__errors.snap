@@ -1,0 +1,19 @@
+---
+source: crates/cb-frontend/tests/lexer_snapshots.rs
+expression: "snapshot_fixture(\"errors\")"
+---
+Ident { sigil: Some(String) } @ 0..2  "a$"
+Op(Eq) @ 3..4  "="
+Error(NewlineInString) @ 5..18  "\"unterminated"
+Newline @ 18..19  "⏎"
+Ident { sigil: None } @ 19..20  "b"
+Op(Eq) @ 21..22  "="
+Error(InvalidDigitSeparator) @ 23..29  "1__000"
+Newline @ 29..30  "⏎"
+Error(UnterminatedBlockComment) @ 30..42  "/* unclosed⏎"
+Eof @ 42..42  ""
+
+--- DIAGNOSTICS ---
+Error Some("E0101") newline in string literal — use `\n` or a triple-quoted `"""..."""` raw string
+Error Some("E0105") digit separators cannot be doubled
+Error Some("E0103") unterminated block comment

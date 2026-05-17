@@ -1,0 +1,26 @@
+Function classify(n As Integer) As Integer
+    If n > 0 Then
+        Return 1
+    ElseIf n = 0 Then
+        Return 0
+    Else
+        Return -1
+    EndIf
+EndFunction
+
+While running
+    work()
+Wend
+
+For i = 0 To 10 Step 2
+    visit(i)
+Next i
+
+Select kind
+    Case 1
+        handleOne()
+    Case 2
+        handleTwo()
+    Default
+        handleOther()
+EndSelect

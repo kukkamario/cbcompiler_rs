@@ -1,0 +1,6 @@
+a$ = "plain string"
+b$ = "escaped\nstring"
+c$ = """
+    line one
+    line two
+    """
