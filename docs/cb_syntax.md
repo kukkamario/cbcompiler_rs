@@ -104,7 +104,7 @@ Wend, While
 Xor
 ```
 
-Any `End <Keyword>` pair may also be written as a single token: `End If` == `EndIf`, `End Function` == `EndFunction`, etc.
+Any `End <Keyword>` pair may also be written as a single token: `End If` == `EndIf`, `End Function` == `EndFunction`, etc. Parsers matching a block closer accept both forms interchangeably.
 `ElseIf` can also be written as `Else If`.
 
 `REM` is recognised as the start of a line comment (§1.2) rather than as a value-producing keyword.
@@ -198,7 +198,13 @@ String concatenation uses `+`. Numeric operands on either side of a string `+` a
 
 Postfix/access: `()` (call), `[]` (index), `.` (member access).
 
-Assignment is `=` (§6.1). Statement separator is the line ending (§1.1).
+Assignment is `=` (§6.1). Statements are separated by the line ending (§1.1) or by `:`; a single line may chain multiple statements with `:`:
+
+```cb
+x = 1 : y = 2 : Print x + y
+```
+
+`:` after an identifier on a line by itself (`name:`) is a label, not a separator — see §6.4.
 
 ## 2. Program structure
 
@@ -317,6 +323,8 @@ var.asd = "hello"
 
 Dim second As MyType = New MyType  // also appended; comes after var
 ```
+
+Each `Field` declares exactly one name; comma-separated forms like `Field x, y As Integer` are not accepted — write one `Field` line per name. The same rule applies to `Field` declarations inside `Struct` (below).
 
 **Built-ins for `Type` linked lists:**
 
@@ -493,6 +501,14 @@ Dim point As Vec2             // value-type Struct, zero-initialised in place
 Dim node As MyType = Null     // reference-type Type, starts Null
 ```
 
+**Multi-name declarations.** `Dim` accepts a comma-separated name list that shares one trailing `As Type` clause:
+
+```cb
+Dim a, b, c As Integer    // three Integer variables, all of type Integer
+```
+
+All names share the declared type. The multi-name form does not accept an initialiser — use single-name `Dim` if you need one (`Dim x As Integer = 0`). `Global` (§4.3) accepts the same form; `Field` (§3.3) and `Const` (§4.4) do not.
+
 **Implicit declaration** at the first assignment:
 
 ```cb
@@ -528,6 +544,12 @@ Function addScore(n As Integer)
 EndFunction
 ```
 
+`Global` accepts the same multi-name form as `Dim` (§4.1):
+
+```cb
+Global a, b As Float
+```
+
 `Global` may appear only at top level.
 
 ### 4.4 Constants
@@ -542,6 +564,8 @@ Global Const Version$ = "1.0.0"
 
 The value must be set at the declaration and cannot be reassigned. Constant expressions may use literals, other constants, and the operators in §5 — they're evaluated at compile time.
 
+`Const` is legal at top level (with or without `Global`) and inside function bodies. A function-local `Const` is scoped to its enclosing function, like an ordinary `Dim`. Each `Const` declares exactly one name; comma-list forms like `Const A = 1, B = 2` are not accepted.
+
 ## 5. Expressions
 
 ### 5.1 Precedence and associativity
@@ -555,7 +579,7 @@ Listed highest precedence (binds tightest) at the top.
 |  3    | `**`                               | **right**     |
 |  4    | `*` `/` `\` `Mod`                  | left          |
 |  5    | `+` `-`                            | left          |
-|  6    | `Shl` `Shr`                        | left          |
+|  6    | `Shl` `Shr` `Sar`                  | left          |
 |  7    | `BinAnd`                           | left          |
 |  8    | `BinXor`                           | left          |
 |  9    | `BinOr`                            | left          |
@@ -598,6 +622,58 @@ EndIf
 - Comparison: `=`, `<>`, `<`, `>`, `<=`, `>=` compare lexicographically by Unicode code point.
 
 - Indexing strings with `[]` is **not** part of the language; use runtime-library functions (`Mid`, `Left`, `Right`, etc.) provided by the runtime.
+
+### 5.4 Type expressions
+
+Several constructs take a **type expression** — a piece of syntax that names a type. Type expressions appear in:
+
+- After `As` in `Dim`, `Global`, `Field`, `Const`, function parameters, and function return types.
+- After `New` (§3.2, §3.3) to allocate an array or a `Type` node.
+- After `Redim` (§3.2) to retype an array variable.
+- Inside `Function(...)` parameter types and the `As ReturnType` clause of a function-pointer type (§7.4).
+
+A type expression is one of:
+
+- **A primitive type** — `Byte`, `Short`, `Int`/`Integer`, `UInt`/`UInteger`, `Long`, `ULong`, `Float`, `Bool`, `String` (§3.1).
+- **A user-defined type name** — any identifier that resolves at sema time to a `Type` or `Struct` (§3.3), e.g. `MyType`, `Vec2`.
+- **An array of T with N dimensions** — the element type followed by `[]` (1-D), `[,]` (2-D), `[,,]` (3-D), and so on: `Integer[]`, `Float[,]`, `String[,,]`. The element type may itself be any non-array type expression.
+- **A function-pointer type** — `Function(<param-types>)` with an optional `As <return-type>`. Parameters use the same syntax as a function declaration (§7.2): each parameter is `name As Type` or `name<sigil>`, with names optional in a type position.
+- **A parenthesised type** — `(T)` is the same type as `T`. Parentheses are for grouping and disambiguation only; they have no effect on meaning. They are valid in every position a type expression is, not just after `As`.
+
+```cb
+Dim x       As Integer                                        // primitive
+Dim p       As Vec2                                           // user-defined
+Dim arr     As Float[,]                                       // 2-D array of Float
+Dim fn      As Function(Integer, Float) As String             // function-pointer
+Dim fnNamed As Function(text As String, length As Float) As String
+Dim grouped As (Integer)                                      // same as As Integer
+```
+
+**Nested function-pointer types.** When a `Function(...)`'s return type is itself a function-pointer, the unparenthesised form parses **right-associatively**: each `As <type>` is consumed as the return type of the most recently opened `Function(...)`, recursively. Parentheses let you write the same type explicitly, or override the default grouping.
+
+```cb
+// Right-assoc default — outer takes Integer, returns (Function(Float) As String):
+Dim fn As Function(Integer) As Function(Float) As String
+// Same type, parenthesised for clarity:
+Dim fn As Function(Integer) As (Function(Float) As String)
+
+// Array of function-pointers requires parens — otherwise [] binds to the return type:
+Dim handlers     As (Function(Integer) As Float)[]    // array of fn-pointers
+Dim returnsArray As Function(Integer) As Float[]      // single fn-pointer returning Float[]
+```
+
+**`New` expression grammar.**
+
+- `New T` — allocates a fresh `Type` node and threads it into `T`'s linked list (§3.3). `T` must be a user-defined `Type`.
+- `New T[dim1, dim2, ...]` — allocates an array. The bracketed dimensions give each axis's size; the number of dimensions must match the array variable's declared rank. `T` is the element type (any non-array type expression).
+
+```cb
+Dim node As MyType    = New MyType
+Dim a    As Float[]   = New Float[10]         // 1-D, length 10
+Dim b    As Float[,]  = New Float[4, 8]       // 2-D, 4 × 8 elements
+```
+
+**`Function` keyword disambiguation.** `Function` starts a declaration at statement position (top level — §7.1) and a function-pointer **type** in a type-expression position (after `As`, or inside another `Function(...)` parameter type). Same keyword, two roles; the parser distinguishes by context.
 
 ## 6. Statements
 
@@ -644,6 +720,22 @@ If x > 0 Then Print "positive"
 If ready Then start() Else stop()      // single-line Else is allowed
 ```
 
+**Single-line vs. block disambiguation.** After consuming `Then`, the parser peeks one token: if it is a line ending, the `If` is the block form (closed with `EndIf`); otherwise the next token starts a single-line `If` statement.
+
+```cb
+If x > 0 Then              // newline follows Then → block form
+    Print "positive"
+EndIf
+
+If x > 0 Then Print "positive"        // statement follows Then → single-line
+```
+
+The `Then` and `Else` branches of a single-line `If` may chain multiple statements with `:` (§1.7):
+
+```cb
+If x > 0 Then a = 1 : b = 2 Else c = 3 : d = 4
+```
+
 A single-line `If` ends at the end of the line; it cannot contain `ElseIf` and cannot span multiple lines.
 
 #### `Select`
@@ -681,6 +773,8 @@ Repeat
     process(line)
 Forever
 ```
+
+`Continue` jumps to the top of the body.
 
 #### Repeat-While (condition at the end)
 
@@ -729,6 +823,10 @@ For node = Each MyType        // iterates the global MyType linked list
     Print node.field1
 Next node
 ```
+
+The parser distinguishes iterative `For` from `For Each` by the token immediately after `=`: if it is the `Each` keyword, this is a For-Each loop; otherwise it is an iterative `For/To/Step` loop.
+
+`Continue` advances to the next element — the next array slot, or `Next(<var>)` in the `Type`-list desugar.
 
 Multi-dimensional arrays iterate in **row-major order** (last index varies fastest).
 

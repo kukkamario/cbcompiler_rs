@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-002](FD-002_PARSER.md) | Parser | Open | High | High |
 
 ## Completed
 
