@@ -1,0 +1,25 @@
+// Heap-allocated linked-list Type, closed with `EndType`.
+Type Foo
+    Field count As Integer
+    Field name$
+    Field link As Foo
+EndType
+
+// Same shape but closed with the `End Type` split spelling.
+Type Bar
+    Field id As Integer
+    Field tag$
+End Type
+
+// Statically-allocated Struct (value type), closed with `EndStruct`.
+Struct Vec2
+    Field x As Float
+    Field y As Float
+EndStruct
+
+// Struct closed with the `End Struct` split spelling.
+Struct Rect
+    Field origin As Vec2
+    Field width As Float
+    Field height As Float
+End Struct

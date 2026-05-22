@@ -1,0 +1,51 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_func\")"
+---
+Program (5 top-level statements)
+  Stmt::Function(params=1, return_sigil=None, has_return_ty=true) @ 31..196
+    Param(named) @ 49..61
+      TypeExpr::Primitive(integer) @ 54..61
+    TypeExpr::Primitive(integer) @ 66..73
+    Stmt::If(form=Block, elseifs=1, has_else=true) @ 78..184
+      Expr::BinOp(Gt) @ 81..86
+        Expr::Ident(sigil=None) @ 81..82
+        Expr::IntLit(0) @ 85..86
+      Stmt::Return(has_value=true) @ 100..108
+        Expr::IntLit(1) @ 107..108
+      Expr::BinOp(Eq) @ 120..125
+        Expr::Ident(sigil=None) @ 120..121
+        Expr::IntLit(0) @ 124..125
+      Stmt::Return(has_value=true) @ 139..147
+        Expr::IntLit(0) @ 146..147
+      Stmt::Return(has_value=true) @ 165..174
+        Expr::UnOp(Neg) @ 172..174
+          Expr::IntLit(1) @ 173..174
+  Stmt::Function(params=2, return_sigil=None, has_return_ty=false) @ 232..308
+    Param(named, sigil=String) @ 252..256
+    Param(named) @ 258..274
+      TypeExpr::Primitive(integer) @ 267..274
+    Stmt::ExprStmt @ 280..296
+      Expr::Call(args=2) @ 280..296
+        Expr::Ident(sigil=None) @ 280..285
+        Expr::Ident(sigil=None) @ 286..291
+        Expr::Ident(sigil=None) @ 293..296
+  Stmt::Function(params=1, return_sigil=Float, has_return_ty=false) @ 370..435
+    Param(named) @ 385..395
+      TypeExpr::Primitive(float) @ 390..395
+    Stmt::Return(has_value=true) @ 401..423
+      Expr::BinOp(Mul) @ 408..423
+        Expr::BinOp(Mul) @ 408..413
+          Expr::Ident(sigil=None) @ 408..409
+          Expr::Ident(sigil=None) @ 412..413
+        Expr::FloatLit(3.14159) @ 416..423
+  Stmt::Function(params=2, return_sigil=None, has_return_ty=true) @ 466..552
+    Param(named, sigil=Float) @ 482..491
+    Param(named, has_default) @ 493..502
+      Expr::IntLit(1) @ 501..502
+    TypeExpr::Primitive(float) @ 507..512
+    Stmt::Return(has_value=true) @ 517..540
+      Expr::BinOp(Mul) @ 524..540
+        Expr::Ident(sigil=None) @ 524..532
+        Expr::Ident(sigil=None) @ 535..540
+  Stmt::Function(params=0, return_sigil=None, has_return_ty=false) @ 588..616

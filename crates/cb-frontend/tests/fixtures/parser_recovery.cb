@@ -1,0 +1,23 @@
+// A valid statement before the broken ones so we can see recovery resumes.
+x = 1
+
+// Missing `Then` after the condition — parser should recover at end of line.
+If x > 0
+    Print "positive"
+EndIf
+
+// Mismatched closer: `End Type` closing a `Function` block.
+Function broken()
+    Print "in fn"
+End Type
+
+// Bogus top-level `EndFunction` with no matching opener.
+EndFunction
+
+// Garbage character (`@` lexes to an Error token) followed by a valid assignment.
+@
+y = 2
+
+// More broken syntax to make sure recovery keeps making progress.
+Dim , As Integer
+z = 3

@@ -1,0 +1,27 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_type_struct\")"
+---
+Program (4 top-level statements)
+  Stmt::Type(fields=3) @ 59..140
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 72..94
+      TypeExpr::Primitive(integer) @ 87..94
+    Stmt::FieldDecl(sigil=String, has_ty=false) @ 99..110
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 115..132
+      TypeExpr::Named @ 129..132
+  Stmt::Type(fields=2) @ 203..259
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 216..235
+      TypeExpr::Primitive(integer) @ 228..235
+    Stmt::FieldDecl(sigil=String, has_ty=false) @ 240..250
+  Stmt::Struct(fields=2) @ 331..394
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 347..363
+      TypeExpr::Primitive(float) @ 358..363
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 368..384
+      TypeExpr::Primitive(float) @ 379..384
+  Stmt::Struct(fields=3) @ 451..549
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 467..487
+      TypeExpr::Named @ 483..487
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 492..512
+      TypeExpr::Primitive(float) @ 507..512
+    Stmt::FieldDecl(sigil=None, has_ty=true) @ 517..538
+      TypeExpr::Primitive(float) @ 533..538

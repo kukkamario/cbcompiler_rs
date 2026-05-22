@@ -1,0 +1,29 @@
+// Function with typed return.
+Function classify(n As Integer) As Integer
+    If n > 0 Then
+        Return 1
+    ElseIf n = 0 Then
+        Return 0
+    Else
+        Return -1
+    EndIf
+EndFunction
+
+// Subroutine — no return type.
+Function logMessage(msg$, level As Integer)
+    Print level, msg
+EndFunction
+
+// Sigil-typed return (`Function area#` ≡ returns Float).
+Function area#(r As Float)
+    Return r * r * 3.14159
+EndFunction
+
+// Default parameter values.
+Function stepBy(distance#, count = 1) As Float
+    Return distance * count
+EndFunction
+
+// `End Function` split spelling.
+Function noop()
+End Function

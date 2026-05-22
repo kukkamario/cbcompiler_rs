@@ -1,6 +1,6 @@
 # FD-002: Parser
 
-**Status:** Open
+**Status:** Complete
 **Priority:** High
 **Effort:** High (> 4 hours)
 **Impact:** Second stage of the frontend — turns the lexer's token stream into an AST that semantic analysis and IR lowering can consume. Without it, nothing past the lexer can land.

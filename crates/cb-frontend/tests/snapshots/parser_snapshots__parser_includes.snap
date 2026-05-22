@@ -1,0 +1,9 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_includes\")"
+---
+Program (2 top-level statements)
+  Stmt::Include @ 34..52
+    Expr::StrLit("utils.cb", Plain) @ 42..52
+  Stmt::Include @ 87..115
+    Expr::StrLit("graphics/sprite.cb", Plain) @ 95..115

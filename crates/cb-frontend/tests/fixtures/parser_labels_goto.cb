@@ -1,0 +1,12 @@
+// Jump forward to a label defined later.
+Goto cleanup
+
+Print "skipped"
+
+cleanup:
+    closeFile(f)
+
+// A second label and a backward Goto.
+loop_top:
+    counter = counter + 1
+    If counter < 10 Then Goto loop_top

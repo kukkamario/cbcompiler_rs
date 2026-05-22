@@ -1,0 +1,47 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_type_expr\")"
+---
+Program (10 top-level statements)
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 30..46
+    TypeExpr::Primitive(integer) @ 39..46
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 76..91
+    TypeExpr::Named @ 85..91
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 120..136
+    TypeExpr::Array(rank=1) @ 129..136
+      TypeExpr::Primitive(float) @ 129..134
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 152..169
+    TypeExpr::Array(rank=2) @ 161..169
+      TypeExpr::Primitive(float) @ 161..166
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 185..204
+    TypeExpr::Array(rank=3) @ 194..204
+      TypeExpr::Primitive(string) @ 194..200
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 274..309
+    TypeExpr::FnPtr(params=1, has_ret=true) @ 283..309
+      Param(<anon>) @ 292..299
+        TypeExpr::Primitive(integer) @ 292..299
+      TypeExpr::Primitive(float) @ 304..309
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 367..422
+    TypeExpr::FnPtr(params=1, has_ret=true) @ 376..422
+      Param(<anon>) @ 385..392
+        TypeExpr::Primitive(integer) @ 385..392
+      TypeExpr::FnPtr(params=1, has_ret=true) @ 397..422
+        Param(<anon>) @ 406..411
+          TypeExpr::Primitive(float) @ 406..411
+        TypeExpr::Primitive(string) @ 416..422
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 481..499
+    TypeExpr::Paren @ 490..499
+      TypeExpr::Primitive(integer) @ 491..498
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 586..625
+    TypeExpr::Array(rank=1) @ 595..625
+      TypeExpr::Paren @ 595..623
+        TypeExpr::FnPtr(params=1, has_ret=true) @ 596..622
+          Param(<anon>) @ 605..612
+            TypeExpr::Primitive(integer) @ 605..612
+          TypeExpr::Primitive(float) @ 617..622
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 701..738
+    TypeExpr::FnPtr(params=1, has_ret=true) @ 710..738
+      Param(<anon>) @ 719..726
+        TypeExpr::Primitive(integer) @ 719..726
+      TypeExpr::Array(rank=1) @ 731..738
+        TypeExpr::Primitive(float) @ 731..736

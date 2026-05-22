@@ -1,0 +1,29 @@
+// Primitive type expression.
+Dim a As Integer
+
+// Named user-defined type.
+Dim b As MyType
+
+// 1-D array of primitive.
+Dim c As Float[]
+
+// 2-D array.
+Dim d As Float[,]
+
+// 3-D array.
+Dim e As String[,,]
+
+// Function-pointer type with one parameter and an `As ReturnType`.
+Dim f As Function(Integer) As Float
+
+// Nested function-pointer types — right-associative.
+Dim g As Function(Integer) As Function(Float) As String
+
+// Parenthesised type — same meaning as the bare type.
+Dim h As (Integer)
+
+// Array of function-pointers — parens force `[]` to bind outside the return type.
+Dim i As (Function(Integer) As Float)[]
+
+// Function-pointer returning an array — `[]` binds to the return type.
+Dim j As Function(Integer) As Float[]

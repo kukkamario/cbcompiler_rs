@@ -1,0 +1,29 @@
+// Standard Select with multiple Case arms and a trailing Default.
+Select kind
+    Case 1
+        handleOne()
+    Case 2
+        handleTwo()
+    Default
+        handleOther()
+EndSelect
+
+// Default appearing before any Case.
+Select state
+    Default
+        Print "unknown"
+    Case 0
+        Print "zero"
+    Case 1
+        Print "one"
+EndSelect
+
+// Comma-list cases (multiple values per arm) and Default in the middle.
+Select code
+    Case 1, 2, 3
+        Print "small"
+    Default
+        Print "other"
+    Case 10, 20
+        Print "round"
+EndSelect

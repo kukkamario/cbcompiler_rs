@@ -8,12 +8,13 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-002](FD-002_PARSER.md) | Parser | Open | High | High |
+| -  | -     | -      | -      | -        |
 
 ## Completed
 
 | FD | Title | Completed | Notes |
 |----|-------|-----------|-------|
+| [FD-002](archive/FD-002_PARSER.md) | Parser | 2026-05-21 | Hand-written recursive descent + Pratt, arena-allocated AST, recovering on `Newline`/`Colon`/`End*` |
 | [FD-001](archive/FD-001_LEXER.md) | Lexer | 2026-05-17 | Hand-written recovering lexer + `cb-diagnostics` crate |
 
 ## Deferred / Closed

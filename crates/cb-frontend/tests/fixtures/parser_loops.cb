@@ -1,0 +1,36 @@
+// While / Wend with body.
+While running
+    work()
+Wend
+
+// Repeat / Forever — body always runs at least once.
+Repeat
+    line$ = readLine()
+    If line = "" Then Break
+    process(line)
+Forever
+
+// Repeat / While — condition at the end.
+Repeat
+    tick()
+While moreToDo()
+
+// Iterative For with explicit positive Step.
+For i = 0 To 10 Step 2
+    Print i
+Next i
+
+// Iterative For with negative Step and a bare `Next`.
+For j = 10 To 0 Step -1
+    Print j
+Next
+
+// For Each over an array.
+For val = Each scores
+    Print val
+Next val
+
+// For Each over a Type linked list.
+For node = Each MyType
+    Print node.field1
+Next node

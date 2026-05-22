@@ -1,0 +1,62 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_select\")"
+---
+Program (3 top-level statements)
+  Stmt::Select(arms=3) @ 67..184
+    Expr::Ident(sigil=None) @ 74..78
+    CaseArm::Case @ 83..109
+      Expr::IntLit(1) @ 88..89
+      Stmt::ExprStmt @ 98..109
+        Expr::Call(args=0) @ 98..109
+          Expr::Ident(sigil=None) @ 98..107
+    CaseArm::Case @ 114..140
+      Expr::IntLit(2) @ 119..120
+      Stmt::ExprStmt @ 129..140
+        Expr::Call(args=0) @ 129..140
+          Expr::Ident(sigil=None) @ 129..138
+    CaseArm::Default @ 145..174
+      Stmt::ExprStmt @ 161..174
+        Expr::Call(args=0) @ 161..174
+          Expr::Ident(sigil=None) @ 161..172
+  Stmt::Select(arms=3) @ 224..345
+    Expr::Ident(sigil=None) @ 231..236
+    CaseArm::Default @ 241..272
+      Stmt::ExprStmt @ 257..272
+        Expr::Call(args=1) @ 257..272
+          Expr::Ident(sigil=None) @ 257..262
+          Expr::StrLit("unknown", Plain) @ 263..272
+    CaseArm::Case @ 277..304
+      Expr::IntLit(0) @ 282..283
+      Stmt::ExprStmt @ 292..304
+        Expr::Call(args=1) @ 292..304
+          Expr::Ident(sigil=None) @ 292..297
+          Expr::StrLit("zero", Plain) @ 298..304
+    CaseArm::Case @ 309..335
+      Expr::IntLit(1) @ 314..315
+      Stmt::ExprStmt @ 324..335
+        Expr::Call(args=1) @ 324..335
+          Expr::Ident(sigil=None) @ 324..329
+          Expr::StrLit("one", Plain) @ 330..335
+  Stmt::Select(arms=3) @ 420..552
+    Expr::Ident(sigil=None) @ 427..431
+    CaseArm::Case @ 436..470
+      Expr::IntLit(1) @ 441..442
+      Expr::IntLit(2) @ 444..445
+      Expr::IntLit(3) @ 447..448
+      Stmt::ExprStmt @ 457..470
+        Expr::Call(args=1) @ 457..470
+          Expr::Ident(sigil=None) @ 457..462
+          Expr::StrLit("small", Plain) @ 463..470
+    CaseArm::Default @ 475..504
+      Stmt::ExprStmt @ 491..504
+        Expr::Call(args=1) @ 491..504
+          Expr::Ident(sigil=None) @ 491..496
+          Expr::StrLit("other", Plain) @ 497..504
+    CaseArm::Case @ 509..542
+      Expr::IntLit(10) @ 514..516
+      Expr::IntLit(20) @ 518..520
+      Stmt::ExprStmt @ 529..542
+        Expr::Call(args=1) @ 529..542
+          Expr::Ident(sigil=None) @ 529..534
+          Expr::StrLit("round", Plain) @ 535..542

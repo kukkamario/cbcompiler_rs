@@ -1,0 +1,37 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_recovery\")"
+---
+Program (10 top-level statements)
+  Stmt::Assign @ 76..81
+    Expr::Ident(sigil=None) @ 76..77
+    Expr::IntLit(1) @ 80..81
+  Stmt::Error @ 171..172
+  Stmt::ExprStmt @ 176..192
+    Expr::Call(args=1) @ 176..192
+      Expr::Ident(sigil=None) @ 176..181
+      Expr::StrLit("positive", Plain) @ 182..192
+  Stmt::Error @ 193..198
+  Stmt::Function(params=0, return_sigil=None, has_return_ty=false) @ 261..305
+    Stmt::ExprStmt @ 283..296
+      Expr::Call(args=1) @ 283..296
+        Expr::Ident(sigil=None) @ 283..288
+        Expr::StrLit("in fn", Plain) @ 289..296
+  Stmt::Error @ 365..376
+  Stmt::Error @ 461..462
+  Stmt::Assign @ 463..468
+    Expr::Ident(sigil=None) @ 463..464
+    Expr::IntLit(2) @ 467..468
+  Stmt::Error @ 541..542
+  Stmt::Assign @ 554..559
+    Expr::Ident(sigil=None) @ 554..555
+    Expr::IntLit(3) @ 558..559
+
+--- DIAGNOSTICS ---
+ERROR[E0201] expected keyword `then` after `If` condition, found end of line @ 171..172
+ERROR[E0202] `endif` cannot start a statement @ 193..198
+ERROR[E0204] expected `EndFunction` to close `Function`, found `EndType` @ 297..305
+ERROR[E0202] `endfunction` cannot start a statement @ 365..376
+ERROR[E0106] unexpected character `@` @ 461..462
+ERROR[E0202] lexical error @ 461..462
+ERROR[E0201] expected variable name @ 541..542

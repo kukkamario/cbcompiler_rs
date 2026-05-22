@@ -1,0 +1,26 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_labels_goto\")"
+---
+Program (7 top-level statements)
+  Stmt::Goto @ 42..54
+  Stmt::ExprStmt @ 56..71
+    Expr::Call(args=1) @ 56..71
+      Expr::Ident(sigil=None) @ 56..61
+      Expr::StrLit("skipped", Plain) @ 62..71
+  Stmt::Label @ 73..81
+  Stmt::ExprStmt @ 86..98
+    Expr::Call(args=1) @ 86..98
+      Expr::Ident(sigil=None) @ 86..95
+      Expr::Ident(sigil=None) @ 96..97
+  Stmt::Label @ 139..148
+  Stmt::Assign @ 153..174
+    Expr::Ident(sigil=None) @ 153..160
+    Expr::BinOp(Add) @ 163..174
+      Expr::Ident(sigil=None) @ 163..170
+      Expr::IntLit(1) @ 173..174
+  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 179..213
+    Expr::BinOp(Lt) @ 182..194
+      Expr::Ident(sigil=None) @ 182..189
+      Expr::IntLit(10) @ 192..194
+    Stmt::Goto @ 200..213

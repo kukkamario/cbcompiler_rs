@@ -1,0 +1,26 @@
+// Single-name Dim with explicit `As Type`.
+Dim x As Integer
+
+// Single-name Dim using a sigil + initialiser.
+Dim count% = 0
+
+// Multi-name Dim sharing a trailing `As Type` clause.
+Dim a, b, c As Float
+
+// Top-level Global with initialiser.
+Global score As Integer = 0
+
+// Multi-name Global sharing a trailing `As Type` clause.
+Global a, b As Float
+
+// Local Const with a sigil + literal value.
+Const Pi# = 3.14159
+
+// Global Const with a sigil + literal value.
+Global Const Version$ = "1.0.0"
+
+// Single-dimension Redim — re-allocates the array.
+Redim arr As Float[100]
+
+// Multi-dimension Redim — 2-D 3x4 Float array.
+Redim m As Float[3, 4]

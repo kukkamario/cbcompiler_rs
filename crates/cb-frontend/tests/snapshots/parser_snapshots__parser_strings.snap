@@ -1,0 +1,17 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_strings\")"
+---
+Program (4 top-level statements)
+  Stmt::Assign @ 32..41
+    Expr::Ident(sigil=String) @ 32..34
+    Expr::StrLit("hi", Plain) @ 37..41
+  Stmt::Assign @ 102..118
+    Expr::Ident(sigil=String) @ 102..104
+    Expr::StrLit("a\nb\tc\"", Escaped) @ 107..118
+  Stmt::Assign @ 165..181
+    Expr::Ident(sigil=String) @ 165..167
+    Expr::StrLit("ÿ byte", Escaped) @ 170..181
+  Stmt::Assign @ 264..306
+    Expr::Ident(sigil=String) @ 264..266
+    Expr::StrLit("line one\nline two\n", Raw) @ 269..306

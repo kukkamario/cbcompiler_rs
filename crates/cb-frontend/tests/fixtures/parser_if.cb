@@ -1,0 +1,33 @@
+// Block If with ElseIf and Else.
+If score > 90 Then
+    grade$ = "A"
+ElseIf score > 80 Then
+    grade$ = "B"
+Else
+    grade$ = "C"
+EndIf
+
+// Single-line If, no Else.
+If ready Then start()
+
+// Single-line If with Else.
+If ready Then start() Else stop()
+
+// Single-line If with `:` chain in both branches.
+If x > 0 Then a = 1 : b = 2 Else c = 3 : d = 4
+
+// `Else If` split spelling (== ElseIf).
+If a > 0 Then
+    Print "pos"
+Else If a = 0 Then
+    Print "zero"
+Else
+    Print "neg"
+End If
+
+// Nested block If inside a block If.
+If outer Then
+    If inner Then
+        Print "both"
+    EndIf
+EndIf

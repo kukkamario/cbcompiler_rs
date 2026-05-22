@@ -62,8 +62,10 @@ version = "0.1.0"
 dependencies = [
  "cb-backend-interp",
  "cb-backend-llvm",
+ "cb-diagnostics",
  "cb-frontend",
  "cb-ir",
+ "codespan-reporting",
 ]
 
 [[package]]

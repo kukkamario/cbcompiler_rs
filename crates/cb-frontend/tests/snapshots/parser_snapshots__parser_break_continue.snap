@@ -1,0 +1,47 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_break_continue\")"
+---
+Program (3 top-level statements)
+  Stmt::For(has_step=false, has_next_name=true) @ 41..95
+    Expr::Ident(sigil=None) @ 45..46
+    Expr::IntLit(0) @ 49..50
+    Expr::IntLit(9) @ 54..55
+    Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 60..90
+      Expr::BinOp(Eq) @ 63..79
+        Expr::Index(rank=1) @ 63..70
+          Expr::Ident(sigil=None) @ 63..67
+          Expr::Ident(sigil=None) @ 68..69
+        Expr::Ident(sigil=None) @ 73..79
+      Stmt::Break @ 85..90
+  Stmt::For(has_step=false, has_next_name=true) @ 142..235
+    Expr::Ident(sigil=None) @ 146..147
+    Expr::IntLit(0) @ 150..151
+    Expr::IntLit(9) @ 155..156
+    Stmt::For(has_step=false, has_next_name=true) @ 161..228
+      Expr::Ident(sigil=None) @ 165..166
+      Expr::IntLit(0) @ 169..170
+      Expr::IntLit(9) @ 174..175
+      Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 184..219
+        Expr::BinOp(Eq) @ 187..206
+          Expr::Index(rank=2) @ 187..197
+            Expr::Ident(sigil=None) @ 187..191
+            Expr::Ident(sigil=None) @ 192..193
+            Expr::Ident(sigil=None) @ 195..196
+          Expr::Ident(sigil=None) @ 200..206
+        Stmt::Break(count=2) @ 212..219
+  Stmt::For(has_step=false, has_next_name=true) @ 287..351
+    Expr::Ident(sigil=None) @ 291..292
+    Expr::IntLit(0) @ 295..296
+    Expr::IntLit(9) @ 300..301
+    Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 306..334
+      Expr::BinOp(Eq) @ 309..320
+        Expr::BinOp(Mod) @ 309..316
+          Expr::Ident(sigil=None) @ 309..310
+          Expr::IntLit(2) @ 315..316
+        Expr::IntLit(0) @ 319..320
+      Stmt::Continue @ 326..334
+    Stmt::ExprStmt @ 339..346
+      Expr::Call(args=1) @ 339..346
+        Expr::Ident(sigil=None) @ 339..344
+        Expr::Ident(sigil=None) @ 345..346

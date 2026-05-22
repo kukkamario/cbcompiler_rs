@@ -1,0 +1,17 @@
+// Plain Break exits the innermost loop.
+For i = 0 To 9
+    If grid[i] = target Then Break
+Next i
+
+// `Break n` exits n nested loops at once.
+For i = 0 To 9
+    For j = 0 To 9
+        If grid[i, j] = target Then Break 2
+    Next j
+Next i
+
+// Continue jumps to the end-of-iteration step.
+For k = 0 To 9
+    If k Mod 2 = 0 Then Continue
+    Print k
+Next k

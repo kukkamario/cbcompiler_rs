@@ -10,10 +10,12 @@ name = "cb"
 path = "src/main.rs"
 
 [dependencies]
+cb-diagnostics = { path = "../cb-diagnostics" }
 cb-frontend = { path = "../cb-frontend" }
 cb-ir = { path = "../cb-ir" }
 cb-backend-interp = { path = "../cb-backend-interp" }
 cb-backend-llvm = { path = "../cb-backend-llvm" }
+codespan-reporting.workspace = true
 
 [lints]
 workspace = true

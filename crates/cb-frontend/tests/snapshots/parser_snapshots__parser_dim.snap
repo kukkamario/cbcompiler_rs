@@ -1,0 +1,29 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+expression: "snapshot_parser_fixture(\"parser_dim\")"
+---
+Program (9 top-level statements)
+  Stmt::Dim(names=1, has_ty=true, has_init=false) @ 44..60
+    TypeExpr::Primitive(integer) @ 53..60
+  Stmt::Dim(names=1, has_ty=false, has_init=true) @ 110..124
+    Expr::IntLit(0) @ 123..124
+  Stmt::Dim(names=3, has_ty=true, has_init=false) @ 181..201
+    TypeExpr::Primitive(float) @ 196..201
+  Stmt::Global(names=1, has_ty=true, has_init=true) @ 241..268
+    TypeExpr::Primitive(integer) @ 257..264
+    Expr::IntLit(0) @ 267..268
+  Stmt::Global(names=2, has_ty=true, has_init=false) @ 328..348
+    TypeExpr::Primitive(float) @ 343..348
+  Stmt::Const(is_global=false, sigil=Float, has_ty=false) @ 395..414
+    Expr::FloatLit(3.14159) @ 407..414
+  Stmt::Const(is_global=true, sigil=String, has_ty=false) @ 469..493
+    Expr::StrLit("1.0.0", Plain) @ 486..493
+  Stmt::Redim(rank=1) @ 549..572
+    Expr::Ident(sigil=None) @ 555..558
+    TypeExpr::Primitive(float) @ 562..567
+    Expr::IntLit(100) @ 568..571
+  Stmt::Redim(rank=2) @ 624..646
+    Expr::Ident(sigil=None) @ 630..631
+    TypeExpr::Primitive(float) @ 635..640
+    Expr::IntLit(3) @ 641..642
+    Expr::IntLit(4) @ 644..645
