@@ -92,4 +92,23 @@ pub fn lookup(candidate: &str) -> Option<Kw> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::{KEYWORDS, LONGEST_KEYWORD_LEN};
+
+    /// `LONGEST_KEYWORD_LEN` sizes the on-stack lowercase scratch buffer in
+    /// [`super::lookup`]; if a longer keyword is ever added without bumping
+    /// this constant, lookup silently rejects it. This test pins the
+    /// invariant so that regression is impossible.
+    #[test]
+    fn longest_keyword_len_matches_table() {
+        let actual = KEYWORDS
+            .keys()
+            .map(|k| k.len())
+            .max()
+            .expect("KEYWORDS is non-empty");
+        assert_eq!(
+            actual, LONGEST_KEYWORD_LEN,
+            "LONGEST_KEYWORD_LEN ({LONGEST_KEYWORD_LEN}) is out of sync with the table (longest entry is {actual} bytes)",
+        );
+    }
+}

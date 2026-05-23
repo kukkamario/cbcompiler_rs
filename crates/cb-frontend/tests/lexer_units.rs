@@ -35,12 +35,12 @@ fn kinds(tokens: &[Token]) -> Vec<TokenKind> {
 
 fn float_value(t: Token) -> f64 {
     match t.kind {
-        TokenKind::FloatLit(v) => v,
+        TokenKind::FloatLit(v) => v.to_f64(),
         other => panic!("expected FloatLit, got {other:?}"),
     }
 }
 
-fn int_value(t: Token) -> i64 {
+fn int_value(t: Token) -> u64 {
     match t.kind {
         TokenKind::IntLit(v) => v,
         other => panic!("expected IntLit, got {other:?}"),
@@ -428,7 +428,7 @@ mod numbers {
     #[test]
     fn hex_with_separators() {
         let toks = lex("$dead_beef");
-        assert_eq!(int_value(toks[0]), 0xDEAD_BEEFi64);
+        assert_eq!(int_value(toks[0]), 0xDEAD_BEEFu64);
     }
 
     #[test]
@@ -838,6 +838,7 @@ mod trivia {
 
 mod newlines {
     use super::*;
+    use cb_frontend::LexErrorKind;
 
     #[test]
     fn lf_newline_one_byte() {
@@ -876,6 +877,53 @@ mod newlines {
             ]
         );
     }
+
+    // --- bare `\r` line-terminator coverage (`cb_syntax.md` §1.1) ----------
+    // All three contexts already behave correctly today; these tests pin the
+    // behaviour so a future regression in any one path fails loudly.
+
+    #[test]
+    fn bare_cr_separates_top_level_statements() {
+        // Three statements separated by bare `\r` must tokenize to the same
+        // shape as the `\n` variant.
+        let with_cr = lex("x = 1\ry = 2\rz = 3");
+        let with_lf = lex("x = 1\ny = 2\nz = 3");
+        assert_eq!(kinds(&with_cr), kinds(&with_lf));
+    }
+
+    #[test]
+    fn bare_cr_after_continuation_backslash() {
+        // `\` followed by bare `\r` is a valid line continuation: in
+        // trivia-preserving mode it emits a `Continuation` token; in the
+        // default (non-trivia) mode the operands fuse into a single
+        // expression. Verify both.
+        let trivia = lex_trivia("a + \\\rb");
+        assert!(
+            trivia.iter().any(|t| t.kind == TokenKind::Continuation),
+            "expected a Continuation token; got {trivia:?}"
+        );
+        let toks = lex("a + \\\rb");
+        // Default mode strips trivia: should be `Ident + Op(Plus) + Ident + Eof`,
+        // with no Newline interrupting the expression.
+        assert!(
+            !toks.iter().any(|t| t.kind == TokenKind::Newline),
+            "continuation should suppress the newline; got {toks:?}"
+        );
+    }
+
+    #[test]
+    fn bare_cr_inside_string_is_newline_in_string() {
+        let (toks, diags) = lex_with_diags("\"abc\rdef\"");
+        assert!(
+            toks.iter()
+                .any(|t| t.kind == TokenKind::Error(LexErrorKind::NewlineInString)),
+            "bare `\\r` inside a single-line string must error; got {toks:?}"
+        );
+        assert!(
+            diags.iter().any(|d| d.code == Some("E0101")),
+            "expected E0101 diagnostic; got {diags:?}"
+        );
+    }
 }
 
 mod bom {
@@ -892,6 +940,45 @@ mod bom {
             "first token should start after the 3-byte BOM"
         );
         assert_eq!(toks[0].span.end, 6);
+    }
+}
+
+mod float_bits {
+    use super::*;
+    use cb_frontend::FloatBits;
+
+    #[test]
+    fn finite_float_lit_round_trips_through_bits() {
+        let toks = lex("0.5");
+        match toks[0].kind {
+            TokenKind::FloatLit(bits) => assert_eq!(bits.to_f64(), 0.5),
+            other => panic!("expected FloatLit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn float_lit_tokens_compare_by_bits_not_ieee() {
+        // Two tokens with the same NaN bit pattern are equal (unlike raw `f64`
+        // where NaN != NaN). Different payloads stay unequal.
+        let nan_payload_a = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0001));
+        let nan_payload_b = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0001));
+        let nan_payload_c = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0002));
+
+        let tok_a = Token {
+            kind: TokenKind::FloatLit(nan_payload_a),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+        let tok_b = Token {
+            kind: TokenKind::FloatLit(nan_payload_b),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+        let tok_c = Token {
+            kind: TokenKind::FloatLit(nan_payload_c),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+
+        assert_eq!(tok_a, tok_b, "same NaN payload must compare equal");
+        assert_ne!(tok_a, tok_c, "different NaN payloads must compare unequal");
     }
 }
 
@@ -947,16 +1034,41 @@ mod errors {
     }
 
     #[test]
-    fn number_overflow_e0104() {
-        let (toks, diags) = lex_with_diags("99999999999999999999");
+    fn number_above_u64_max_emits_malformed_number_e0107() {
+        // 21-digit decimal exceeds `u64::MAX` (~1.8e19). The lexer rejects
+        // values no signed *or* unsigned 64-bit type could represent.
+        let (toks, diags) = lex_with_diags("999999999999999999999");
         assert!(
-            has_error_kind(&toks, LexErrorKind::NumberOverflow),
-            "expected NumberOverflow token; got {toks:?}"
+            has_error_kind(&toks, LexErrorKind::MalformedNumber),
+            "expected MalformedNumber token; got {toks:?}"
         );
         assert!(
-            has_diag_code(&diags, "E0104"),
-            "expected E0104 diagnostic; got {diags:?}"
+            has_diag_code(&diags, "E0107"),
+            "expected E0107 diagnostic; got {diags:?}"
         );
+    }
+
+    #[test]
+    fn int_literal_at_signed_boundary_lexes_ok() {
+        // `i64::MAX = 9_223_372_036_854_775_807`; one past that
+        // (`9_223_372_036_854_775_808`) is a valid `ULong` literal and must
+        // lex without a diagnostic — sema decides whether the inferred type
+        // can hold the value.
+        for s in [
+            "9223372036854775807",
+            "9223372036854775808",
+            "18446744073709551615", // u64::MAX
+        ] {
+            let (toks, diags) = lex_with_diags(s);
+            assert!(
+                diags.is_empty(),
+                "unexpected diagnostics for {s}: {diags:?}"
+            );
+            assert!(
+                matches!(toks[0].kind, TokenKind::IntLit(_)),
+                "expected IntLit for {s}; got {toks:?}"
+            );
+        }
     }
 
     #[test]
@@ -1076,17 +1188,9 @@ mod errors {
     #[test]
     fn invalid_char_at_top_level_e0106() {
         let (toks, diags) = lex_with_diags("@");
-        // Either InvalidChar or UnexpectedChar.
-        let has_err = toks.iter().any(|t| {
-            matches!(
-                t.kind,
-                TokenKind::Error(LexErrorKind::InvalidChar)
-                    | TokenKind::Error(LexErrorKind::UnexpectedChar)
-            )
-        });
         assert!(
-            has_err,
-            "expected InvalidChar or UnexpectedChar token; got {toks:?}"
+            has_error_kind(&toks, LexErrorKind::UnexpectedChar),
+            "expected UnexpectedChar token; got {toks:?}"
         );
         assert!(
             has_diag_code(&diags, "E0106"),
@@ -1096,6 +1200,107 @@ mod errors {
         assert!(
             toks.len() >= 2,
             "lexer must continue past invalid char; got {toks:?}"
+        );
+    }
+
+    #[test]
+    fn hex_underscore_only_emits_both_diagnostics() {
+        // `$_` with no following hex digits is two distinct problems: a
+        // misplaced digit separator AND a literal with no hex digits at all.
+        // The user should hear about both.
+        let (toks, diags) = lex_with_diags("$_");
+        assert!(
+            has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
+            "expected InvalidDigitSeparator token; got {toks:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0105"),
+            "expected E0105 (separator) diagnostic; got {diags:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0106"),
+            "expected E0106 (expected hex digits) diagnostic; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn binary_underscore_only_emits_both_diagnostics() {
+        let (toks, diags) = lex_with_diags("%_");
+        assert!(
+            has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
+            "expected InvalidDigitSeparator token; got {toks:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0105"),
+            "expected E0105 (separator) diagnostic; got {diags:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0106"),
+            "expected E0106 (expected binary digits) diagnostic; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn unterminated_block_comment_label_covers_full_body() {
+        // 1 KiB of content inside `/* …` (no closer) must produce a
+        // diagnostic whose *primary* label covers the entire consumed range,
+        // not just the 2-byte opener.
+        let body: String = "x".repeat(1024);
+        let src = format!("/* {body}");
+        let (_, diags) = lex_with_diags(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some("E0103"))
+            .expect("expected E0103 diagnostic");
+        assert_eq!(
+            d.primary.span.start, 0,
+            "primary label should start at the opener"
+        );
+        assert_eq!(
+            d.primary.span.end as usize,
+            src.len(),
+            "primary label should extend through end of consumed input"
+        );
+        // The opener is preserved as a secondary anchor for context.
+        assert!(
+            d.secondary
+                .iter()
+                .any(|l| l.span.start == 0 && l.span.end == 2),
+            "expected secondary label on the 2-byte opener; got {:?}",
+            d.secondary
+        );
+    }
+
+    #[test]
+    fn unterminated_raw_string_diagnostic_has_opener_and_eof_labels() {
+        let src = "\"\"\"abc\ndef";
+        let (toks, diags) = lex_with_diags(src);
+        assert!(
+            has_error_kind(&toks, LexErrorKind::UnterminatedString),
+            "expected UnterminatedString token; got {toks:?}"
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some("E0102"))
+            .expect("expected E0102 diagnostic");
+        assert_eq!(
+            d.primary.span.start, 0,
+            "primary label should start at the opener"
+        );
+        assert_eq!(
+            d.primary.span.end, 3,
+            "primary label should cover the 3-byte opener"
+        );
+        // Secondary label points at the EOF cursor so the user sees both
+        // where the literal opened and where the lexer gave up.
+        let eof_label = d
+            .secondary
+            .iter()
+            .find(|l| l.span.start as usize == src.len() && l.span.end as usize == src.len());
+        assert!(
+            eof_label.is_some(),
+            "expected secondary label at EOF cursor; got {:?}",
+            d.secondary
         );
     }
 }

@@ -1,4 +1,4 @@
-# CBCompiler2
+# cbcompiler_rs
 
 ## Project intent
 

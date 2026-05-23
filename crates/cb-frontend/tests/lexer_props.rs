@@ -70,6 +70,30 @@ proptest! {
     }
 
     #[test]
+    fn non_eof_token_spans_well_formed(src in any::<String>()) {
+        let (tokens, _) = tokenize(&src, FileId(0), LexerOptions::default());
+        for t in &tokens {
+            if matches!(t.kind, TokenKind::Eof) {
+                continue;
+            }
+            prop_assert!(
+                t.span.start < t.span.end,
+                "empty/inverted span for non-Eof token {:?} at {}..{}",
+                t.kind,
+                t.span.start,
+                t.span.end
+            );
+            prop_assert!(
+                (t.span.end as usize) <= src.len(),
+                "span end {} past source length {} for token {:?}",
+                t.span.end,
+                src.len(),
+                t.kind
+            );
+        }
+    }
+
+    #[test]
     fn determinism(src in any::<String>()) {
         let a = tokenize(&src, FileId(0), LexerOptions::default());
         let b = tokenize(&src, FileId(0), LexerOptions::default());
