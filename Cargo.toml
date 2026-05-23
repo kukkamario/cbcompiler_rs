@@ -20,10 +20,13 @@ unsafe_code = "deny"
 
 [workspace.dependencies]
 # External crates
+assert_cmd = "2"
 codespan-reporting = "0.11"
 insta = "1"
 phf = { version = "0.11", features = ["macros"] }
+predicates = "3"
 proptest = "1"
+tempfile = "3"
 unicode-ident = "1"
 
 # Internal crates (path entries so other crates can switch to `workspace = true`)

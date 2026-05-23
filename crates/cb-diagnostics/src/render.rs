@@ -59,6 +59,14 @@ impl<W: WriteColor> CliRenderer<W> {
     pub fn config_mut(&mut self) -> &mut term::Config {
         &mut self.config
     }
+
+    /// Consume the renderer and return its writer.
+    ///
+    /// Useful in tests: after rendering into a `NoColor<Vec<u8>>` buffer,
+    /// pull the buffer back out for assertion against snapshot output.
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 impl<W: WriteColor> Renderer for CliRenderer<W> {
@@ -85,8 +93,9 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
 }
 
 /// Pre-flight check for one [`Label`]: the span must have `end >= start`,
-/// and the referenced [`FileId`](crate::FileId) must exist in the
-/// [`SourceMap`].
+/// the referenced [`FileId`](crate::FileId) must exist in the
+/// [`SourceMap`], and `end` must not exceed the source's byte length
+/// (`end` is exclusive, so `end == text_len` is valid).
 fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
     if label.span.end < label.span.start {
         let msg = format!(
@@ -96,8 +105,18 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
         eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
-    if sources.get(label.span.file).is_none() {
+    let Some(src) = sources.get(label.span.file) else {
         let msg = format!("Span references unknown FileId({})", label.span.file.0);
+        eprintln!("cb-diagnostics: {msg}");
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
+    };
+    let text_len = u32::try_from(src.text.len())
+        .expect("source longer than u32::MAX bytes — Source builders forbid this");
+    if label.span.end > text_len {
+        let msg = format!(
+            "Span end ({}) exceeds source length ({}) of file '{}'",
+            label.span.end, text_len, src.name
+        );
         eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
@@ -246,5 +265,17 @@ mod tests {
         let diag = Diagnostic::error("E0001", "demo", Label::new(Span::new(0, 1, file)));
         let mut r = renderer();
         r.emit(&diag, &sources).expect("emit on valid input");
+    }
+
+    #[test]
+    fn emit_span_past_eof_returns_invalid_input() {
+        let mut sources = SourceMap::new();
+        let file = sources.add("short.cb".into(), "abc".into()); // 3 bytes
+        let span = Span::new(0, 100, file);
+        let diag = Diagnostic::error("E0001", "boom", Label::new(span));
+        let err = renderer()
+            .emit(&diag, &sources)
+            .expect_err("emit should fail on span past EOF");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 }

@@ -1,0 +1,10 @@
+---
+source: crates/cb-diagnostics/tests/render.rs
+assertion_line: 33
+expression: out
+---
+error[E0001]: demo error
+  ┌─ test.cb:1:5
+  │
+1 │ let x = 42
+  │     ^ here

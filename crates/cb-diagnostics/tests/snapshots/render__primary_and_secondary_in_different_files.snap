@@ -1,0 +1,15 @@
+---
+source: crates/cb-diagnostics/tests/render.rs
+assertion_line: 67
+expression: out
+---
+error[E0003]: type mismatch across files
+  ┌─ main.cb:1:5
+  │
+1 │ Dim x As Int
+  │     ^ primary x
+  │
+  ┌─ other.cb:1:5
+  │
+1 │ Dim x As Float
+  │     - also declared here
