@@ -21,13 +21,13 @@ Cargo workspace, edition 2024, resolver 3, `unsafe_code = "deny"` workspace-wide
 
 | Crate                              | Role                                              | Depends on              |
 | ---------------------------------- | ------------------------------------------------- | ----------------------- |
-| `crates/cb-frontend`               | Lexer, parser, AST, semantic analysis             | —                       |
-| `crates/cb-ir`                     | Backend-agnostic IR + passes                      | —                       |
+| `crates/cb-diagnostics`           | Diagnostics, `Span`, `FileId`, `Symbol`, `Interner` | —                     |
+| `crates/cb-frontend`               | Lexer, parser, AST                                | `cb-diagnostics`        |
+| `crates/cb-ir`                     | Backend-agnostic IR + passes                      | `cb-diagnostics`        |
+| `crates/cb-sema`                   | Semantic analysis + AST→IR lowering               | `cb-frontend`, `cb-ir`  |
 | `crates/cb-backend-interp`         | Interpreter backend (reference impl)              | `cb-ir`                 |
 | `crates/cb-backend-llvm`           | LLVM backend                                      | `cb-ir`                 |
-| `crates/cb-driver` (binary `cb`)   | CLI; wires frontend, IR, and backends together    | all of the above        |
-
-`cb-frontend` does not yet depend on `cb-ir` — wire that up when lowering exists.
+| `crates/cb-driver` (binary `cb`)   | CLI; wires frontend, sema, IR, and backends       | all of the above        |
 
 ## Commands
 

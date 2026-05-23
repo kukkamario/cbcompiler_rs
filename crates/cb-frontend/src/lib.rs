@@ -1,6 +1,7 @@
-//! CoolBasic frontend: lexer, parser, AST, semantic analysis.
+//! CoolBasic frontend: lexer, parser, AST.
 //!
-//! Backend-agnostic. Lowering to IR happens in [`cb_ir`].
+//! Backend-agnostic. Semantic analysis lives in [`cb_sema`]; IR lowering
+//! also lives in `cb_sema` and produces [`cb_ir`] types.
 
 pub mod ast;
 pub mod ast_print;

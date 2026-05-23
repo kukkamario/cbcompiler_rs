@@ -8,7 +8,8 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-007](FD-007_SEMANTIC_ANALYSIS.md) | Semantic Analysis | Open | High | High |
+| [FD-008](FD-008_IR.md) | Intermediate Representation | Open | High | High |
 
 ## Completed
 
