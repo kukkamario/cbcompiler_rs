@@ -309,3 +309,93 @@ pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cb_frontend::BinOp;
+
+    #[test]
+    fn numeric_promote_wider_wins() {
+        assert_eq!(numeric_promote(&Type::Byte, &Type::Int), Type::Int);
+        assert_eq!(numeric_promote(&Type::Int, &Type::Byte), Type::Int);
+        assert_eq!(numeric_promote(&Type::Int, &Type::Float), Type::Float);
+        assert_eq!(numeric_promote(&Type::Short, &Type::Long), Type::Long);
+    }
+
+    #[test]
+    fn numeric_promote_same_type() {
+        assert_eq!(numeric_promote(&Type::Int, &Type::Int), Type::Int);
+        assert_eq!(numeric_promote(&Type::Float, &Type::Float), Type::Float);
+    }
+
+    #[test]
+    fn binary_add_numeric() {
+        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::Int), Some(Type::Int));
+        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::Float), Some(Type::Float));
+        assert_eq!(binary_result_type(BinOp::Add, &Type::Byte, &Type::Long), Some(Type::Long));
+    }
+
+    #[test]
+    fn binary_add_string() {
+        assert_eq!(binary_result_type(BinOp::Add, &Type::String, &Type::String), Some(Type::String));
+        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::String), Some(Type::String));
+        assert_eq!(binary_result_type(BinOp::Add, &Type::String, &Type::Float), Some(Type::String));
+    }
+
+    #[test]
+    fn binary_sub_requires_numeric() {
+        assert_eq!(binary_result_type(BinOp::Sub, &Type::Int, &Type::Float), Some(Type::Float));
+        assert!(binary_result_type(BinOp::Sub, &Type::String, &Type::Int).is_none());
+    }
+
+    #[test]
+    fn binary_intdiv_always_int() {
+        assert_eq!(binary_result_type(BinOp::IntDiv, &Type::Int, &Type::Int), Some(Type::Int));
+        assert_eq!(binary_result_type(BinOp::IntDiv, &Type::Float, &Type::Float), Some(Type::Int));
+    }
+
+    #[test]
+    fn binary_comparison_returns_bool() {
+        assert_eq!(binary_result_type(BinOp::Eq, &Type::Int, &Type::Int), Some(Type::Bool));
+        assert_eq!(binary_result_type(BinOp::Lt, &Type::Int, &Type::Float), Some(Type::Bool));
+        assert_eq!(binary_result_type(BinOp::Eq, &Type::String, &Type::String), Some(Type::Bool));
+        assert_eq!(binary_result_type(BinOp::Eq, &Type::Bool, &Type::Bool), Some(Type::Bool));
+    }
+
+    #[test]
+    fn binary_comparison_incompatible() {
+        assert!(binary_result_type(BinOp::Eq, &Type::String, &Type::Int).is_none());
+        assert!(binary_result_type(BinOp::Lt, &Type::Bool, &Type::Int).is_none());
+    }
+
+    #[test]
+    fn binary_logical() {
+        assert_eq!(binary_result_type(BinOp::And, &Type::Bool, &Type::Bool), Some(Type::Bool));
+        assert_eq!(binary_result_type(BinOp::Or, &Type::Int, &Type::Bool), Some(Type::Bool));
+        assert_eq!(binary_result_type(BinOp::Xor, &Type::Bool, &Type::Int), Some(Type::Bool));
+    }
+
+    #[test]
+    fn binary_bitwise_requires_integer() {
+        assert_eq!(binary_result_type(BinOp::BinAnd, &Type::Int, &Type::Int), Some(Type::Int));
+        assert!(binary_result_type(BinOp::BinAnd, &Type::Float, &Type::Int).is_none());
+    }
+
+    #[test]
+    fn binary_shift_preserves_lhs() {
+        assert_eq!(binary_result_type(BinOp::Shl, &Type::Byte, &Type::Int), Some(Type::Byte));
+        assert_eq!(binary_result_type(BinOp::Shr, &Type::Long, &Type::Short), Some(Type::Long));
+    }
+
+    #[test]
+    fn unary_result_types() {
+        assert_eq!(unary_result_type(UnOp::Neg, &Type::Int), Some(Type::Int));
+        assert_eq!(unary_result_type(UnOp::Neg, &Type::Float), Some(Type::Float));
+        assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
+        assert_eq!(unary_result_type(UnOp::Not, &Type::Bool), Some(Type::Bool));
+        assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Bool));
+        assert_eq!(unary_result_type(UnOp::BinNot, &Type::Int), Some(Type::Int));
+        assert!(unary_result_type(UnOp::BinNot, &Type::Float).is_none());
+    }
+}
+

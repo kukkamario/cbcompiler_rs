@@ -1,0 +1,17 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 34
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: x (Float)
+
+  bb0:
+    r0 = const_int 1
+    r1 = convert r0: Int -> Float
+    r2 = const_float 1.5
+    r3 = add r1, r2
+    store_local local0, r3
+    return
+}

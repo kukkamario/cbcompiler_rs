@@ -1,0 +1,18 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 96
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: x (Int)
+
+  bb0:
+    goto bb1
+  bb1:
+    return
+  bb2:
+    r0 = const_int 1
+    store_local local0, r0
+    goto bb1
+}

@@ -25,3 +25,4 @@ pub const E_NARROWING_CONVERSION: DiagnosticCode = DiagnosticCode::new("E0318");
 pub const E_DUPLICATE_DEFINITION: DiagnosticCode = DiagnosticCode::new("E0319");
 pub const E_SIGIL_AS_DISAGREE: DiagnosticCode = DiagnosticCode::new("E0320");
 pub const E_GOTO_INTO_FOR: DiagnosticCode = DiagnosticCode::new("E0321");
+pub const E_CONST_EVAL_ERROR: DiagnosticCode = DiagnosticCode::new("E0322");

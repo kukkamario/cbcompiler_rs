@@ -1055,7 +1055,7 @@ impl<'a> Checker<'a> {
             Node::Expr(Expr::Unary { op, operand }) => {
                 let val = self.eval_const_expr(operand)?;
                 match (op, val) {
-                    (UnOp::Neg, ConstValue::Int(v)) => Some(ConstValue::Int(-v)),
+                    (UnOp::Neg, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_neg())),
                     (UnOp::Neg, ConstValue::Float(v)) => Some(ConstValue::Float(-v)),
                     (UnOp::Plus, v @ ConstValue::Int(_)) => Some(v),
                     (UnOp::Plus, v @ ConstValue::Float(_)) => Some(v),
@@ -1066,7 +1066,18 @@ impl<'a> Checker<'a> {
             Node::Expr(Expr::Binary { op, lhs, rhs }) => {
                 let l = self.eval_const_expr(lhs)?;
                 let r = self.eval_const_expr(rhs)?;
-                eval_const_binary(op, &l, &r)
+                let result = eval_const_binary(op, &l, &r);
+                if result.is_none()
+                    && matches!(op, BinOp::Div | BinOp::Mod)
+                    && matches!(&r, ConstValue::Int(0))
+                {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_CONST_EVAL_ERROR,
+                        "division by zero in constant expression",
+                        Label::new(self.arena.span_of(rhs)),
+                    ));
+                }
+                result
             }
             Node::Expr(Expr::Ident { name_span, sigil }) => {
                 let name = self.intern_ident(name_span, sigil);

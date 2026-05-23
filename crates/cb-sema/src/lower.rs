@@ -124,10 +124,7 @@ impl<'a> Lowerer<'a> {
     }
 
     fn block_mut(&mut self, id: BlockId) -> &mut BasicBlock {
-        self.blocks
-            .iter_mut()
-            .find(|b| b.id == id)
-            .expect("block not found")
+        &mut self.blocks[id.0 as usize]
     }
 
     fn current_block_mut(&mut self) -> &mut BasicBlock {
@@ -254,10 +251,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn current_block_is_terminated(&self) -> bool {
-        self.blocks
-            .iter()
-            .find(|b| b.id == self.current_block)
-            .is_some_and(|b| b.terminator.is_some())
+        self.blocks[self.current_block.0 as usize]
+            .terminator
+            .is_some()
     }
 
     fn start_dead_block(&mut self) {
@@ -322,12 +318,17 @@ impl<'a> Lowerer<'a> {
 
         let main_name = self.interner.intern("@main");
 
-        // Allocate locals for top-level variables.
-        for (sym, decl) in self.symbols.iter_scope(top_scope) {
-            if let DeclKind::Variable = &decl.kind {
-                let ir_ty = self.sema_type_to_ir(&decl.ty);
-                self.alloc_local(sym, ir_ty, decl.is_global, false);
-            }
+        // Allocate locals for top-level variables (sorted by source position
+        // for deterministic output).
+        let mut top_vars: Vec<_> = self
+            .symbols
+            .iter_scope(top_scope)
+            .filter(|(_, decl)| matches!(decl.kind, DeclKind::Variable))
+            .collect();
+        top_vars.sort_by_key(|(_, decl)| decl.span.start);
+        for (sym, decl) in top_vars {
+            let ir_ty = self.sema_type_to_ir(&decl.ty);
+            self.alloc_local(sym, ir_ty, decl.is_global, false);
         }
 
         // Lower non-function/type/struct top-level statements.

@@ -167,3 +167,191 @@ fn verify_terminator_regs(term: &Terminator, defined: &HashSet<Reg>) {
         Terminator::Return { value: None } | Terminator::Goto(_) | Terminator::Trap(_) => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cb_diagnostics::{Span, Symbol};
+    use cb_diagnostics::source::FileId;
+    use crate::inst::IrBinOp;
+    use crate::types::IrType;
+    use crate::{BasicBlock, Function, Inst, Local, Program};
+
+    const DUMMY_SPAN: Span = Span::new(0, 0, FileId::SYNTHETIC);
+
+    fn dummy_sym() -> Symbol {
+        Symbol::DUMMY
+    }
+
+    fn minimal_program(func: Function) -> Program {
+        Program {
+            functions: vec![func],
+            type_defs: Vec::new(),
+            struct_defs: Vec::new(),
+        }
+    }
+
+    fn valid_one_block(insts: Vec<Inst>, locals: Vec<Local>, term: Terminator) -> Program {
+        minimal_program(Function {
+            name: dummy_sym(),
+            params: Vec::new(),
+            return_type: IrType::Void,
+            locals,
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                insts,
+                terminator: Some(term),
+            }],
+        })
+    }
+
+    #[test]
+    fn valid_empty_function() {
+        let prog = valid_one_block(vec![], vec![], Terminator::Return { value: None });
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "no terminator")]
+    fn unterminated_block() {
+        let prog = minimal_program(Function {
+            name: dummy_sym(),
+            params: Vec::new(),
+            return_type: IrType::Void,
+            locals: Vec::new(),
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                insts: Vec::new(),
+                terminator: None,
+            }],
+        });
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "used before definition")]
+    fn use_undefined_register() {
+        let prog = valid_one_block(
+            vec![Inst {
+                result: None,
+                kind: InstKind::StoreLocal {
+                    local: crate::LocalId(0),
+                    value: Reg(99),
+                },
+                span: DUMMY_SPAN,
+            }],
+            vec![Local {
+                name: dummy_sym(),
+                ty: IrType::Int,
+                is_global: false,
+                is_param: false,
+            }],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn local_out_of_range() {
+        let prog = valid_one_block(
+            vec![Inst {
+                result: Some(Reg(0)),
+                kind: InstKind::LoadLocal {
+                    local: crate::LocalId(5),
+                },
+                span: DUMMY_SPAN,
+            }],
+            vec![],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-existent")]
+    fn branch_to_nonexistent_block() {
+        let prog = valid_one_block(
+            vec![Inst {
+                result: Some(Reg(0)),
+                kind: InstKind::ConstBool(true),
+                span: DUMMY_SPAN,
+            }],
+            vec![],
+            Terminator::BranchIf {
+                cond: Reg(0),
+                then_block: BlockId(99),
+                else_block: BlockId(0),
+            },
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "used before definition")]
+    fn return_undefined_register() {
+        let prog = valid_one_block(
+            vec![],
+            vec![],
+            Terminator::Return { value: Some(Reg(0)) },
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    fn valid_two_blocks_with_branch() {
+        let prog = minimal_program(Function {
+            name: dummy_sym(),
+            params: Vec::new(),
+            return_type: IrType::Void,
+            locals: Vec::new(),
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    insts: vec![Inst {
+                        result: Some(Reg(0)),
+                        kind: InstKind::ConstBool(true),
+                        span: DUMMY_SPAN,
+                    }],
+                    terminator: Some(Terminator::BranchIf {
+                        cond: Reg(0),
+                        then_block: BlockId(1),
+                        else_block: BlockId(1),
+                    }),
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    insts: Vec::new(),
+                    terminator: Some(Terminator::Return { value: None }),
+                },
+            ],
+        });
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "used before definition")]
+    fn binop_with_undefined_operand() {
+        let prog = valid_one_block(
+            vec![
+                Inst {
+                    result: Some(Reg(0)),
+                    kind: InstKind::ConstInt(1),
+                    span: DUMMY_SPAN,
+                },
+                Inst {
+                    result: Some(Reg(2)),
+                    kind: InstKind::BinOp {
+                        op: IrBinOp::Add,
+                        lhs: Reg(0),
+                        rhs: Reg(1),
+                    },
+                    span: DUMMY_SPAN,
+                },
+            ],
+            vec![],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+}

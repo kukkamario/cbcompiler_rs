@@ -1,0 +1,39 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 76
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: x (Int)
+
+  bb0:
+    r0 = const_int 2
+    store_local local0, r0
+    r1 = load_local local0
+    goto bb5
+  bb1:
+    return
+  bb2:
+    r4 = const_int 10
+    store_local local0, r4
+    goto bb1
+  bb3:
+    r7 = const_int 20
+    store_local local0, r7
+    goto bb1
+  bb4:
+    r8 = const_int 0
+    store_local local0, r8
+    goto bb1
+  bb5:
+    r2 = const_int 1
+    r3 = eq r1, r2
+    branch_if r3, bb2, bb6
+  bb6:
+    r5 = const_int 2
+    r6 = eq r1, r5
+    branch_if r6, bb3, bb7
+  bb7:
+    goto bb4
+}

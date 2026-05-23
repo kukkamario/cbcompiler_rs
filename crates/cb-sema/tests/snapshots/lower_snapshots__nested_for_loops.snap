@@ -1,0 +1,78 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: i (Int)
+    local1: j (Int)
+    local2: @for_to_0 (Int)
+    local3: @for_step_1 (Int)
+    local4: @for_to_2 (Int)
+    local5: @for_step_3 (Int)
+
+  bb0:
+    r0 = const_int 0
+    store_local local0, r0
+    r1 = const_int 3
+    store_local local2, r1
+    r2 = const_int 1
+    store_local local3, r2
+    goto bb3
+  bb1:
+    r6 = load_local local0
+    r7 = load_local local2
+    r8 = lt_eq r6, r7
+    branch_if r8, bb4, bb6
+  bb2:
+    r9 = load_local local0
+    r10 = load_local local2
+    r11 = gt_eq r9, r10
+    branch_if r11, bb4, bb6
+  bb3:
+    r3 = load_local local3
+    r4 = const_int 0
+    r5 = gt r3, r4
+    branch_if r5, bb1, bb2
+  bb4:
+    r12 = const_int 0
+    store_local local1, r12
+    r13 = const_int 5
+    store_local local4, r13
+    r14 = const_int 1
+    store_local local5, r14
+    goto bb9
+  bb5:
+    r27 = load_local local0
+    r28 = load_local local3
+    r29 = add r27, r28
+    store_local local0, r29
+    goto bb3
+  bb6:
+    return
+  bb7:
+    r18 = load_local local1
+    r19 = load_local local4
+    r20 = lt_eq r18, r19
+    branch_if r20, bb10, bb12
+  bb8:
+    r21 = load_local local1
+    r22 = load_local local4
+    r23 = gt_eq r21, r22
+    branch_if r23, bb10, bb12
+  bb9:
+    r15 = load_local local5
+    r16 = const_int 0
+    r17 = gt r15, r16
+    branch_if r17, bb7, bb8
+  bb10:
+    goto bb11
+  bb11:
+    r24 = load_local local1
+    r25 = load_local local5
+    r26 = add r24, r25
+    store_local local1, r26
+    goto bb9
+  bb12:
+    goto bb5
+}
