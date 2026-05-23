@@ -129,6 +129,10 @@ dependencies = [
 [[package]]
 name = "cb-ir"
 version = "0.1.0"
+dependencies = [
+ "cb-diagnostics",
+ "insta",
+]
 
 [[package]]
 name = "cb-sema"
@@ -136,6 +140,7 @@ version = "0.1.0"
 dependencies = [
  "cb-diagnostics",
  "cb-frontend",
+ "cb-ir",
  "insta",
 ]
 

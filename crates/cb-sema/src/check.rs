@@ -80,6 +80,7 @@ impl<'a> Checker<'a> {
             conversions: checker.conversions,
             delete_classes: checker.delete_classes,
             diagnostics: checker.diagnostics,
+            interner: checker.interner,
         }
     }
 
@@ -967,7 +968,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         if let Some(conv) = convert::find_implicit_conversion(from, to) {
-            self.conversions.insert(value_node, conv);
+            self.conversions.insert(value_node, conv, to.clone());
             if convert::is_narrowing(conv, from, to) {
                 self.diagnostics.push(Diagnostic::warning(
                     E_NARROWING_CONVERSION,

@@ -84,27 +84,32 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut backend_arg: Option<String> = None;
     let mut positional: Option<String> = None;
+    let mut dump_ir = false;
+    let mut dump_ast = false;
     while let Some(a) = args.next() {
-        if a == "--backend" {
-            match args.next() {
+        match a.as_str() {
+            "--backend" => match args.next() {
                 Some(v) => backend_arg = Some(v),
                 None => {
                     eprintln!("cb: --backend requires a value");
                     return ExitCode::from(2);
                 }
+            },
+            "--dump-ir" => dump_ir = true,
+            "--dump-ast" => dump_ast = true,
+            _ if a.starts_with("--backend=") => {
+                backend_arg = Some(a["--backend=".len()..].to_string());
             }
-        } else if let Some(rest) = a.strip_prefix("--backend=") {
-            backend_arg = Some(rest.to_string());
-        } else if positional.is_none() {
-            positional = Some(a);
-        } else {
-            eprintln!("cb: unexpected argument: {a}");
-            return ExitCode::from(2);
+            _ if positional.is_none() => positional = Some(a),
+            _ => {
+                eprintln!("cb: unexpected argument: {a}");
+                return ExitCode::from(2);
+            }
         }
     }
 
     let Some(path_arg) = positional else {
-        eprintln!("usage: cb [--backend <name>] <file.cb>");
+        eprintln!("usage: cb [--backend <name>] [--dump-ast] [--dump-ir] <file.cb>");
         return ExitCode::from(2);
     };
 
@@ -147,7 +152,7 @@ fn main() -> ExitCode {
     } = parse(&tokens, &text, file);
 
     // Run semantic analysis.
-    let sema_result = cb_sema::analyze(&arena, &program, &text, file);
+    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file);
 
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;
@@ -165,12 +170,27 @@ fn main() -> ExitCode {
         }
     }
 
-    println!("Program ({} top-level statements):", program.len());
-    let mut buf = String::new();
-    for &id in &program {
-        buf.clear();
-        ast_print::debug_print(&mut buf, &arena, id).expect("writing to String never fails");
-        print!("{buf}");
+    if dump_ast {
+        println!("Program ({} top-level statements):", program.len());
+        let mut buf = String::new();
+        for &id in &program {
+            buf.clear();
+            ast_print::debug_print(&mut buf, &arena, id).expect("writing to String never fails");
+            print!("{buf}");
+        }
+    }
+
+    // Lower to IR (only if no errors).
+    if !had_error {
+        let ir_program = cb_sema::lower::lower(&arena, &program, &text, &mut sema_result);
+
+        #[cfg(debug_assertions)]
+        cb_ir::verify::verify(&ir_program);
+
+        if dump_ir {
+            let output = cb_ir::print::print_program(&ir_program, &sema_result.interner);
+            print!("{output}");
+        }
     }
 
     if had_error {

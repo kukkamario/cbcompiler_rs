@@ -6,12 +6,13 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Diagnostic, FileId};
+use cb_diagnostics::{Diagnostic, FileId, Interner};
 use cb_frontend::{Arena, NodeId};
 
 mod check;
 mod convert;
 mod diagnostics;
+pub mod lower;
 mod scope;
 mod types;
 
@@ -54,6 +55,8 @@ pub struct SemaResult {
     pub delete_classes: HashMap<NodeId, DeleteClass>,
     /// Diagnostics produced during analysis.
     pub diagnostics: Vec<Diagnostic>,
+    /// The string interner used during analysis (needed by the lowering pass).
+    pub interner: Interner,
 }
 
 impl SemaResult {

@@ -23,6 +23,7 @@ fn valid_file_exits_zero_and_dumps_ast() {
     let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
     let out = Command::cargo_bin("cb")
         .unwrap()
+        .arg("--dump-ast")
         .arg(&path)
         .assert()
         .success()

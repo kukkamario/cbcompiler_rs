@@ -1,6 +1,7 @@
 # FD-008: Intermediate Representation
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-24
 **Priority:** High
 **Effort:** High (> 4 hours)
 **Impact:** Defines the shared representation that both backends consume — the central seam of the compiler.
