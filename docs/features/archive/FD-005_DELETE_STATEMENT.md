@@ -1,6 +1,7 @@
 # FD-005: `Delete` Statement
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-05-23
 **Priority:** Medium
 **Effort:** Medium (1-4 hours for frontend; runtime semantics deferred)
 **Impact:** Adds first-class language surface for `Delete` (`cb_syntax.md` §3.3). Today the keyword does not exist in the lexer, the parser silently misparses `Delete x` as a paren-less subroutine call, and the documented lvalue-rewind / sentinel / double-delete-trap semantics are unreachable. This FD lands the lexer + parser + AST work so the construct is at least syntactically recognized; runtime semantics are scoped out to the eventual interpreter FD.
