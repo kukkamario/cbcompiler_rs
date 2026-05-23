@@ -1222,7 +1222,7 @@ impl<'a> Checker<'a> {
 
     fn check_function(
         &mut self,
-        name_span: Span,
+        _name_span: Span,
         return_sigil: Option<Sigil>,
         params: &[NodeId],
         return_ty_node: Option<NodeId>,
@@ -1261,11 +1261,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Also hoist labels inside this function body.
+        // Hoist labels from the entire function body (including nested control flow).
+        let mut for_stack = Vec::new();
         for &s in body {
-            if let Node::Stmt(Stmt::Label { name_span: lspan }) = &self.arena[s] {
-                self.pass1_label(fn_scope, *lspan);
-            }
+            self.collect_labels_recursive(s, fn_scope, &mut for_stack);
         }
 
         // Check function body.
@@ -1273,8 +1272,6 @@ impl<'a> Checker<'a> {
             self.check_stmt(s);
         }
 
-        // Restore.
-        let _name = self.intern_span(name_span);
         self.current_scope = prev_scope;
         self.current_fn_return_ty = prev_fn_ret;
     }
@@ -1943,6 +1940,14 @@ mod tests {
     fn goto_within_for_ok() {
         let result = analyze_src(
             "For i = 0 To 10\nGoto skip\nskip:\nNext\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn goto_label_nested_in_if_inside_function() {
+        let result = analyze_src(
+            "Function f()\nGoto target\nIf True Then\ntarget:\nEndIf\nEndFunction\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
