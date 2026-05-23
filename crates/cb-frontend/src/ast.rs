@@ -4,8 +4,10 @@
 //! - Single homogeneous arena of `Node` with a parallel `spans` side table.
 //! - `NodeId` is a `u32` index; child relationships are stored as `NodeId`
 //!   (or `Vec<NodeId>` for variable-arity children).
-//! - `Node`, `Expr`, `Stmt`, and `TypeExpr` cannot derive `Eq` because
-//!   `Expr::FloatLit(f64)` is reachable from them.
+//! - `Expr::FloatLit` carries a [`FloatBits`] wrapper (raw IEEE-754 bits)
+//!   rather than a bare `f64`, so the literal types are bit-comparable and
+//!   could derive `Eq` if a use case ever wants it. `Eq` is not currently
+//!   derived because no caller needs it and `PartialEq` is sufficient.
 
 use crate::span::Span;
 use crate::token::{FloatBits, Kw, Sigil, StrLitKind};
