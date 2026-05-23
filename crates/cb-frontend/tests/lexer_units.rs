@@ -701,7 +701,7 @@ mod comments {
             "expected Error(UnterminatedBlockComment), got tokens={toks:?}"
         );
         assert!(
-            diags.iter().any(|d| d.code == Some("E0103")),
+            diags.iter().any(|d| d.code_is("E0103")),
             "expected at least one E0103 diagnostic, got {diags:?}"
         );
     }
@@ -939,7 +939,7 @@ mod newlines {
             "bare `\\r` inside a single-line string must error; got {toks:?}"
         );
         assert!(
-            diags.iter().any(|d| d.code == Some("E0101")),
+            diags.iter().any(|d| d.code_is("E0101")),
             "expected E0101 diagnostic; got {diags:?}"
         );
     }
@@ -1010,7 +1010,7 @@ mod errors {
     }
 
     fn has_diag_code(diags: &[Diagnostic], code: &str) -> bool {
-        diags.iter().any(|d| d.code == Some(code))
+        diags.iter().any(|d| d.code_is(code))
     }
 
     #[test]
@@ -1117,7 +1117,7 @@ mod errors {
         // Regression: `$_ff` must produce exactly ONE E0105 diagnostic, not
         // two. Previously both the hex-prefix pre-check and `scan_digit_run`
         // diagnosed the same leading `_`.
-        let e0105_count = diags.iter().filter(|d| d.code == Some("E0105")).count();
+        let e0105_count = diags.iter().filter(|d| d.code_is("E0105")).count();
         assert_eq!(
             e0105_count, 1,
             "expected exactly one E0105 diagnostic for `$_ff`, got {diags:?}"
@@ -1136,7 +1136,7 @@ mod errors {
             "expected E0105 diagnostic; got {diags:?}"
         );
         // Regression: `%_10` must produce exactly ONE E0105 diagnostic.
-        let e0105_count = diags.iter().filter(|d| d.code == Some("E0105")).count();
+        let e0105_count = diags.iter().filter(|d| d.code_is("E0105")).count();
         assert_eq!(
             e0105_count, 1,
             "expected exactly one E0105 diagnostic for `%_10`, got {diags:?}"
@@ -1156,7 +1156,7 @@ mod errors {
             has_diag_code(&diags, "E0107"),
             "expected E0107 diagnostic; got {diags:?}"
         );
-        let e0107 = diags.iter().find(|d| d.code == Some("E0107")).unwrap();
+        let e0107 = diags.iter().find(|d| d.code_is("E0107")).unwrap();
         assert!(
             e0107.message.contains("exponent"),
             "expected E0107 message to mention exponent; got {:?}",
@@ -1173,12 +1173,12 @@ mod errors {
         let (_, diags_escaped) = lex_with_diags("\"hello\\\nworld\"");
         let plain_msg = diags_plain
             .iter()
-            .find(|d| d.code == Some("E0101"))
+            .find(|d| d.code_is("E0101"))
             .map(|d| d.message.clone())
             .expect("expected E0101 for plain newline");
         let escaped_msg = diags_escaped
             .iter()
-            .find(|d| d.code == Some("E0101"))
+            .find(|d| d.code_is("E0101"))
             .map(|d| d.message.clone())
             .expect("expected E0101 for backslash-newline");
         assert_ne!(
@@ -1269,7 +1269,7 @@ mod errors {
         let (_, diags) = lex_with_diags(&src);
         let d = diags
             .iter()
-            .find(|d| d.code == Some("E0103"))
+            .find(|d| d.code_is("E0103"))
             .expect("expected E0103 diagnostic");
         assert_eq!(
             d.primary.span.start, 0,
@@ -1300,7 +1300,7 @@ mod errors {
         );
         let d = diags
             .iter()
-            .find(|d| d.code == Some("E0102"))
+            .find(|d| d.code_is("E0102"))
             .expect("expected E0102 diagnostic");
         assert_eq!(
             d.primary.span.start, 0,

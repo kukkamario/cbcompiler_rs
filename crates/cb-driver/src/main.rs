@@ -45,7 +45,10 @@ fn main() -> ExitCode {
         if matches!(d.severity, Severity::Error) {
             had_error = true;
         }
-        stderr.emit(d, &sources);
+        if let Err(e) = stderr.emit(d, &sources) {
+            eprintln!("cb: failed to render diagnostic: {e}");
+            return ExitCode::from(2);
+        }
     }
 
     println!("Program ({} top-level statements):", program.len());

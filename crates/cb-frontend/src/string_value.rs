@@ -6,13 +6,13 @@
 //! diagnostics are produced. This lets the parser continue building the AST
 //! instead of bailing on a malformed escape.
 
-use cb_diagnostics::{Diagnostic, Label};
+use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::span::Span;
 use crate::token::StrLitKind;
 
-pub(crate) const E_INVALID_ESCAPE: &str = "E0208";
-pub(crate) const E_BAD_RAW_INDENT: &str = "E0209";
+pub(crate) const E_INVALID_ESCAPE: DiagnosticCode = DiagnosticCode::new("E0208");
+pub(crate) const E_BAD_RAW_INDENT: DiagnosticCode = DiagnosticCode::new("E0209");
 
 /// Decode a string literal's source bytes into its runtime value.
 ///

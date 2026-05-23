@@ -41,7 +41,7 @@ fn snapshot_parser_fixture(name: &str) -> String {
             writeln!(
                 out,
                 "{sev}[{}] {} @ {}..{}",
-                d.code.unwrap_or("----"),
+                d.code.map_or("----", |c| c.as_str()),
                 d.message,
                 d.primary.span.start,
                 d.primary.span.end,
@@ -611,7 +611,7 @@ fn snapshot_parser_fixture_preserve_trivia(name: &str) -> String {
             writeln!(
                 out,
                 "{sev}[{}] {} @ {}..{}",
-                d.code.unwrap_or("----"),
+                d.code.map_or("----", |c| c.as_str()),
                 d.message,
                 d.primary.span.start,
                 d.primary.span.end,
