@@ -560,10 +560,14 @@ impl<'t> Parser<'t> {
                     TokenKind::Ident { sigil } => {
                         self.cursor.bump();
                         let name_span = bare_name_span(name_tok.span, sigil);
-                        let name =
-                            self.alloc(Node::Expr(Expr::Ident { name_span, sigil }), name_tok.span);
                         let span = lhs_span.merge(name_tok.span);
-                        Ok(self.alloc(Node::Expr(Expr::Field { target: lhs, name }), span))
+                        Ok(self.alloc(
+                            Node::Expr(Expr::Field {
+                                target: lhs,
+                                name_span,
+                            }),
+                            span,
+                        ))
                     }
                     _ => Err(ParseError {
                         diag: Box::new(Diagnostic::error(
@@ -2521,14 +2525,18 @@ fn bare_name_span(tok_span: Span, sigil: Option<Sigil>) -> Span {
     )
 }
 
-/// Whether a keyword names one of the primitive types accepted by the W3
-/// stub type-expression parser.
+/// Whether a keyword names one of the primitive types accepted by the
+/// type-expression parser. `Int`/`Integer` and `UInt`/`UInteger` are both
+/// accepted here as spelling-preserving aliases (FD-004 #3); sema treats
+/// the alias pairs as equivalent.
 fn is_primitive_type_kw(kw: Kw) -> bool {
     matches!(
         kw,
         Kw::Byte
             | Kw::Short
+            | Kw::Int
             | Kw::Integer
+            | Kw::UInt
             | Kw::UInteger
             | Kw::Long
             | Kw::ULong
@@ -2933,17 +2941,17 @@ mod expr_tests {
         // a.b.c → Field(Field(a, b), c)
         let src = "a.b.c";
         let (arena, root, _) = parse_expr(src);
-        let (outer_target, outer_name) = match expr_of(&arena, root) {
-            Expr::Field { target, name } => (*target, *name),
+        let (outer_target, outer_name_span) = match expr_of(&arena, root) {
+            Expr::Field { target, name_span } => (*target, *name_span),
             other => panic!("expected Field, got {other:?}"),
         };
-        assert_ident(&arena, outer_name, src, "c");
-        let (inner_target, inner_name) = match expr_of(&arena, outer_target) {
-            Expr::Field { target, name } => (*target, *name),
+        assert_eq!(outer_name_span.slice(src), "c");
+        let (inner_target, inner_name_span) = match expr_of(&arena, outer_target) {
+            Expr::Field { target, name_span } => (*target, *name_span),
             other => panic!("expected inner Field, got {other:?}"),
         };
         assert_ident(&arena, inner_target, src, "a");
-        assert_ident(&arena, inner_name, src, "b");
+        assert_eq!(inner_name_span.slice(src), "b");
     }
 
     #[test]
@@ -3136,9 +3144,9 @@ mod stmt_tests {
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Assign { target, value } => {
                 match expr_of(&r.arena, *target) {
-                    Expr::Field { target: t, name } => {
+                    Expr::Field { target: t, name_span } => {
                         assert_ident(&r.arena, *t, src, "node");
-                        assert_ident(&r.arena, *name, src, "f");
+                        assert_eq!(name_span.slice(src), "f");
                     }
                     other => panic!("expected Field target, got {other:?}"),
                 }

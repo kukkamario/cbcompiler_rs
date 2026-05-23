@@ -111,7 +111,13 @@ pub enum Expr {
     },
     Field {
         target: NodeId,
-        name: NodeId,
+        /// Bare-name span of the field (sigil byte excluded, if any). FD-004
+        /// #12: previously a full `Expr::Ident` node was allocated for this
+        /// position to share machinery with regular identifier exprs. The
+        /// span-only form matches every other declaration site (e.g.
+        /// `DimName::name_span`, `Stmt::FieldDecl::name_span`) and avoids an
+        /// allocation per `.field` access in deep chains.
+        name_span: Span,
     },
     Paren {
         inner: NodeId,

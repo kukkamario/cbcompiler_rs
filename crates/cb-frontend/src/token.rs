@@ -111,9 +111,12 @@ impl std::fmt::Debug for FloatBits {
 
 /// CoolBasic keyword. See §1.5 of `cb_syntax.md` for the full list.
 ///
-/// `Int`/`Integer` are aliases that both map to [`Kw::Integer`]; same for
-/// `UInt`/`UInteger` → [`Kw::UInteger`]. `REM` is NOT a keyword here — it
-/// is recognised as a line-comment marker by the lexer (§1.2).
+/// `Int`/`Integer` are spelling-preserving aliases: `int` lexes to
+/// [`Kw::Int`] and `integer` to [`Kw::Integer`] so diagnostics can render
+/// the user's spelling. Same for `UInt`/`UInteger` → [`Kw::UInt`] vs
+/// [`Kw::UInteger`]. Downstream code (parser, sema) treats the alias pairs
+/// as equivalent. `REM` is NOT a keyword here — it is recognised as a
+/// line-comment marker by the lexer (§1.2).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Kw {
     And,
@@ -149,6 +152,7 @@ pub enum Kw {
     Goto,
     If,
     Include,
+    Int,
     Integer,
     Long,
     Mod,
@@ -172,6 +176,7 @@ pub enum Kw {
     To,
     True,
     Type,
+    UInt,
     UInteger,
     ULong,
     Wend,
@@ -216,6 +221,7 @@ impl Kw {
             Kw::Goto => "goto",
             Kw::If => "if",
             Kw::Include => "include",
+            Kw::Int => "int",
             Kw::Integer => "integer",
             Kw::Long => "long",
             Kw::Mod => "mod",
@@ -239,6 +245,7 @@ impl Kw {
             Kw::To => "to",
             Kw::True => "true",
             Kw::Type => "type",
+            Kw::UInt => "uint",
             Kw::UInteger => "uinteger",
             Kw::ULong => "ulong",
             Kw::Wend => "wend",
