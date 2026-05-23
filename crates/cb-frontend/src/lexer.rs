@@ -4,7 +4,7 @@
 //! [`TokenKind::Error`] variants with structured [`Diagnostic`]s pushed to the
 //! returned `Vec<Diagnostic>`.
 
-use cb_diagnostics::{Diagnostic, Label};
+use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::keywords;
 use crate::span::{FileId, Span};
@@ -39,12 +39,12 @@ pub fn tokenize(src: &str, file: FileId, opts: LexerOptions) -> (Vec<Token>, Vec
 // retired: range-checking against the inferred signed target type now lives
 // in sema; the lexer only flags values no type could represent and emits
 // `MalformedNumber` (E0107) for both shape and out-of-`u64`-range cases.
-const E_NEWLINE_IN_STRING: &str = "E0101";
-const E_UNTERMINATED_STRING: &str = "E0102";
-const E_UNTERMINATED_BLOCK_COMMENT: &str = "E0103";
-const E_INVALID_DIGIT_SEPARATOR: &str = "E0105";
-const E_UNEXPECTED_CHAR: &str = "E0106";
-const E_MALFORMED_NUMBER: &str = "E0107";
+const E_NEWLINE_IN_STRING: DiagnosticCode = DiagnosticCode::new("E0101");
+const E_UNTERMINATED_STRING: DiagnosticCode = DiagnosticCode::new("E0102");
+const E_UNTERMINATED_BLOCK_COMMENT: DiagnosticCode = DiagnosticCode::new("E0103");
+const E_INVALID_DIGIT_SEPARATOR: DiagnosticCode = DiagnosticCode::new("E0105");
+const E_UNEXPECTED_CHAR: DiagnosticCode = DiagnosticCode::new("E0106");
+const E_MALFORMED_NUMBER: DiagnosticCode = DiagnosticCode::new("E0107");
 
 /// Maximum decimal digits that can fit a signed `i64` without overflow check
 /// short-circuiting. We use a stack scratch buffer for digit-underscore stripping

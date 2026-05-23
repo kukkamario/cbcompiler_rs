@@ -81,7 +81,7 @@ fn to_codespan(diag: &Diagnostic) -> cs_diag::Diagnostic<usize> {
         .with_message(&diag.message)
         .with_labels(labels);
     if let Some(code) = diag.code {
-        out = out.with_code(code);
+        out = out.with_code(code.as_str());
     }
     if !diag.notes.is_empty() {
         out = out.with_notes(diag.notes.clone());

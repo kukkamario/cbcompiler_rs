@@ -8,7 +8,7 @@
 //! is currently coarse — errors bubble to statement boundary. Refine in a
 //! future FD when concrete cases motivate it.
 
-use cb_diagnostics::{Diagnostic, Label};
+use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::ast::{
     Arena, BinOp, CaseArm, DimName, ElseIf, Expr, IfForm, NewKind, Node, NodeId, Param, Stmt,
@@ -19,28 +19,28 @@ use crate::string_value;
 use crate::token::{Kw, Op, Punct, Sigil, Token, TokenKind};
 
 // Error codes (E02xx — parser).
-pub const E_EXPECTED_TOKEN: &str = "E0201";
-pub const E_UNEXPECTED_TOKEN: &str = "E0202";
-pub const E_UNTERMINATED_BLOCK: &str = "E0203";
-pub const E_MISMATCHED_END_KEYWORD: &str = "E0204";
-pub const E_INVALID_TYPE_EXPR: &str = "E0205";
-pub const E_BAD_STATEMENT: &str = "E0206";
-pub const E_RESERVED_WORD_AS_NAME: &str = "E0207";
+pub const E_EXPECTED_TOKEN: DiagnosticCode = DiagnosticCode::new("E0201");
+pub const E_UNEXPECTED_TOKEN: DiagnosticCode = DiagnosticCode::new("E0202");
+pub const E_UNTERMINATED_BLOCK: DiagnosticCode = DiagnosticCode::new("E0203");
+pub const E_MISMATCHED_END_KEYWORD: DiagnosticCode = DiagnosticCode::new("E0204");
+pub const E_INVALID_TYPE_EXPR: DiagnosticCode = DiagnosticCode::new("E0205");
+pub const E_BAD_STATEMENT: DiagnosticCode = DiagnosticCode::new("E0206");
+pub const E_RESERVED_WORD_AS_NAME: DiagnosticCode = DiagnosticCode::new("E0207");
 // E0208 (E_INVALID_ESCAPE) and E0209 (E_BAD_RAW_INDENT) live in
 // `string_value.rs` next to their emission sites. FD-004 #17.
-pub const E_MULTI_NAME_NOT_ALLOWED: &str = "E0210";
-pub const E_FIELD_OUTSIDE_TYPE_BODY: &str = "E0211";
-pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: &str = "E0212";
-pub const E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL: &str = "E0213";
-pub const E_LABEL_HAS_SIGIL: &str = "E0214";
-pub const E_EMPTY_SINGLE_LINE_IF_BODY: &str = "E0215";
-pub const E_DUPLICATE_DEFAULT: &str = "E0216";
-pub const E_NEXT_SIGIL_MISMATCH: &str = "E0217";
+pub const E_MULTI_NAME_NOT_ALLOWED: DiagnosticCode = DiagnosticCode::new("E0210");
+pub const E_FIELD_OUTSIDE_TYPE_BODY: DiagnosticCode = DiagnosticCode::new("E0211");
+pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: DiagnosticCode = DiagnosticCode::new("E0212");
+pub const E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL: DiagnosticCode = DiagnosticCode::new("E0213");
+pub const E_LABEL_HAS_SIGIL: DiagnosticCode = DiagnosticCode::new("E0214");
+pub const E_EMPTY_SINGLE_LINE_IF_BODY: DiagnosticCode = DiagnosticCode::new("E0215");
+pub const E_DUPLICATE_DEFAULT: DiagnosticCode = DiagnosticCode::new("E0216");
+pub const E_NEXT_SIGIL_MISMATCH: DiagnosticCode = DiagnosticCode::new("E0217");
 /// Internal compiler error — emitted only from defensive branches that
 /// should be unreachable by the parser invariants. Surfaced (rather than
 /// `panic!`) so a future change that violates the invariants produces a
 /// clear failure instead of a hard crash.
-pub const E_INTERNAL_PARSER: &str = "E0299";
+pub const E_INTERNAL_PARSER: DiagnosticCode = DiagnosticCode::new("E0299");
 
 /// Internal error type that propagates up to `parse_stmt`'s recovery point.
 /// Carries a structured diagnostic and the span where parsing failed. The

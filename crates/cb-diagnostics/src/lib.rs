@@ -8,6 +8,6 @@ pub mod diagnostic;
 pub mod render;
 pub mod source;
 
-pub use diagnostic::{Diagnostic, Label, Severity, Span};
+pub use diagnostic::{Diagnostic, DiagnosticCode, Label, Severity, Span};
 pub use render::{CliRenderer, Renderer, SourceMapFiles};
 pub use source::{FileId, LineIndex, Source, SourceMap};
