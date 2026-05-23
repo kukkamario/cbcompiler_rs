@@ -1,0 +1,43 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 551
+expression: "snapshot_parser_fixture(\"select_duplicate_default\")"
+---
+Program (2 top-level statements)
+  Stmt::Select(arms=3) @ 62..166
+    Expr::Ident(sigil=None) @ 69..70
+    CaseArm::Case @ 75..97
+      Expr::IntLit(1) @ 80..81
+      Stmt::ExprStmt @ 90..97
+        Expr::Call(args=1) @ 90..97
+          Expr::Ident(sigil=None) @ 90..95
+          Expr::IntLit(1) @ 96..97
+    CaseArm::Default @ 102..126
+      Stmt::ExprStmt @ 118..126
+        Expr::Call(args=1) @ 118..126
+          Expr::Ident(sigil=None) @ 118..123
+          Expr::IntLit(99) @ 124..126
+    CaseArm::Default @ 131..156
+      Stmt::ExprStmt @ 147..156
+        Expr::Call(args=1) @ 147..156
+          Expr::Ident(sigil=None) @ 147..152
+          Expr::IntLit(100) @ 153..156
+  Stmt::Select(arms=3) @ 230..326
+    Expr::Ident(sigil=None) @ 237..238
+    CaseArm::Default @ 243..264
+      Stmt::Assign @ 259..264
+        Expr::Ident(sigil=None) @ 259..260
+        Expr::IntLit(1) @ 263..264
+    CaseArm::Default @ 269..290
+      Stmt::Assign @ 285..290
+        Expr::Ident(sigil=None) @ 285..286
+        Expr::IntLit(2) @ 289..290
+    CaseArm::Default @ 295..316
+      Stmt::Assign @ 311..316
+        Expr::Ident(sigil=None) @ 311..312
+        Expr::IntLit(3) @ 315..316
+
+--- DIAGNOSTICS ---
+ERROR[E0216] `Select` has more than one `Default` arm @ 131..138
+ERROR[E0216] `Select` has more than one `Default` arm @ 269..276
+ERROR[E0216] `Select` has more than one `Default` arm @ 295..302

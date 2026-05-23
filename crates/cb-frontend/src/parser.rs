@@ -354,14 +354,18 @@ pub(crate) struct Parser<'t> {
     arena: Arena,
     diagnostics: Vec<Diagnostic>,
     last_term: LastTerm,
-    /// Cursor position at which the most recent `parse_stmt_inner` error was
-    /// reported. If `parse_stmt` re-enters at the same position, recovery
-    /// must force at least one token of forward progress before retrying —
-    /// otherwise a sync target that's also a statement-position keyword
-    /// (e.g. `EndFunction` appearing at top level) would parse-error, sync,
-    /// stop at the same token, and loop forever. See
-    /// `recovery_endfunction_at_top_level_does_not_loop`.
-    last_error_pos: Option<usize>,
+    /// Cursor position + diagnostic span at which the most recent
+    /// `parse_stmt_inner` error was reported. If `parse_stmt` re-enters at
+    /// the same position, recovery must force at least one token of forward
+    /// progress before retrying — otherwise a sync target that's also a
+    /// statement-position keyword (e.g. `EndFunction` appearing at top
+    /// level) would parse-error, sync, stop at the same token, and loop
+    /// forever. See `recovery_endfunction_at_top_level_does_not_loop`.
+    ///
+    /// FD-004 #9: the `Span` field is preserved so any forced-progress
+    /// `Stmt::Error` node can span from the original error to the bumped
+    /// token, instead of pinning the Error to just the bumped token's span.
+    last_error: Option<(usize, Span)>,
 }
 
 impl<'t> Parser<'t> {
@@ -371,7 +375,7 @@ impl<'t> Parser<'t> {
             arena: Arena::new(),
             diagnostics: Vec::new(),
             last_term: LastTerm::None,
-            last_error_pos: None,
+            last_error: None,
         }
     }
 
@@ -536,14 +540,18 @@ impl<'t> Parser<'t> {
                     .cursor
                     .expect_punct(Punct::RBracket, "in index expression")?;
                 if indices.is_empty() {
-                    // `arr[]` is not a valid index expression — the parser
-                    // emits a diagnostic but keeps the (empty) node so
-                    // recovery can continue.
+                    // `arr[]` is not a valid index expression. FD-004 #6:
+                    // returning a malformed `Index { indices: [] }` would
+                    // force every downstream consumer to special-case empty
+                    // indices; `Expr::Error` is the standard
+                    // diagnostic-already-emitted carrier.
+                    let span = lhs_span.merge(close.span);
                     self.diagnostics.push(Diagnostic::error(
                         E_BAD_STATEMENT,
                         "index expression must have at least one index",
-                        Label::new(lhs_span.merge(close.span)),
+                        Label::new(span),
                     ));
+                    return Ok(self.alloc(Node::Expr(Expr::Error), span));
                 }
                 let span = lhs_span.merge(close.span);
                 Ok(self.alloc(
@@ -624,14 +632,20 @@ impl<'t> Parser<'t> {
             let close = self
                 .cursor
                 .expect_punct(Punct::RBracket, "in `New` array dimensions")?;
+            let span = new_tok.span.merge(close.span);
             if dims.is_empty() {
+                // FD-004 #6: previously emitted a diagnostic and returned a
+                // malformed `NewKind::Array { dims: [] }`; downstream code
+                // (e.g. lvalue checks for FD-005 `Delete`) would then need to
+                // special-case the empty-dims shape. `Expr::Error` is the
+                // standard "diagnostic was already emitted" carrier.
                 self.diagnostics.push(Diagnostic::error(
                     E_BAD_STATEMENT,
                     "`New T[…]` requires at least one dimension expression",
-                    Label::new(new_tok.span.merge(close.span)),
+                    Label::new(span),
                 ));
+                return Ok(self.alloc(Node::Expr(Expr::Error), span));
             }
-            let span = new_tok.span.merge(close.span);
             return Ok(self.alloc(
                 Node::Expr(Expr::New(NewKind::Array {
                     elem: elem_id,
@@ -851,7 +865,8 @@ impl<'t> Parser<'t> {
         // *don't* consume (block-closers, statement-position keywords); when
         // such a token appears in a context that can't actually start a
         // statement, we bump past it once and try again.
-        if self.last_error_pos == Some(self.cursor.pos())
+        if let Some((pos, orig_span)) = self.last_error
+            && pos == self.cursor.pos()
             && !matches!(self.cursor.peek(), TokenKind::Eof)
         {
             let bad = self.cursor.bump();
@@ -860,22 +875,26 @@ impl<'t> Parser<'t> {
             if matches!(self.cursor.peek(), TokenKind::Eof) {
                 // Allocate a placeholder Error so the program still has a node
                 // attributed to this position; the diagnostic was already
-                // emitted on the previous turn.
-                let id = self.alloc(Node::Stmt(Stmt::Error), bad.span);
-                self.last_error_pos = None;
+                // emitted on the previous turn. FD-004 #9: span the Error
+                // from the original error site to the bumped token so the
+                // recovered range is visible.
+                let span = orig_span.merge(bad.span);
+                let id = self.alloc(Node::Stmt(Stmt::Error), span);
+                self.last_error = None;
                 return Some(id);
             }
-            self.last_error_pos = None;
+            self.last_error = None;
         }
         let result = self.parse_stmt_inner();
         match result {
             Ok(id) => {
-                self.last_error_pos = None;
+                self.last_error = None;
                 Some(id)
             }
             Err(err) => {
+                let err_span = err.span;
                 self.diagnostics.push(*err.diag);
-                let id = self.alloc(Node::Stmt(Stmt::Error), err.span);
+                let id = self.alloc(Node::Stmt(Stmt::Error), err_span);
                 let pre_sync = self.cursor.pos();
                 self.sync_to_stmt_boundary();
                 // Track where this recovery left the cursor *only when sync
@@ -886,8 +905,8 @@ impl<'t> Parser<'t> {
                 // statement-position keyword (e.g. `EndFunction` at top level)
                 // — re-entering would just repeat the same diagnostic, so
                 // `parse_stmt` will bump once before retrying.
-                self.last_error_pos = if self.cursor.pos() == pre_sync {
-                    Some(self.cursor.pos())
+                self.last_error = if self.cursor.pos() == pre_sync {
+                    Some((self.cursor.pos(), err_span))
                 } else {
                     None
                 };
@@ -1409,10 +1428,19 @@ impl<'t> Parser<'t> {
                 span
             }
             _ => {
-                // Defensive: parse_block_until should only return when a
+                // FD-004 #13: `parse_block_until` should only return when a
                 // closer-shaped token is present (or EOF, which it already
-                // diagnosed). If we somehow land here, return the current
-                // span so the caller can still build a usable node.
+                // diagnosed). If we somehow land here, surface a structured
+                // internal-error diagnostic so a future invariant violation
+                // is loud instead of silently producing a node with a
+                // current-token span.
+                self.diagnostics.push(Diagnostic::error(
+                    E_INTERNAL_PARSER,
+                    format!(
+                        "internal: `consume_block_closer` reached an unexpected token while closing `{opener_name}`",
+                    ),
+                    Label::new(tok.span),
+                ));
                 tok.span
             }
         }
@@ -1840,6 +1868,9 @@ impl<'t> Parser<'t> {
         let scrutinee = self.parse_expr_bp(0)?;
         self.cursor.eat_newlines();
         let mut arms = Vec::new();
+        // FD-004 #10: track the span of the first `Default` arm so a second
+        // one can be diagnosed with a secondary label pointing at it.
+        let mut first_default_span: Option<Span> = None;
         loop {
             self.cursor.eat_newlines();
             match self.cursor.peek() {
@@ -1869,7 +1900,26 @@ impl<'t> Parser<'t> {
                     break;
                 }
                 TokenKind::Keyword(Kw::Case) => arms.push(self.parse_case_arm()?),
-                TokenKind::Keyword(Kw::Default) => arms.push(self.parse_default_arm()?),
+                TokenKind::Keyword(Kw::Default) => {
+                    let default_kw_span = self.cursor.peek_tok().span;
+                    let arm_id = self.parse_default_arm()?;
+                    if let Some(prev_span) = first_default_span {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                E_DUPLICATE_DEFAULT,
+                                "`Select` has more than one `Default` arm",
+                                Label::new(default_kw_span),
+                            )
+                            .with_secondary(Label::with_message(
+                                prev_span,
+                                "first `Default` arm here",
+                            )),
+                        );
+                    } else {
+                        first_default_span = Some(default_kw_span);
+                    }
+                    arms.push(arm_id);
+                }
                 _ => {
                     // Stray token — emit a diagnostic and consume one to
                     // make progress.

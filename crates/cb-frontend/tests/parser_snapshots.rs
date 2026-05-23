@@ -547,6 +547,11 @@ fn redim_array_element_type() {
 }
 
 #[test]
+fn select_duplicate_default() {
+    insta::assert_snapshot!(snapshot_parser_fixture("select_duplicate_default"));
+}
+
+#[test]
 fn continuation_multi_line_preserve_trivia() {
     // Verifies that `\` line continuations are transparent to the parser even
     // when the lexer emits them as tokens (preserve_trivia=true). Same source
