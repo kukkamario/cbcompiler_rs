@@ -35,6 +35,7 @@ pub const E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL: &str = "E0213";
 pub const E_LABEL_HAS_SIGIL: &str = "E0214";
 pub const E_EMPTY_SINGLE_LINE_IF_BODY: &str = "E0215";
 pub const E_DUPLICATE_DEFAULT: &str = "E0216";
+pub const E_NEXT_SIGIL_MISMATCH: &str = "E0217";
 /// Internal compiler error — emitted only from defensive branches that
 /// should be unreachable by the parser invariants. Surfaced (rather than
 /// `panic!`) so a future change that violates the invariants produces a
@@ -1012,7 +1013,8 @@ impl<'t> Parser<'t> {
     }
 
     /// Handle a statement that starts with an `Ident`: either a `Label` (per
-    /// §6.4) or an assignment / expression statement / paren-less call.
+    /// §6.4), an implicit declaration with `As Type =` (per §4.1, FD-004 #4),
+    /// or an assignment / expression statement / paren-less call.
     ///
     /// Uses pure lookahead (`peek_n`); never bumps speculatively.
     fn parse_label_or_expr_stmt(&mut self) -> Result<NodeId, ParseError> {
@@ -1041,8 +1043,61 @@ impl<'t> Parser<'t> {
                 }
                 return Ok(self.alloc(Node::Stmt(Stmt::Label { name_span }), span));
             }
+
+            // Implicit declaration with type annotation: `Ident [Sigil] As Type = expr`.
+            // §4.1 explicitly shows `z As String = "asd"` as a first-assignment
+            // form; the bare-`Ident = expr` case continues to go through
+            // `parse_expr_or_assign_stmt` (it lexes as an assignment to a
+            // possibly-new variable).
+            if matches!(self.cursor.peek_n(1), TokenKind::Keyword(Kw::As)) {
+                return self.parse_implicit_decl_stmt(first.span, sigil);
+            }
         }
         self.parse_expr_or_assign_stmt()
+    }
+
+    /// Parse an implicit declaration with `As` annotation:
+    /// `<name>[<sigil>] As <Type> = <expr>` (§4.1, FD-004 #4). Produces a
+    /// single-name `Stmt::Dim` with the type and initializer. The `= <expr>`
+    /// tail is required; without it sema can't tell an implicit decl from a
+    /// dangling `Ident As Type` (which has no statement meaning), and any
+    /// later assignment would conflict. The current token at entry is the
+    /// name `Ident`; `name_tok_span` and `sigil` come from
+    /// `parse_label_or_expr_stmt`'s peek.
+    fn parse_implicit_decl_stmt(
+        &mut self,
+        name_tok_span: Span,
+        sigil: Option<Sigil>,
+    ) -> Result<NodeId, ParseError> {
+        self.cursor.bump(); // consume the name Ident
+        let name_span = bare_name_span(name_tok_span, sigil);
+        self.cursor
+            .expect_kw(Kw::As, "after implicit declaration name")?;
+        let ty = self.parse_type_expr()?;
+        if !matches!(self.cursor.peek(), TokenKind::Op(Op::Eq)) {
+            let tok = self.cursor.peek_tok();
+            return Err(ParseError {
+                diag: Box::new(Diagnostic::error(
+                    E_EXPECTED_TOKEN,
+                    "implicit declaration with `As` requires an initializer; \
+                     use `Dim` to declare without one",
+                    Label::new(tok.span),
+                )),
+                span: tok.span,
+            });
+        }
+        self.cursor.bump(); // `=`
+        let value = self.parse_expr_bp(0)?;
+        let span = name_tok_span.merge(self.arena.span_of(value));
+        self.consume_stmt_sep_or_terminator()?;
+        Ok(self.alloc(
+            Node::Stmt(Stmt::Dim {
+                names: vec![DimName { name_span, sigil }],
+                ty: Some(ty),
+                init: Some(value),
+            }),
+            span,
+        ))
     }
 
     /// Parse the three Ident-starting expression-statement forms:
@@ -1693,7 +1748,7 @@ impl<'t> Parser<'t> {
                     here
                 }
             };
-            let next_name = self.parse_optional_next_name();
+            let next_name = self.parse_optional_next_name(sigil);
             let span = opener.merge(close_span);
             let _ = self.consume_stmt_sep_or_terminator();
             return Ok(self.alloc(
@@ -1728,7 +1783,7 @@ impl<'t> Parser<'t> {
                 here
             }
         };
-        let next_name = self.parse_optional_next_name();
+        let next_name = self.parse_optional_next_name(sigil);
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();
         Ok(self.alloc(
@@ -1744,15 +1799,40 @@ impl<'t> Parser<'t> {
         ))
     }
 
-    fn parse_optional_next_name(&mut self) -> Option<Span> {
+    /// Parse an optional name after `Next` (§6.3). Accepts sigilled idents
+    /// (FD-004 #5); when the sigil differs from the loop variable's, emit
+    /// `E0217` so the parser doesn't silently drop the user's name. The
+    /// loop-var name match (e.g. `For i = … Next j`) is sema's job — only the
+    /// sigil is checked here because the parser already has it.
+    ///
+    /// Returns the bare-name span (sigil byte excluded) on success.
+    fn parse_optional_next_name(&mut self, loop_sigil: Option<Sigil>) -> Option<Span> {
         let tok = self.cursor.peek_tok();
-        match tok.kind {
-            TokenKind::Ident { sigil: None } => {
-                self.cursor.bump();
-                Some(tok.span)
-            }
-            _ => None,
+        let TokenKind::Ident { sigil } = tok.kind else {
+            return None;
+        };
+        self.cursor.bump();
+        if sigil != loop_sigil {
+            let msg = match (loop_sigil, sigil) {
+                (Some(l), Some(n)) => format!(
+                    "`Next` name has sigil `{}` but the loop variable has sigil `{}`",
+                    n.as_char(),
+                    l.as_char(),
+                ),
+                (Some(l), None) => format!(
+                    "`Next` name has no sigil but the loop variable has sigil `{}`",
+                    l.as_char(),
+                ),
+                (None, Some(n)) => format!(
+                    "`Next` name has sigil `{}` but the loop variable has no sigil",
+                    n.as_char(),
+                ),
+                (None, None) => unreachable!("sigil != loop_sigil but both are None"),
+            };
+            self.diagnostics
+                .push(Diagnostic::error(E_NEXT_SIGIL_MISMATCH, msg, Label::new(tok.span)));
         }
+        Some(bare_name_span(tok.span, sigil))
     }
 
     fn parse_select(&mut self) -> Result<NodeId, ParseError> {
@@ -2317,8 +2397,13 @@ impl<'t> Parser<'t> {
         let target = self.alloc(Node::Expr(Expr::Ident { name_span, sigil }), name_tok.span);
 
         self.cursor.expect_kw(Kw::As, "after `Redim` target")?;
-        // Element type — use `parse_type_atom` so the dim-list `[…]` stays.
-        let elem_ty = self.parse_type_atom()?;
+        // Element type — `parse_type_expr` so the user can carry rank markers
+        // (`Integer[]`) on the element. The bracket-with-expression that
+        // follows (`[N, M]`) is the dim-list, which `parse_array_brackets`
+        // refuses to consume (it only matches empty/comma-only brackets).
+        // FD-004 #8: this was previously `parse_type_atom`, which rejected
+        // `Redim arr As Integer[][10]`.
+        let elem_ty = self.parse_type_expr()?;
         self.cursor
             .expect_punct(Punct::LBracket, "after `Redim` element type")?;
         let mut dims = Vec::new();
@@ -4705,6 +4790,44 @@ mod decl_tests {
             "expected E0211, got {:?}",
             r.diagnostics
         );
+    }
+
+    /// FD-004 #7: the stray-`Field` recovery loop stops at `:` so a trailing
+    /// statement on the same line still parses. The loop must NOT consume
+    /// past the `:` separator.
+    #[test]
+    fn field_outside_type_body_stops_at_colon() {
+        let src = "Field x : Print y\n";
+        let r = parse_src(src);
+        // One E0211 for the stray Field…
+        assert_eq!(
+            r.diagnostics
+                .iter()
+                .filter(|d| d.code == Some(E_FIELD_OUTSIDE_TYPE_BODY))
+                .count(),
+            1,
+            "expected exactly one E0211, got {:?}",
+            r.diagnostics,
+        );
+        // …and `Print y` recovered as a sibling ExprStmt (paren-less call).
+        let print_stmt_id = r
+            .program
+            .iter()
+            .find_map(|&id| match &r.arena[id] {
+                Node::Stmt(Stmt::ExprStmt { expr }) => Some(*expr),
+                _ => None,
+            })
+            .expect("expected a recovered ExprStmt for `Print y`");
+        match &r.arena[print_stmt_id] {
+            Node::Expr(Expr::Call { callee, args }) => {
+                let callee_span = r.arena.span_of(*callee);
+                assert_eq!(callee_span.slice(src), "Print");
+                assert_eq!(args.len(), 1);
+                let arg_span = r.arena.span_of(args[0]);
+                assert_eq!(arg_span.slice(src), "y");
+            }
+            other => panic!("expected Call(Print, [y]), got {other:?}"),
+        }
     }
 
     #[test]

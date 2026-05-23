@@ -532,6 +532,21 @@ fn single_line_if_empty() {
 }
 
 #[test]
+fn implicit_decl_as() {
+    insta::assert_snapshot!(snapshot_parser_fixture("implicit_decl_as"));
+}
+
+#[test]
+fn next_with_sigil() {
+    insta::assert_snapshot!(snapshot_parser_fixture("next_with_sigil"));
+}
+
+#[test]
+fn redim_array_element_type() {
+    insta::assert_snapshot!(snapshot_parser_fixture("redim_array_element_type"));
+}
+
+#[test]
 fn continuation_multi_line_preserve_trivia() {
     // Verifies that `\` line continuations are transparent to the parser even
     // when the lexer emits them as tokens (preserve_trivia=true). Same source
