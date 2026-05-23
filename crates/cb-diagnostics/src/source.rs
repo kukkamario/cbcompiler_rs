@@ -41,6 +41,27 @@ impl Source {
     pub fn line_index(&self) -> &LineIndex {
         &self.line_index
     }
+
+    /// Translate a byte offset to a (line, char-column) pair on this source.
+    ///
+    /// Lines are 1-based; columns are 0-based counts of Unicode scalar
+    /// values on the line (not bytes). For ASCII input this matches
+    /// [`LineIndex::offset_to_line_byte_col`] exactly; for multi-byte UTF-8
+    /// it counts characters, which is what most IDE/LSP consumers expect.
+    ///
+    /// Offsets beyond the source are clamped to the end. Worst-case cost is
+    /// O(line length) because of the char-count walk.
+    pub fn offset_to_line_char_col(&self, offset: u32) -> (u32, u32) {
+        let (line1, byte_col) = self.line_index.offset_to_line_byte_col(offset);
+        let (line_start, _) = self
+            .line_index
+            .line_byte_range((line1 as usize) - 1)
+            .expect("line index from offset_to_line_byte_col must exist");
+        let slice_start = line_start as usize;
+        let slice_end = slice_start + byte_col as usize;
+        let char_col = self.text[slice_start..slice_end].chars().count() as u32;
+        (line1, char_col)
+    }
 }
 
 /// Collection of source files indexed by [`FileId`].
@@ -57,13 +78,55 @@ impl SourceMap {
         }
     }
 
-    /// Add a source file, returning its newly-assigned [`FileId`].
+    /// Add a source file, returning its [`FileId`].
+    ///
+    /// If a source with the same `name` is already registered, returns the
+    /// existing [`FileId`] without storing a new copy. Callers that want a
+    /// fresh slot for synthetic input (REPL, in-memory snippet, anonymous
+    /// fixture) should use [`SourceMap::add_anonymous`] instead.
+    ///
+    /// In debug builds, calling `add` twice with the same `name` but
+    /// different `text` panics — that almost always indicates a caller bug.
     ///
     /// # Panics
     ///
     /// Panics if more than `u32::MAX - 1` files are added (the last `u32`
     /// value is reserved for [`FileId::SYNTHETIC`]).
     pub fn add(&mut self, name: String, text: String) -> FileId {
+        if let Some((idx, existing)) = self
+            .sources
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.name == name)
+        {
+            debug_assert_eq!(
+                existing.text, text,
+                "SourceMap::add called twice for {name} with different text — \
+                 caller likely meant SourceMap::add_anonymous",
+            );
+            let id = u32::try_from(idx).expect("source map index overflowed u32");
+            return FileId(id);
+        }
+        self.push_source(name, text)
+    }
+
+    /// Add a source file with an auto-generated unique name, returning its
+    /// newly-assigned [`FileId`].
+    ///
+    /// Unlike [`SourceMap::add`], this method never dedupes: each call
+    /// produces a fresh slot. Use it for REPL inputs, synthetic snippets,
+    /// or any case where the source has no on-disk identity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than `u32::MAX - 1` files are added (the last `u32`
+    /// value is reserved for [`FileId::SYNTHETIC`]).
+    pub fn add_anonymous(&mut self, text: String) -> FileId {
+        let name = format!("<anon:{}>", self.sources.len());
+        self.push_source(name, text)
+    }
+
+    fn push_source(&mut self, name: String, text: String) -> FileId {
         let idx = self.sources.len();
         let id = u32::try_from(idx).expect("source map index overflowed u32");
         assert!(
@@ -98,6 +161,16 @@ impl SourceMap {
 /// the position immediately after the `i`-th line terminator. Line 1 always
 /// starts at offset `0`. `\r\n` is treated as one terminator (length 2);
 /// `\n` and bare `\r` are each length 1 terminators.
+///
+/// # Bare `\r` vs codespan-reporting
+///
+/// Treating a bare `\r` (classic-Mac line ending) as a terminator diverges
+/// from `codespan-reporting`'s default `Files` impl, which only recognises
+/// `\n` and `\r\n`. Our [`SourceMapFiles`](crate::render) adapter routes
+/// codespan's `line_index`/`line_range` queries back through this type, so
+/// the renderer and `LineIndex` agree internally. Code that bypasses the
+/// adapter and feeds a bare-`\r` source straight into codespan's
+/// `SimpleFile` will see different line numbers.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
     /// Byte offsets at which lines after the first begin.
@@ -150,12 +223,16 @@ impl LineIndex {
         self.text_len
     }
 
-    /// Translate a byte offset to a (line, column-in-bytes) pair.
+    /// Translate a byte offset to a (line, byte-column-in-line) pair.
     ///
     /// Lines are 1-based; columns are 0-based byte offsets into the line.
     /// Offsets at or beyond the end of the text are clamped to the last
     /// line's coordinates — this function never panics.
-    pub fn offset_to_line_col(&self, offset: u32) -> (u32, u32) {
+    ///
+    /// For a char-column (Unicode scalar count) variant, see
+    /// [`Source::offset_to_line_char_col`], which is cheap to call from any
+    /// callsite that already holds a `Source`.
+    pub fn offset_to_line_byte_col(&self, offset: u32) -> (u32, u32) {
         let clamped = offset.min(self.text_len);
         // Find the first newline-start strictly greater than `clamped`.
         // partition_point returns the count of elements `<= clamped`, which
@@ -177,7 +254,7 @@ impl LineIndex {
     /// Returns the 0-based line index (suitable for codespan-reporting's
     /// `Files::line_index`) for the given byte offset.
     pub fn line_index_of_offset(&self, offset: u32) -> usize {
-        let (line1, _) = self.offset_to_line_col(offset);
+        let (line1, _) = self.offset_to_line_byte_col(offset);
         (line1 as usize) - 1
     }
 

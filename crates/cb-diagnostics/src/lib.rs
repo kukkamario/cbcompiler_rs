@@ -9,5 +9,5 @@ pub mod render;
 pub mod source;
 
 pub use diagnostic::{Diagnostic, Label, Severity, Span};
-pub use render::{CliRenderer, Renderer};
+pub use render::{CliRenderer, Renderer, SourceMapFiles};
 pub use source::{FileId, LineIndex, Source, SourceMap};

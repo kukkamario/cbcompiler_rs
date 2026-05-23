@@ -99,8 +99,16 @@ fn to_cs_label(label: &Label, style: cs_diag::LabelStyle) -> cs_diag::Label<usiz
     cs
 }
 
-/// Adapter exposing a [`SourceMap`] to `codespan-reporting`.
-struct SourceMapFiles<'a>(&'a SourceMap);
+/// Adapter exposing a [`SourceMap`] to `codespan-reporting`'s
+/// [`Files`](codespan_reporting::files::Files) trait.
+///
+/// Construct one as `SourceMapFiles(&sources)` to feed a [`SourceMap`]
+/// into any codespan-reporting renderer or test. The adapter routes line
+/// and column queries back through our [`LineIndex`](crate::LineIndex),
+/// so codespan's reported line numbers stay consistent with the rest of
+/// the crate (including on bare-`\r` sources where codespan's default
+/// `Files` impls would disagree).
+pub struct SourceMapFiles<'a>(pub &'a SourceMap);
 
 impl<'a> Files<'a> for SourceMapFiles<'a> {
     type FileId = usize;
