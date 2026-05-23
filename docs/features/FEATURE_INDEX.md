@@ -8,7 +8,10 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| -  | -     | -      | -      | -        |
+| [FD-003](FD-003_LEXER_CORRECTNESS.md) | Lexer correctness & robustness pass | Open | Medium | Medium |
+| [FD-004](FD-004_PARSER_CORRECTNESS.md) | Parser correctness & small spec gaps | Open | Medium | Medium |
+| [FD-005](FD-005_DELETE_STATEMENT.md) | `Delete` statement (§3.3) | Open | Medium | Medium |
+| [FD-006](FD-006_DIAGNOSTICS_DRIVER_HARDENING.md) | Diagnostics & driver hardening | Open | Medium | Medium |
 
 ## Completed
 
