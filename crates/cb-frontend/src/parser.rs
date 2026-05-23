@@ -26,8 +26,8 @@ pub const E_MISMATCHED_END_KEYWORD: &str = "E0204";
 pub const E_INVALID_TYPE_EXPR: &str = "E0205";
 pub const E_BAD_STATEMENT: &str = "E0206";
 pub const E_RESERVED_WORD_AS_NAME: &str = "E0207";
-pub const E_INVALID_ESCAPE: &str = "E0208";
-pub const E_BAD_RAW_INDENT: &str = "E0209";
+// E0208 (E_INVALID_ESCAPE) and E0209 (E_BAD_RAW_INDENT) live in
+// `string_value.rs` next to their emission sites. FD-004 #17.
 pub const E_MULTI_NAME_NOT_ALLOWED: &str = "E0210";
 pub const E_FIELD_OUTSIDE_TYPE_BODY: &str = "E0211";
 pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: &str = "E0212";
@@ -380,9 +380,9 @@ impl<'t> Parser<'t> {
     }
 
     /// Consume the parser and return the final [`ParseResult`]. The program
-    /// statement list is filled in by W4+; for now it is empty by default and
-    /// the [`parse`] driver below pushes top-level `Stmt::Error`s into it for
-    /// the W2 scaffolding behavior.
+    /// statement list is empty by default; the [`parse`] driver pushes
+    /// successfully-parsed top-level statements (and `Stmt::Error` nodes
+    /// for recovered failures) into it.
     pub(crate) fn finish(self) -> ParseResult {
         ParseResult {
             arena: self.arena,
@@ -659,7 +659,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W6: type expressions.
+    // Type expressions.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse a full type expression: an atom (primitive, named, fn-ptr, or
@@ -847,7 +847,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W4: statement dispatch + simple statements.
+    // Statement dispatch + simple statements.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse a single statement. On error, push a diagnostic, allocate a
@@ -925,14 +925,14 @@ impl<'t> Parser<'t> {
                 Kw::Break => self.parse_break(),
                 Kw::Continue => self.parse_continue(),
 
-                // Block statements (W5).
+                // Block statements.
                 Kw::If => self.parse_if(),
                 Kw::While => self.parse_while(),
                 Kw::Repeat => self.parse_repeat(),
                 Kw::For => self.parse_for(),
                 Kw::Select => self.parse_select(),
 
-                // Declaration statements (W6).
+                // Declaration statements.
                 Kw::Function => self.parse_function(),
                 Kw::Type => self.parse_type_decl(),
                 Kw::Struct => self.parse_struct_decl(),
@@ -1293,7 +1293,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W5: block statements (If / While / Repeat / For / Select).
+    // Block statements (If / While / Repeat / For / Select).
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse statements until any of `closers` appears at the start of a
@@ -1857,8 +1857,11 @@ impl<'t> Parser<'t> {
                 ),
                 (None, None) => unreachable!("sigil != loop_sigil but both are None"),
             };
-            self.diagnostics
-                .push(Diagnostic::error(E_NEXT_SIGIL_MISMATCH, msg, Label::new(tok.span)));
+            self.diagnostics.push(Diagnostic::error(
+                E_NEXT_SIGIL_MISMATCH,
+                msg,
+                Label::new(tok.span),
+            ));
         }
         Some(bare_name_span(tok.span, sigil))
     }
@@ -1977,7 +1980,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W6: declaration statements.
+    // Declaration statements.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse `Function name(params) [As ret] body EndFunction`. The
@@ -2681,13 +2684,19 @@ fn is_primitive_type_kw(kw: Kw) -> bool {
     )
 }
 
+/// Left-binding-power of comparison operators (`=`, `<>`, `<`, `>`, `<=`,
+/// `>=`). Pinned here as a named constant so [`STMT_LHS_MIN_BP`] derives
+/// from it. If the comparison level shifts in [`infix_bp`], update this
+/// constant — the derived statement-LHS gate moves with it.
+const CMP_LBP: u8 = 16;
+
 /// Minimum binding power for the LHS of a statement-level expression /
-/// assignment. Set one above the comparison binding power (16) so the Pratt
-/// loop refuses to consume `=` (and the other comparison operators) into
-/// the LHS — letting `parse_expr_or_assign_stmt` see a top-level `=` and
-/// dispatch to assignment. See the doc on that function for the design
-/// rationale.
-const STMT_LHS_MIN_BP: u8 = 17;
+/// assignment. Set one above [`CMP_LBP`] so the Pratt loop refuses to
+/// consume `=` (and the other comparison operators) into the LHS — letting
+/// `parse_expr_or_assign_stmt` see a top-level `=` and dispatch to
+/// assignment. See the doc on that function for the design rationale.
+/// FD-004 #15: derived from `CMP_LBP` (was a hand-written `17`).
+const STMT_LHS_MIN_BP: u8 = CMP_LBP + 1;
 
 /// Binding powers for infix operators. Returns `(left_bp, right_bp)`; when
 /// `right > left` the operator is right-associative.
@@ -2700,7 +2709,9 @@ fn infix_bp(kind: &TokenKind) -> Option<(u8, u8)> {
         TokenKind::Keyword(Kw::Or) => (10, 11),
         TokenKind::Keyword(Kw::Xor) => (12, 13),
         TokenKind::Keyword(Kw::And) => (14, 15),
-        TokenKind::Op(Op::Eq | Op::NotEq | Op::Lt | Op::Gt | Op::LtEq | Op::GtEq) => (16, 17),
+        TokenKind::Op(Op::Eq | Op::NotEq | Op::Lt | Op::Gt | Op::LtEq | Op::GtEq) => {
+            (CMP_LBP, CMP_LBP + 1)
+        }
         TokenKind::Keyword(Kw::BinOr) => (18, 19),
         TokenKind::Keyword(Kw::BinXor) => (20, 21),
         TokenKind::Keyword(Kw::BinAnd) => (22, 23),
@@ -2832,8 +2843,8 @@ mod tests {
 
     #[test]
     fn unknown_token_at_stmt_start_recovers() {
-        // `*` cannot start a statement; W2 stub recovers by allocating
-        // Stmt::Error and bumping. Real dispatch will replace this in W4.
+        // `*` cannot start a statement; recovery allocates `Stmt::Error`
+        // and bumps past the offending token.
         let src = "*";
         let (tokens, _) = tokenize(src, FileId(0), LexerOptions::default());
         let result = parse(&tokens, src, FileId(0));
@@ -3279,7 +3290,10 @@ mod stmt_tests {
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Assign { target, value } => {
                 match expr_of(&r.arena, *target) {
-                    Expr::Field { target: t, name_span } => {
+                    Expr::Field {
+                        target: t,
+                        name_span,
+                    } => {
                         assert_ident(&r.arena, *t, src, "node");
                         assert_eq!(name_span.slice(src), "f");
                     }
@@ -3651,7 +3665,7 @@ mod stmt_tests {
 
 #[cfg(test)]
 mod block_tests {
-    //! Unit tests for the W5 block-statement parsers: `If` (single-line and
+    //! Unit tests for block-statement parsers: `If` (single-line and
     //! block), `While`, `Repeat`, `For`, `For Each`, and `Select`.
 
     use super::*;
@@ -4243,8 +4257,7 @@ mod block_tests {
 
 #[cfg(test)]
 mod type_expr_tests {
-    //! Unit tests for [`Parser::parse_type_expr`] — the type-expression
-    //! grammar landed in W6.
+    //! Unit tests for [`Parser::parse_type_expr`].
 
     use super::*;
     use crate::ast::{Node, NodeId, Param, TypeExpr};
@@ -4542,7 +4555,7 @@ mod type_expr_tests {
 
 #[cfg(test)]
 mod decl_tests {
-    //! Unit tests for declaration statements (W6): `Function`, `Type`,
+    //! Unit tests for declaration statements: `Function`, `Type`,
     //! `Struct`, `Dim`, `Global`, `Const`, `Redim`, and stray `Field`.
 
     use super::*;

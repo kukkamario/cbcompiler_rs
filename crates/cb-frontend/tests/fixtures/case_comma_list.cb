@@ -1,0 +1,12 @@
+// FD-004 #11: pin the comma-separated `Case` values path (§6.2).
+
+Select x
+    Case 1, 2, 3
+        Print 1
+    Case 5
+        Print 5
+    Case 10, 20
+        Print 10
+    Default
+        Print 0
+EndSelect
