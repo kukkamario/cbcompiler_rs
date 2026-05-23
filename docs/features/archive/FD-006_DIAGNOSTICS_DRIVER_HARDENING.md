@@ -1,6 +1,7 @@
 # FD-006: Diagnostics & Driver Hardening
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-23
 **Priority:** Medium (driver cargo-feature gating is time-sensitive — should land before `inkwell` is added)
 **Effort:** Medium (1-4 hours)
 **Impact:** Cleans up `cb-diagnostics` API issues, gates the LLVM backend behind a cargo feature so the workspace stays buildable without an LLVM toolchain, lifts the AST printer out of `cb-driver` (where its catch-all `_ => {}` arms silently swallow new AST variants), and adds the first integration tests for both the driver and the diagnostics renderer.
