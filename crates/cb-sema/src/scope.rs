@@ -136,6 +136,7 @@ impl SymbolTable {
                             DeclKind::Function { .. }
                                 | DeclKind::TypeDef { .. }
                                 | DeclKind::StructDef { .. }
+                                | DeclKind::Constant { .. }
                                 | DeclKind::Label
                         );
                     if visible {

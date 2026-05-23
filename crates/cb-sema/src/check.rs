@@ -1779,6 +1779,14 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
+    #[test]
+    fn pass2_function_sees_hoisted_const() {
+        let result = analyze_src(
+            "Const MAX = 100\nFunction f() As Integer\nReturn MAX\nEndFunction\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
     // ── pass 2 tests: error poisoning ───────────────────────────────────
 
     #[test]
