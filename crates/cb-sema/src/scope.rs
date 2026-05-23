@@ -152,6 +152,17 @@ impl SymbolTable {
         None
     }
 
+    /// Iterate over all symbols declared directly in a scope.
+    pub(crate) fn iter_scope(
+        &self,
+        scope: ScopeId,
+    ) -> impl Iterator<Item = (Symbol, &Declaration)> {
+        self.scopes[scope.0 as usize]
+            .symbols
+            .iter()
+            .map(|(&sym, decl)| (sym, decl))
+    }
+
     /// Update the ConstValue of an existing Constant declaration.
     pub(crate) fn update_const_value(
         &mut self,

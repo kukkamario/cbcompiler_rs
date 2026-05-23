@@ -20,7 +20,7 @@ pub enum Conversion {
 
 /// Records which AST nodes need an implicit conversion applied.
 pub struct ConversionTable {
-    entries: HashMap<NodeId, Conversion>,
+    entries: HashMap<NodeId, (Conversion, Type)>,
 }
 
 impl ConversionTable {
@@ -30,13 +30,18 @@ impl ConversionTable {
         }
     }
 
-    pub(crate) fn insert(&mut self, id: NodeId, conv: Conversion) {
-        self.entries.insert(id, conv);
+    pub(crate) fn insert(&mut self, id: NodeId, conv: Conversion, target: Type) {
+        self.entries.insert(id, (conv, target));
     }
 
     /// Look up whether a node has an implicit conversion.
     pub fn get(&self, id: NodeId) -> Option<Conversion> {
-        self.entries.get(&id).copied()
+        self.entries.get(&id).map(|(c, _)| *c)
+    }
+
+    /// Look up the conversion and target type for a node.
+    pub fn get_with_target(&self, id: NodeId) -> Option<(Conversion, &Type)> {
+        self.entries.get(&id).map(|(c, t)| (*c, t))
     }
 }
 
