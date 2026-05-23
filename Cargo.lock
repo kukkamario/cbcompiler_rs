@@ -108,6 +108,7 @@ dependencies = [
  "cb-diagnostics",
  "cb-frontend",
  "cb-ir",
+ "cb-sema",
  "codespan-reporting",
  "insta",
  "predicates",
@@ -128,6 +129,15 @@ dependencies = [
 [[package]]
 name = "cb-ir"
 version = "0.1.0"
+
+[[package]]
+name = "cb-sema"
+version = "0.1.0"
+dependencies = [
+ "cb-diagnostics",
+ "cb-frontend",
+ "insta",
+]
 
 [[package]]
 name = "cfg-if"

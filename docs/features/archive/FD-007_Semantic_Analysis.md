@@ -1,6 +1,7 @@
 # FD-007: Semantic Analysis
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-23
 **Priority:** High
 **Effort:** High (> 4 hours)
 **Impact:** Bridges the gap between parsing and code generation — without sema, no backend can run.

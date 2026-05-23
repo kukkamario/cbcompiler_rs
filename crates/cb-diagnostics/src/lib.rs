@@ -5,9 +5,11 @@
 //! `cb-frontend`; both frontend and renderers depend on this.
 
 pub mod diagnostic;
+pub mod intern;
 pub mod render;
 pub mod source;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Label, Severity, Span};
+pub use intern::{Interner, Symbol};
 pub use render::{CliRenderer, Renderer, SourceMapFiles};
 pub use source::{FileId, LineIndex, Source, SourceMap};

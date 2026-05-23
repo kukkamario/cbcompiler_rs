@@ -146,9 +146,16 @@ fn main() -> ExitCode {
         diagnostics: parse_diags,
     } = parse(&tokens, &text, file);
 
+    // Run semantic analysis.
+    let sema_result = cb_sema::analyze(&arena, &program, &text, file);
+
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;
-    for d in lex_diags.iter().chain(parse_diags.iter()) {
+    let all_diags = lex_diags
+        .iter()
+        .chain(parse_diags.iter())
+        .chain(sema_result.diagnostics.iter());
+    for d in all_diags {
         if matches!(d.severity, Severity::Error) {
             had_error = true;
         }

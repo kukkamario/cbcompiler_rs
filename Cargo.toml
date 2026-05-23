@@ -7,6 +7,7 @@ members = [
     "crates/cb-driver",
     "crates/cb-frontend",
     "crates/cb-ir",
+    "crates/cb-sema",
 ]
 
 [workspace.package]
@@ -35,3 +36,4 @@ cb-backend-llvm = { path = "crates/cb-backend-llvm" }
 cb-diagnostics = { path = "crates/cb-diagnostics" }
 cb-frontend = { path = "crates/cb-frontend" }
 cb-ir = { path = "crates/cb-ir" }
+cb-sema = { path = "crates/cb-sema" }
