@@ -1,0 +1,16 @@
+[package]
+name = "cb-sema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+cb-diagnostics = { path = "../cb-diagnostics" }
+cb-frontend = { path = "../cb-frontend" }
+
+[dev-dependencies]
+insta = { workspace = true }
+
+[lints]
+workspace = true
