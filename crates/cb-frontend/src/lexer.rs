@@ -24,6 +24,10 @@ pub struct LexerOptions {
 /// paired with structured [`Diagnostic`]s. A terminal [`TokenKind::Eof`] token
 /// with a zero-length span is always appended.
 pub fn tokenize(src: &str, file: FileId, opts: LexerOptions) -> (Vec<Token>, Vec<Diagnostic>) {
+    debug_assert!(
+        src.len() <= u32::MAX as usize,
+        "source too large for u32 offsets"
+    );
     let mut lex = Lexer::new(src, file, opts);
     lex.run();
     (lex.tokens, lex.diagnostics)
@@ -91,13 +95,22 @@ impl<'src> Lexer<'src> {
         b
     }
 
-    /// Advance by the next char's UTF-8 length and return the char.
+    /// Advance by the next char's UTF-8 length and return the char. If the
+    /// cursor is at EOF, this is a no-op and returns `'\0'` — every in-tree
+    /// caller has an explicit peek-guard, so the EOF arm is unreachable on
+    /// valid input. The `debug_assert!` surfaces the bug in debug builds; the
+    /// saturating release-mode behaviour preserves the lexer's "never aborts"
+    /// contract even if a future byte-level guard ever desynchronises.
     fn bump_char(&mut self) -> char {
-        // Safe because `src: &str` guarantees valid UTF-8.
+        debug_assert!(!self.at_eof(), "bump_char at EOF");
         let rest = &self.src[self.pos as usize..];
-        let c = rest.chars().next().expect("bump_char at EOF");
-        self.pos += c.len_utf8() as u32;
-        c
+        match rest.chars().next() {
+            Some(c) => {
+                self.pos += c.len_utf8() as u32;
+                c
+            }
+            None => '\0',
+        }
     }
 
     fn eat_while_byte(&mut self, mut pred: impl FnMut(u8) -> bool) {
@@ -190,9 +203,12 @@ impl<'src> Lexer<'src> {
                             ));
                         }
                     } else {
-                        // Should be impossible: src is valid UTF-8 and we're not at EOF.
-                        // Advance one byte to make progress.
-                        self.pos += 1;
+                        // Should be impossible: src is valid UTF-8 and we're
+                        // not at EOF. Use `bump_char` (saturating) rather than
+                        // `self.pos += 1` so a future regression doesn't
+                        // desynchronise the cursor from a multi-byte boundary
+                        // and break `&str` slicing in `peek_char`.
+                        self.bump_char();
                     }
                 }
             }
