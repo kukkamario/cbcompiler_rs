@@ -8,7 +8,7 @@
 //!   `Expr::FloatLit(f64)` is reachable from them.
 
 use crate::span::Span;
-use crate::token::{Kw, Sigil, StrLitKind};
+use crate::token::{FloatBits, Kw, Sigil, StrLitKind};
 
 /// Index into [`Arena`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -78,8 +78,8 @@ pub enum Node {
 /// Expression nodes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
-    IntLit(i64),
-    FloatLit(f64),
+    IntLit(u64),
+    FloatLit(FloatBits),
     BoolLit(bool),
     NullLit,
     StrLit {

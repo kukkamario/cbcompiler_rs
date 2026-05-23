@@ -8,7 +8,9 @@ use cb_diagnostics::{Diagnostic, Label};
 
 use crate::keywords;
 use crate::span::{FileId, Span};
-use crate::token::{CommentKind, LexErrorKind, Op, Punct, Sigil, StrLitKind, Token, TokenKind};
+use crate::token::{
+    CommentKind, FloatBits, LexErrorKind, Op, Punct, Sigil, StrLitKind, Token, TokenKind,
+};
 
 /// Options controlling lexer behaviour.
 #[derive(Copy, Clone, Debug, Default)]
@@ -33,11 +35,13 @@ pub fn tokenize(src: &str, file: FileId, opts: LexerOptions) -> (Vec<Token>, Vec
     (lex.tokens, lex.diagnostics)
 }
 
-// Error codes (E01xx — lexer).
+// Error codes (E01xx — lexer). E0104 was previously `NumberOverflow` and is
+// retired: range-checking against the inferred signed target type now lives
+// in sema; the lexer only flags values no type could represent and emits
+// `MalformedNumber` (E0107) for both shape and out-of-`u64`-range cases.
 const E_NEWLINE_IN_STRING: &str = "E0101";
 const E_UNTERMINATED_STRING: &str = "E0102";
 const E_UNTERMINATED_BLOCK_COMMENT: &str = "E0103";
-const E_NUMBER_OVERFLOW: &str = "E0104";
 const E_INVALID_DIGIT_SEPARATOR: &str = "E0105";
 const E_UNEXPECTED_CHAR: &str = "E0106";
 const E_MALFORMED_NUMBER: &str = "E0107";
@@ -181,7 +185,7 @@ impl<'src> Lexer<'src> {
                     // ASCII byte that doesn't begin any token.
                     self.bump_byte();
                     let span = self.current_span(start);
-                    self.push_token(TokenKind::Error(LexErrorKind::InvalidChar), span);
+                    self.push_token(TokenKind::Error(LexErrorKind::UnexpectedChar), span);
                     self.diagnostics.push(Diagnostic::error(
                         E_UNEXPECTED_CHAR,
                         format!("unexpected character `{}`", b as char),
@@ -195,7 +199,7 @@ impl<'src> Lexer<'src> {
                         } else {
                             self.bump_char();
                             let span = self.current_span(start);
-                            self.push_token(TokenKind::Error(LexErrorKind::InvalidChar), span);
+                            self.push_token(TokenKind::Error(LexErrorKind::UnexpectedChar), span);
                             self.diagnostics.push(Diagnostic::error(
                                 E_UNEXPECTED_CHAR,
                                 format!("unexpected character `{}`", c),
@@ -646,7 +650,7 @@ impl<'src> Lexer<'src> {
                     continue;
                 }
                 if n >= buf.len() {
-                    self.report_number_overflow(span);
+                    self.report_malformed_number(span);
                     return;
                 }
                 buf[n] = b;
@@ -654,7 +658,7 @@ impl<'src> Lexer<'src> {
             }
             if frac_hi > frac_lo {
                 if n >= buf.len() {
-                    self.report_number_overflow(span);
+                    self.report_malformed_number(span);
                     return;
                 }
                 buf[n] = b'.';
@@ -664,7 +668,7 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
                     if n >= buf.len() {
-                        self.report_number_overflow(span);
+                        self.report_malformed_number(span);
                         return;
                     }
                     buf[n] = b;
@@ -697,7 +701,7 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
                     if n >= buf.len() {
-                        self.report_number_overflow(span);
+                        self.report_malformed_number(span);
                         return;
                     }
                     buf[n] = b;
@@ -707,31 +711,33 @@ impl<'src> Lexer<'src> {
             let s = match std::str::from_utf8(&buf[..n]) {
                 Ok(s) => s,
                 Err(_) => {
-                    self.report_number_overflow(span);
+                    self.report_malformed_number(span);
                     return;
                 }
             };
             match s.parse::<f64>() {
                 Ok(v) if v.is_finite() => {
-                    self.push_token(TokenKind::FloatLit(v), span);
+                    self.push_token(TokenKind::FloatLit(FloatBits::from_f64(v)), span);
                 }
                 _ => {
-                    self.report_number_overflow(span);
+                    self.report_malformed_number(span);
                 }
             }
         } else {
-            // Integer.
+            // Integer. Parse as `u64` — the lexer never commits to a signed
+            // representation. Range-checking against the inferred signed
+            // target type is sema's job (`cb_syntax.md` §3.4).
             let raw = &self.bytes[int_lo as usize..int_hi as usize];
             let stripped = match Self::strip_underscores(raw, &mut scratch) {
                 Some(s) => s,
                 None => {
-                    self.report_number_overflow(span);
+                    self.report_malformed_number(span);
                     return;
                 }
             };
-            match stripped.parse::<i64>() {
+            match stripped.parse::<u64>() {
                 Ok(v) => self.push_token(TokenKind::IntLit(v), span),
-                Err(_) => self.report_number_overflow(span),
+                Err(_) => self.report_malformed_number(span),
             }
         }
     }
@@ -789,13 +795,13 @@ impl<'src> Lexer<'src> {
         let stripped = match Self::strip_underscores(raw, &mut scratch) {
             Some(s) => s,
             None => {
-                self.report_number_overflow(span);
+                self.report_malformed_number(span);
                 return;
             }
         };
-        match i64::from_str_radix(stripped, 16) {
+        match u64::from_str_radix(stripped, 16) {
             Ok(v) => self.push_token(TokenKind::IntLit(v), span),
-            Err(_) => self.report_number_overflow(span),
+            Err(_) => self.report_malformed_number(span),
         }
     }
 
@@ -848,23 +854,28 @@ impl<'src> Lexer<'src> {
         let stripped = match Self::strip_underscores(raw, &mut scratch) {
             Some(s) => s,
             None => {
-                self.report_number_overflow(span);
+                self.report_malformed_number(span);
                 return;
             }
         };
-        match i64::from_str_radix(stripped, 2) {
+        match u64::from_str_radix(stripped, 2) {
             Ok(v) => self.push_token(TokenKind::IntLit(v), span),
-            Err(_) => self.report_number_overflow(span),
+            Err(_) => self.report_malformed_number(span),
         }
     }
 
-    fn report_number_overflow(&mut self, span: Span) {
+    /// Emit `MalformedNumber` (E0107) — used for both structurally malformed
+    /// literals (e.g. `1e` with no exponent digits) and values that exceed
+    /// the lexer's representable range (`u64` for integers, finite `f64` for
+    /// floats). Range-checking against the inferred signed target type is
+    /// sema's job, not the lexer's.
+    fn report_malformed_number(&mut self, span: Span) {
         self.diagnostics.push(Diagnostic::error(
-            E_NUMBER_OVERFLOW,
-            "numeric literal is out of range",
+            E_MALFORMED_NUMBER,
+            "numeric literal is malformed or out of representable range",
             Label::new(span),
         ));
-        self.push_token(TokenKind::Error(LexErrorKind::NumberOverflow), span);
+        self.push_token(TokenKind::Error(LexErrorKind::MalformedNumber), span);
     }
 
     /// Returns true if `raw` (a digit run without prefix) has any separator
@@ -1014,7 +1025,7 @@ impl<'src> Lexer<'src> {
                     format!("unexpected character `{}`", b as char),
                     Label::new(span),
                 ));
-                self.push_token(TokenKind::Error(LexErrorKind::InvalidChar), span);
+                self.push_token(TokenKind::Error(LexErrorKind::UnexpectedChar), span);
             }
         }
     }

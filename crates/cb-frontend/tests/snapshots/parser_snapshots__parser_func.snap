@@ -38,7 +38,7 @@ Program (5 top-level statements)
         Expr::BinOp(Mul) @ 408..413
           Expr::Ident(sigil=None) @ 408..409
           Expr::Ident(sigil=None) @ 412..413
-        Expr::FloatLit(3.14159) @ 416..423
+        Expr::FloatLit(FloatBits(3.14159)) @ 416..423
   Stmt::Function(params=2, return_sigil=None, has_return_ty=true) @ 466..552
     Param(named, sigil=Float) @ 482..491
     Param(named, has_default) @ 493..502

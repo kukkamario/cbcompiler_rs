@@ -246,7 +246,7 @@ fn describe_token(kind: TokenKind, src: &str, span: Span) -> String {
             format!("identifier `{lexeme}`")
         }
         TokenKind::IntLit(v) => format!("integer literal `{v}`"),
-        TokenKind::FloatLit(v) => format!("float literal `{v}`"),
+        TokenKind::FloatLit(v) => format!("float literal `{}`", v.to_f64()),
         TokenKind::StrLit(_) => "string literal".to_string(),
         TokenKind::Punct(p) => format!("`{}`", punct_str(p)),
         TokenKind::Op(_) => {
@@ -1128,7 +1128,7 @@ impl<'t> Parser<'t> {
             // Must be a positive integer literal (§6.3). Anything else → E0213.
             let n_tok = self.cursor.peek_tok();
             match n_tok.kind {
-                TokenKind::IntLit(v) if v > 0 && v <= u32::MAX as i64 => {
+                TokenKind::IntLit(v) if v > 0 && v <= u32::MAX as u64 => {
                     self.cursor.bump();
                     count = Some(v as u32);
                     span = start.merge(n_tok.span);
@@ -2618,7 +2618,7 @@ mod expr_tests {
         }
     }
 
-    fn assert_int(arena: &Arena, id: NodeId, expected: i64) {
+    fn assert_int(arena: &Arena, id: NodeId, expected: u64) {
         match expr_of(arena, id) {
             Expr::IntLit(v) => assert_eq!(*v, expected, "wrong int literal"),
             other => panic!("expected IntLit({expected}), got {other:?}"),
@@ -2970,7 +2970,7 @@ mod stmt_tests {
         }
     }
 
-    fn assert_int(arena: &Arena, id: NodeId, expected: i64) {
+    fn assert_int(arena: &Arena, id: NodeId, expected: u64) {
         match expr_of(arena, id) {
             Expr::IntLit(v) => assert_eq!(*v, expected, "wrong int literal"),
             other => panic!("expected IntLit({expected}), got {other:?}"),
@@ -3116,7 +3116,7 @@ mod stmt_tests {
                     assert_ident(&r.arena, *callee, src, "MySub");
                     assert_eq!(args.len(), 3);
                     match expr_of(&r.arena, args[0]) {
-                        Expr::FloatLit(v) => assert!((v - 0.42).abs() < 1e-9),
+                        Expr::FloatLit(v) => assert!((v.to_f64() - 0.42).abs() < 1e-9),
                         other => panic!("expected FloatLit, got {other:?}"),
                     }
                     match expr_of(&r.arena, args[1]) {
@@ -3373,7 +3373,7 @@ mod stmt_tests {
 
     #[test]
     fn recovery_garbage_then_stmt() {
-        // `@` lexes as Error(InvalidChar). The parser recovers via
+        // `@` lexes as Error(UnexpectedChar). The parser recovers via
         // sync_to_stmt_boundary, then parses `x = 1`. There should be at
         // least one diagnostic.
         let src = "@ x = 1\n";
@@ -4337,7 +4337,7 @@ mod decl_tests {
         }
     }
 
-    fn assert_int(arena: &Arena, id: NodeId, expected: i64) {
+    fn assert_int(arena: &Arena, id: NodeId, expected: u64) {
         match expr_of(arena, id) {
             Expr::IntLit(v) => assert_eq!(*v, expected),
             other => panic!("expected IntLit({expected}), got {other:?}"),
@@ -4393,7 +4393,7 @@ mod decl_tests {
                 assert!(ty.is_none());
                 let init = init.expect("init");
                 match expr_of(&r.arena, init) {
-                    Expr::FloatLit(v) => assert!((v - 0.0).abs() < 1e-9),
+                    Expr::FloatLit(v) => assert!((v.to_f64() - 0.0).abs() < 1e-9),
                     other => panic!("expected FloatLit, got {other:?}"),
                 }
             }
@@ -4480,7 +4480,7 @@ mod decl_tests {
                 assert_eq!(*sigil, Some(Sigil::Float));
                 assert!(ty.is_none());
                 match expr_of(&r.arena, *value) {
-                    Expr::FloatLit(v) => assert!((v - 2.5).abs() < 1e-9),
+                    Expr::FloatLit(v) => assert!((v.to_f64() - 2.5).abs() < 1e-9),
                     other => panic!("expected FloatLit, got {other:?}"),
                 }
             }

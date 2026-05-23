@@ -12,19 +12,14 @@
 use crate::span::Span;
 
 /// A lexed token: a kind plus the source span it came from.
-///
-/// Not `Eq` because [`TokenKind::FloatLit`] carries an `f64`; use
-/// `PartialEq` and treat NaN as not equal to itself.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
 }
 
 /// The kind of a [`Token`].
-///
-/// Not `Eq` (see [`Token`]).
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
     /// Identifier; lexeme recovered from source via `span`. `sigil` is the
     /// trailing type sigil (`%`, `#`, `$`, `!`) if any. The sigil's bytes are
@@ -34,8 +29,14 @@ pub enum TokenKind {
         sigil: Option<Sigil>,
     },
     Keyword(Kw),
-    IntLit(i64),
-    FloatLit(f64),
+    /// Unsigned-magnitude integer literal value. The lexer is intentionally
+    /// type-agnostic — range-checking against the inferred signed/unsigned
+    /// target type is sema's job (§3.4 of `cb_syntax.md`).
+    IntLit(u64),
+    /// Float literal stored as raw IEEE-754 bits so [`Token`] can be `Eq`.
+    /// Bit-equality treats two NaNs with the same payload as equal, which is
+    /// the right thing for parser-side token comparisons.
+    FloatLit(FloatBits),
     StrLit(StrLitKind),
     Punct(Punct),
     Op(Op),
@@ -74,6 +75,37 @@ impl Sigil {
             Sigil::String => '$',
             Sigil::Bool => '!',
         }
+    }
+}
+
+/// Bit-pattern wrapper around an IEEE-754 `f64`. Used by
+/// [`TokenKind::FloatLit`] so [`Token`] can be `Eq` and `Hash` — equality is
+/// raw-bit equality, which treats two NaNs with the same payload as equal
+/// (and two NaNs with different payloads as unequal). This is what callers
+/// comparing tokens actually want; the IEEE "NaN != NaN" rule is the wrong
+/// default at the lexer level.
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct FloatBits(u64);
+
+impl FloatBits {
+    pub const fn from_f64(v: f64) -> Self {
+        Self(v.to_bits())
+    }
+
+    pub const fn to_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+
+    pub const fn to_bits(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for FloatBits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Use Debug for the inner `f64` so scientific notation survives for
+        // very large / very small values (e.g. `1.24e24`, `1e-7`).
+        write!(f, "FloatBits({:?})", self.to_f64())
     }
 }
 
@@ -284,17 +316,14 @@ pub enum LexErrorKind {
     /// Underscore at an invalid position in a numeric literal (adjacent to a
     /// prefix, doubled, or trailing).
     InvalidDigitSeparator,
-    /// Numeric literal value exceeds `i64`/`f64` range.
-    NumberOverflow,
-    /// Numeric literal is structurally malformed (e.g. exponent with no
-    /// digits — `1e`, `1e+`). Distinct from `NumberOverflow` (value out of
-    /// range) and `InvalidDigitSeparator` (underscore placement).
+    /// Numeric literal is structurally malformed *or* exceeds the lexer's
+    /// representable range (`u64` for integers, finite `f64` for floats).
+    /// Range-checking against the inferred signed target type is sema's job;
+    /// the lexer only flags values no type could represent.
     MalformedNumber,
-    /// Bare character the scanner doesn't recognize.
+    /// Bare character the scanner doesn't recognize, or a character that
+    /// can't start any token in CoolBasic.
     UnexpectedChar,
-    /// A character that can never start a token in CoolBasic (e.g. `@`, `~`).
-    /// Distinct from UnexpectedChar in case we want a different message later.
-    InvalidChar,
 }
 
 #[cfg(test)]

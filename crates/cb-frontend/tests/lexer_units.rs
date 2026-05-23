@@ -35,12 +35,12 @@ fn kinds(tokens: &[Token]) -> Vec<TokenKind> {
 
 fn float_value(t: Token) -> f64 {
     match t.kind {
-        TokenKind::FloatLit(v) => v,
+        TokenKind::FloatLit(v) => v.to_f64(),
         other => panic!("expected FloatLit, got {other:?}"),
     }
 }
 
-fn int_value(t: Token) -> i64 {
+fn int_value(t: Token) -> u64 {
     match t.kind {
         TokenKind::IntLit(v) => v,
         other => panic!("expected IntLit, got {other:?}"),
@@ -428,7 +428,7 @@ mod numbers {
     #[test]
     fn hex_with_separators() {
         let toks = lex("$dead_beef");
-        assert_eq!(int_value(toks[0]), 0xDEAD_BEEFi64);
+        assert_eq!(int_value(toks[0]), 0xDEAD_BEEFu64);
     }
 
     #[test]
@@ -895,6 +895,45 @@ mod bom {
     }
 }
 
+mod float_bits {
+    use super::*;
+    use cb_frontend::FloatBits;
+
+    #[test]
+    fn finite_float_lit_round_trips_through_bits() {
+        let toks = lex("0.5");
+        match toks[0].kind {
+            TokenKind::FloatLit(bits) => assert_eq!(bits.to_f64(), 0.5),
+            other => panic!("expected FloatLit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn float_lit_tokens_compare_by_bits_not_ieee() {
+        // Two tokens with the same NaN bit pattern are equal (unlike raw `f64`
+        // where NaN != NaN). Different payloads stay unequal.
+        let nan_payload_a = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0001));
+        let nan_payload_b = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0001));
+        let nan_payload_c = FloatBits::from_f64(f64::from_bits(0x7ff8_0000_0000_0002));
+
+        let tok_a = Token {
+            kind: TokenKind::FloatLit(nan_payload_a),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+        let tok_b = Token {
+            kind: TokenKind::FloatLit(nan_payload_b),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+        let tok_c = Token {
+            kind: TokenKind::FloatLit(nan_payload_c),
+            span: cb_frontend::span::Span::new(0, 0, FileId(0)),
+        };
+
+        assert_eq!(tok_a, tok_b, "same NaN payload must compare equal");
+        assert_ne!(tok_a, tok_c, "different NaN payloads must compare unequal");
+    }
+}
+
 mod errors {
     use super::*;
     use cb_frontend::LexErrorKind;
@@ -947,16 +986,41 @@ mod errors {
     }
 
     #[test]
-    fn number_overflow_e0104() {
-        let (toks, diags) = lex_with_diags("99999999999999999999");
+    fn number_above_u64_max_emits_malformed_number_e0107() {
+        // 21-digit decimal exceeds `u64::MAX` (~1.8e19). The lexer rejects
+        // values no signed *or* unsigned 64-bit type could represent.
+        let (toks, diags) = lex_with_diags("999999999999999999999");
         assert!(
-            has_error_kind(&toks, LexErrorKind::NumberOverflow),
-            "expected NumberOverflow token; got {toks:?}"
+            has_error_kind(&toks, LexErrorKind::MalformedNumber),
+            "expected MalformedNumber token; got {toks:?}"
         );
         assert!(
-            has_diag_code(&diags, "E0104"),
-            "expected E0104 diagnostic; got {diags:?}"
+            has_diag_code(&diags, "E0107"),
+            "expected E0107 diagnostic; got {diags:?}"
         );
+    }
+
+    #[test]
+    fn int_literal_at_signed_boundary_lexes_ok() {
+        // `i64::MAX = 9_223_372_036_854_775_807`; one past that
+        // (`9_223_372_036_854_775_808`) is a valid `ULong` literal and must
+        // lex without a diagnostic — sema decides whether the inferred type
+        // can hold the value.
+        for s in [
+            "9223372036854775807",
+            "9223372036854775808",
+            "18446744073709551615", // u64::MAX
+        ] {
+            let (toks, diags) = lex_with_diags(s);
+            assert!(
+                diags.is_empty(),
+                "unexpected diagnostics for {s}: {diags:?}"
+            );
+            assert!(
+                matches!(toks[0].kind, TokenKind::IntLit(_)),
+                "expected IntLit for {s}; got {toks:?}"
+            );
+        }
     }
 
     #[test]
@@ -1076,17 +1140,9 @@ mod errors {
     #[test]
     fn invalid_char_at_top_level_e0106() {
         let (toks, diags) = lex_with_diags("@");
-        // Either InvalidChar or UnexpectedChar.
-        let has_err = toks.iter().any(|t| {
-            matches!(
-                t.kind,
-                TokenKind::Error(LexErrorKind::InvalidChar)
-                    | TokenKind::Error(LexErrorKind::UnexpectedChar)
-            )
-        });
         assert!(
-            has_err,
-            "expected InvalidChar or UnexpectedChar token; got {toks:?}"
+            has_error_kind(&toks, LexErrorKind::UnexpectedChar),
+            "expected UnexpectedChar token; got {toks:?}"
         );
         assert!(
             has_diag_code(&diags, "E0106"),

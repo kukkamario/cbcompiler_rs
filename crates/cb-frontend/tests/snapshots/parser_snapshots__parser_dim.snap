@@ -15,7 +15,7 @@ Program (9 top-level statements)
   Stmt::Global(names=2, has_ty=true, has_init=false) @ 328..348
     TypeExpr::Primitive(float) @ 343..348
   Stmt::Const(is_global=false, sigil=Float, has_ty=false) @ 395..414
-    Expr::FloatLit(3.14159) @ 407..414
+    Expr::FloatLit(FloatBits(3.14159)) @ 407..414
   Stmt::Const(is_global=true, sigil=String, has_ty=false) @ 469..493
     Expr::StrLit("1.0.0", Plain) @ 486..493
   Stmt::Redim(rank=1) @ 549..572
