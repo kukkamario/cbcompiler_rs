@@ -3,6 +3,7 @@
 //! Backend-agnostic. Lowering to IR happens in [`cb_ir`].
 
 pub mod ast;
+pub mod ast_print;
 pub mod keywords;
 pub mod lexer;
 pub mod parser;
