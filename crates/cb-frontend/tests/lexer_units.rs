@@ -237,12 +237,15 @@ mod keywords {
     }
 
     #[test]
-    fn int_and_integer_alias_to_same_keyword() {
+    fn int_and_integer_preserve_spelling() {
+        // FD-004 #3: `Int`/`Integer` are aliases but lex to distinct keyword
+        // variants so diagnostics can render the user's spelling. Downstream
+        // code (parser, sema) treats them as equivalent.
         let int_toks = lex("Int");
         let integer_toks = lex("Integer");
         assert_eq!(
             kinds(&int_toks),
-            vec![TokenKind::Keyword(Kw::Integer), TokenKind::Eof]
+            vec![TokenKind::Keyword(Kw::Int), TokenKind::Eof]
         );
         assert_eq!(
             kinds(&integer_toks),
@@ -251,12 +254,13 @@ mod keywords {
     }
 
     #[test]
-    fn uint_and_uinteger_alias_to_same_keyword() {
+    fn uint_and_uinteger_preserve_spelling() {
+        // FD-004 #3: see int_and_integer_preserve_spelling.
         let uint_toks = lex("UInt");
         let uinteger_toks = lex("UInteger");
         assert_eq!(
             kinds(&uint_toks),
-            vec![TokenKind::Keyword(Kw::UInteger), TokenKind::Eof]
+            vec![TokenKind::Keyword(Kw::UInt), TokenKind::Eof]
         );
         assert_eq!(
             kinds(&uinteger_toks),

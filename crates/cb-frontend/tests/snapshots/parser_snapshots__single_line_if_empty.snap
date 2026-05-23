@@ -1,0 +1,32 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 531
+expression: "snapshot_parser_fixture(\"single_line_if_empty\")"
+---
+Program (4 top-level statements)
+  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 346..348
+    Expr::BinOp(Gt) @ 349..354
+      Expr::Ident(sigil=None) @ 349..350
+      Expr::IntLit(0) @ 353..354
+  Stmt::Assign @ 362..367
+    Expr::Ident(sigil=None) @ 362..363
+    Expr::IntLit(1) @ 366..367
+  Stmt::If(form=SingleLine, elseifs=0, has_else=true) @ 424..448
+    Expr::BinOp(Gt) @ 427..432
+      Expr::Ident(sigil=None) @ 427..428
+      Expr::IntLit(0) @ 431..432
+    Stmt::Assign @ 443..448
+      Expr::Ident(sigil=None) @ 443..444
+      Expr::IntLit(2) @ 447..448
+  Stmt::If(form=SingleLine, elseifs=0, has_else=true) @ 559..578
+    Expr::BinOp(Gt) @ 562..567
+      Expr::Ident(sigil=None) @ 562..563
+      Expr::IntLit(0) @ 566..567
+    Stmt::Assign @ 573..578
+      Expr::Ident(sigil=None) @ 573..574
+      Expr::IntLit(3) @ 577..578
+
+--- DIAGNOSTICS ---
+ERROR[E0215] single-line `If` requires at least one statement after `Then` @ 360..361
+ERROR[E0215] single-line `If` requires at least one statement after `Then` @ 438..442
+ERROR[E0215] single-line `If` requires at least one statement after `Else` @ 584..585

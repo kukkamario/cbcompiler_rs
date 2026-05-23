@@ -1,0 +1,20 @@
+// cb_syntax.md §1.1 — `\` at end of line fuses the lines unconditionally.
+// The continuation MUST be transparent to the parser regardless of lexer
+// trivia mode.
+
+total = a + b + c + \
+    d + e + f
+
+// Continuation between operator and operand on consecutive lines.
+sum = 1 \
+    + 2 \
+    + 3
+
+// Continuation inside an argument list.
+result = foo(a, \
+    b, \
+    c)
+
+// Continuation between `Then` and the single-line body.
+If x > 0 Then \
+    y = 1

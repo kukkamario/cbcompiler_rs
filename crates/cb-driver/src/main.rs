@@ -95,9 +95,10 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.push(*array);
                 out.extend_from_slice(indices);
             }
-            Expr::Field { target, name } => {
+            Expr::Field { target, .. } => {
+                // FD-004 #12: `Expr::Field`'s name is a bare `Span`, not a
+                // child node, so there is nothing extra to traverse here.
                 out.push(*target);
-                out.push(*name);
             }
             Expr::Paren { inner } => out.push(*inner),
             Expr::New(NewKind::Type(t)) => out.push(*t),

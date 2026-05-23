@@ -1,0 +1,13 @@
+// FD-004 #8: `Redim` accepts array rank markers on the element type.
+
+// Plain — resize a 1D Integer array.
+Redim arr1 As Integer[10]
+
+// 2D dim list.
+Redim arr2 As Float[2, 3]
+
+// Element type is itself an array (matrix-of-arrays kind of shape).
+Redim arr3 As Integer[][5]
+
+// Element type is 2D array.
+Redim arr4 As Float[,][3, 3]

@@ -1,5 +1,6 @@
 ---
 source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 471
 expression: "snapshot_parser_fixture(\"parser_loops\")"
 ---
 Program (7 top-level statements)
@@ -62,4 +63,3 @@ Program (7 top-level statements)
         Expr::Ident(sigil=None) @ 602..607
         Expr::Field @ 608..619
           Expr::Ident(sigil=None) @ 608..612
-          Expr::Ident(sigil=None) @ 613..619

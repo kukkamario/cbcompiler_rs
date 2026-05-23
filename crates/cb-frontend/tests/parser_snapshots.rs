@@ -315,9 +315,9 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.push(*array);
                 out.extend_from_slice(indices);
             }
-            Expr::Field { target, name } => {
+            Expr::Field { target, .. } => {
+                // FD-004 #12: field name is a bare Span, not a child node.
                 out.push(*target);
-                out.push(*name);
             }
             Expr::Paren { inner } => out.push(*inner),
             Expr::New(NewKind::Type(t)) => out.push(*t),
@@ -519,4 +519,98 @@ fn parser_includes() {
 #[test]
 fn parser_break_continue() {
     insta::assert_snapshot!(snapshot_parser_fixture("parser_break_continue"));
+}
+
+#[test]
+fn continuation_multi_line() {
+    insta::assert_snapshot!(snapshot_parser_fixture("continuation_multi_line"));
+}
+
+#[test]
+fn single_line_if_empty() {
+    insta::assert_snapshot!(snapshot_parser_fixture("single_line_if_empty"));
+}
+
+#[test]
+fn implicit_decl_as() {
+    insta::assert_snapshot!(snapshot_parser_fixture("implicit_decl_as"));
+}
+
+#[test]
+fn next_with_sigil() {
+    insta::assert_snapshot!(snapshot_parser_fixture("next_with_sigil"));
+}
+
+#[test]
+fn redim_array_element_type() {
+    insta::assert_snapshot!(snapshot_parser_fixture("redim_array_element_type"));
+}
+
+#[test]
+fn select_duplicate_default() {
+    insta::assert_snapshot!(snapshot_parser_fixture("select_duplicate_default"));
+}
+
+#[test]
+fn case_comma_list() {
+    insta::assert_snapshot!(snapshot_parser_fixture("case_comma_list"));
+}
+
+#[test]
+fn continuation_multi_line_preserve_trivia() {
+    // Verifies that `\` line continuations are transparent to the parser even
+    // when the lexer emits them as tokens (preserve_trivia=true). Same source
+    // as the default snapshot; differs from the default tokenizer run only in
+    // that the Continuation tokens are present in the stream.
+    insta::assert_snapshot!(
+        "continuation_multi_line_preserve_trivia",
+        snapshot_parser_fixture_preserve_trivia("continuation_multi_line")
+    );
+}
+
+fn snapshot_parser_fixture_preserve_trivia(name: &str) -> String {
+    let path = format!("tests/fixtures/{name}.cb");
+    let src = std::fs::read_to_string(&path).expect("fixture missing");
+    let opts = LexerOptions {
+        preserve_trivia: true,
+    };
+    let (tokens, lex_diags) = tokenize(&src, FileId(0), opts);
+    // Drop everything except significant tokens + Continuation, so the parser
+    // is exercised with the exact mix the FD-004 #1 fix targets. We KEEP
+    // Continuation tokens precisely so the cursor's skip path runs.
+    let tokens: Vec<_> = tokens
+        .into_iter()
+        .filter(|t| {
+            !matches!(
+                t.kind,
+                cb_frontend::TokenKind::Whitespace | cb_frontend::TokenKind::Comment(_)
+            )
+        })
+        .collect();
+    let r = parse(&tokens, &src, FileId(0));
+
+    let mut out = String::new();
+    writeln!(out, "Program ({} top-level statements)", r.program.len()).unwrap();
+    for &id in &r.program {
+        print_node(&r.arena, id, 1, &mut out);
+    }
+
+    let mut all_diags: Vec<&Diagnostic> = lex_diags.iter().chain(r.diagnostics.iter()).collect();
+    if !all_diags.is_empty() {
+        all_diags.sort_by_key(|d| d.primary.span.start);
+        out.push_str("\n--- DIAGNOSTICS ---\n");
+        for d in &all_diags {
+            let sev = severity_str(d.severity);
+            writeln!(
+                out,
+                "{sev}[{}] {} @ {}..{}",
+                d.code.unwrap_or("----"),
+                d.message,
+                d.primary.span.start,
+                d.primary.span.end,
+            )
+            .unwrap();
+        }
+    }
+    out
 }

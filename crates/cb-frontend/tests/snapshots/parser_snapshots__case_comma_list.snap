@@ -1,0 +1,34 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 556
+expression: "snapshot_parser_fixture(\"case_comma_list\")"
+---
+Program (1 top-level statements)
+  Stmt::Select(arms=4) @ 68..207
+    Expr::Ident(sigil=None) @ 75..76
+    CaseArm::Case @ 81..109
+      Expr::IntLit(1) @ 86..87
+      Expr::IntLit(2) @ 89..90
+      Expr::IntLit(3) @ 92..93
+      Stmt::ExprStmt @ 102..109
+        Expr::Call(args=1) @ 102..109
+          Expr::Ident(sigil=None) @ 102..107
+          Expr::IntLit(1) @ 108..109
+    CaseArm::Case @ 114..136
+      Expr::IntLit(5) @ 119..120
+      Stmt::ExprStmt @ 129..136
+        Expr::Call(args=1) @ 129..136
+          Expr::Ident(sigil=None) @ 129..134
+          Expr::IntLit(5) @ 135..136
+    CaseArm::Case @ 141..169
+      Expr::IntLit(10) @ 146..148
+      Expr::IntLit(20) @ 150..152
+      Stmt::ExprStmt @ 161..169
+        Expr::Call(args=1) @ 161..169
+          Expr::Ident(sigil=None) @ 161..166
+          Expr::IntLit(10) @ 167..169
+    CaseArm::Default @ 174..197
+      Stmt::ExprStmt @ 190..197
+        Expr::Call(args=1) @ 190..197
+          Expr::Ident(sigil=None) @ 190..195
+          Expr::IntLit(0) @ 196..197

@@ -26,13 +26,21 @@ pub const E_MISMATCHED_END_KEYWORD: &str = "E0204";
 pub const E_INVALID_TYPE_EXPR: &str = "E0205";
 pub const E_BAD_STATEMENT: &str = "E0206";
 pub const E_RESERVED_WORD_AS_NAME: &str = "E0207";
-pub const E_INVALID_ESCAPE: &str = "E0208";
-pub const E_BAD_RAW_INDENT: &str = "E0209";
+// E0208 (E_INVALID_ESCAPE) and E0209 (E_BAD_RAW_INDENT) live in
+// `string_value.rs` next to their emission sites. FD-004 #17.
 pub const E_MULTI_NAME_NOT_ALLOWED: &str = "E0210";
 pub const E_FIELD_OUTSIDE_TYPE_BODY: &str = "E0211";
 pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: &str = "E0212";
 pub const E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL: &str = "E0213";
 pub const E_LABEL_HAS_SIGIL: &str = "E0214";
+pub const E_EMPTY_SINGLE_LINE_IF_BODY: &str = "E0215";
+pub const E_DUPLICATE_DEFAULT: &str = "E0216";
+pub const E_NEXT_SIGIL_MISMATCH: &str = "E0217";
+/// Internal compiler error — emitted only from defensive branches that
+/// should be unreachable by the parser invariants. Surfaced (rather than
+/// `panic!`) so a future change that violates the invariants produces a
+/// clear failure instead of a hard crash.
+pub const E_INTERNAL_PARSER: &str = "E0299";
 
 /// Internal error type that propagates up to `parse_stmt`'s recovery point.
 /// Carries a structured diagnostic and the span where parsing failed. The
@@ -65,11 +73,28 @@ pub(crate) struct Cursor<'t> {
 
 impl<'t> Cursor<'t> {
     pub(crate) fn new(tokens: &'t [Token], src: &'t str, file: FileId) -> Self {
-        Self {
+        let mut c = Self {
             tokens,
             pos: 0,
             src,
             file,
+        };
+        c.skip_continuations();
+        c
+    }
+
+    /// Advance `pos` past any [`TokenKind::Continuation`] tokens at the front
+    /// of the lookahead. Per `cb_syntax.md` §1.1 the `\` line-continuation
+    /// fuses the surrounding lines unconditionally, so the parser must treat
+    /// the token as invisible. Maintained as an invariant: every public
+    /// `Cursor` mutation leaves `pos` either past the slice or on a
+    /// non-Continuation token. Constructors and [`Cursor::bump`] call this;
+    /// [`Cursor::peek_n`] walks past them in its own lookup.
+    fn skip_continuations(&mut self) {
+        while self.pos < self.tokens.len()
+            && matches!(self.tokens[self.pos].kind, TokenKind::Continuation)
+        {
+            self.pos += 1;
         }
     }
 
@@ -78,19 +103,33 @@ impl<'t> Cursor<'t> {
         self.peek_tok().kind
     }
 
-    /// Kind of the token `n` positions ahead. Returns `Eof` past end of stream.
+    /// Kind of the token `n` positions ahead, skipping any
+    /// [`TokenKind::Continuation`] tokens in between. Returns `Eof` past end
+    /// of stream.
     pub(crate) fn peek_n(&self, n: usize) -> TokenKind {
-        let idx = self.pos.saturating_add(n);
-        if idx < self.tokens.len() {
-            self.tokens[idx].kind
-        } else {
-            TokenKind::Eof
+        let mut remaining = n;
+        let mut idx = self.pos;
+        while idx < self.tokens.len() {
+            if matches!(self.tokens[idx].kind, TokenKind::Continuation) {
+                idx += 1;
+                continue;
+            }
+            if remaining == 0 {
+                return self.tokens[idx].kind;
+            }
+            remaining -= 1;
+            idx += 1;
         }
+        TokenKind::Eof
     }
 
     /// The current token. When the cursor is past the end of the token stream
     /// (or the stream is empty), returns a synthetic zero-length Eof token at
     /// the end of the source so the rest of the parser can stay uniform.
+    ///
+    /// Invariant: `pos` is never on a [`TokenKind::Continuation`]; the
+    /// constructor and [`Cursor::bump`] both call `skip_continuations` after
+    /// every position change.
     pub(crate) fn peek_tok(&self) -> Token {
         if self.pos < self.tokens.len() {
             self.tokens[self.pos]
@@ -102,10 +141,19 @@ impl<'t> Cursor<'t> {
     /// Advance one token and return the consumed token. Past end-of-stream
     /// this returns the (real or synthetic) Eof token repeatedly without
     /// advancing `pos`, which keeps error-recovery loops bounded.
+    ///
+    /// Caller contract: do NOT accumulate `bump().span` in a loop without
+    /// a separate termination guard. At Eof this function returns the same
+    /// zero-length span repeatedly without advancing `pos`; callers that
+    /// merge those spans (e.g. into a span-of-recovered-tokens) get a fixed
+    /// zero-length region. The forced-progress guard in [`Parser::parse_stmt`]
+    /// owns the only legitimate at-Eof recovery loop and exits via an
+    /// explicit Eof check.
     pub(crate) fn bump(&mut self) -> Token {
         let tok = self.peek_tok();
         if self.pos < self.tokens.len() && !matches!(tok.kind, TokenKind::Eof) {
             self.pos += 1;
+            self.skip_continuations();
         }
         tok
     }
@@ -306,14 +354,18 @@ pub(crate) struct Parser<'t> {
     arena: Arena,
     diagnostics: Vec<Diagnostic>,
     last_term: LastTerm,
-    /// Cursor position at which the most recent `parse_stmt_inner` error was
-    /// reported. If `parse_stmt` re-enters at the same position, recovery
-    /// must force at least one token of forward progress before retrying —
-    /// otherwise a sync target that's also a statement-position keyword
-    /// (e.g. `EndFunction` appearing at top level) would parse-error, sync,
-    /// stop at the same token, and loop forever. See
-    /// `recovery_endfunction_at_top_level_does_not_loop`.
-    last_error_pos: Option<usize>,
+    /// Cursor position + diagnostic span at which the most recent
+    /// `parse_stmt_inner` error was reported. If `parse_stmt` re-enters at
+    /// the same position, recovery must force at least one token of forward
+    /// progress before retrying — otherwise a sync target that's also a
+    /// statement-position keyword (e.g. `EndFunction` appearing at top
+    /// level) would parse-error, sync, stop at the same token, and loop
+    /// forever. See `recovery_endfunction_at_top_level_does_not_loop`.
+    ///
+    /// FD-004 #9: the `Span` field is preserved so any forced-progress
+    /// `Stmt::Error` node can span from the original error to the bumped
+    /// token, instead of pinning the Error to just the bumped token's span.
+    last_error: Option<(usize, Span)>,
 }
 
 impl<'t> Parser<'t> {
@@ -323,14 +375,14 @@ impl<'t> Parser<'t> {
             arena: Arena::new(),
             diagnostics: Vec::new(),
             last_term: LastTerm::None,
-            last_error_pos: None,
+            last_error: None,
         }
     }
 
     /// Consume the parser and return the final [`ParseResult`]. The program
-    /// statement list is filled in by W4+; for now it is empty by default and
-    /// the [`parse`] driver below pushes top-level `Stmt::Error`s into it for
-    /// the W2 scaffolding behavior.
+    /// statement list is empty by default; the [`parse`] driver pushes
+    /// successfully-parsed top-level statements (and `Stmt::Error` nodes
+    /// for recovered failures) into it.
     pub(crate) fn finish(self) -> ParseResult {
         ParseResult {
             arena: self.arena,
@@ -488,14 +540,18 @@ impl<'t> Parser<'t> {
                     .cursor
                     .expect_punct(Punct::RBracket, "in index expression")?;
                 if indices.is_empty() {
-                    // `arr[]` is not a valid index expression — the parser
-                    // emits a diagnostic but keeps the (empty) node so
-                    // recovery can continue.
+                    // `arr[]` is not a valid index expression. FD-004 #6:
+                    // returning a malformed `Index { indices: [] }` would
+                    // force every downstream consumer to special-case empty
+                    // indices; `Expr::Error` is the standard
+                    // diagnostic-already-emitted carrier.
+                    let span = lhs_span.merge(close.span);
                     self.diagnostics.push(Diagnostic::error(
                         E_BAD_STATEMENT,
                         "index expression must have at least one index",
-                        Label::new(lhs_span.merge(close.span)),
+                        Label::new(span),
                     ));
+                    return Ok(self.alloc(Node::Expr(Expr::Error), span));
                 }
                 let span = lhs_span.merge(close.span);
                 Ok(self.alloc(
@@ -513,10 +569,14 @@ impl<'t> Parser<'t> {
                     TokenKind::Ident { sigil } => {
                         self.cursor.bump();
                         let name_span = bare_name_span(name_tok.span, sigil);
-                        let name =
-                            self.alloc(Node::Expr(Expr::Ident { name_span, sigil }), name_tok.span);
                         let span = lhs_span.merge(name_tok.span);
-                        Ok(self.alloc(Node::Expr(Expr::Field { target: lhs, name }), span))
+                        Ok(self.alloc(
+                            Node::Expr(Expr::Field {
+                                target: lhs,
+                                name_span,
+                            }),
+                            span,
+                        ))
                     }
                     _ => Err(ParseError {
                         diag: Box::new(Diagnostic::error(
@@ -572,14 +632,20 @@ impl<'t> Parser<'t> {
             let close = self
                 .cursor
                 .expect_punct(Punct::RBracket, "in `New` array dimensions")?;
+            let span = new_tok.span.merge(close.span);
             if dims.is_empty() {
+                // FD-004 #6: previously emitted a diagnostic and returned a
+                // malformed `NewKind::Array { dims: [] }`; downstream code
+                // (e.g. lvalue checks for FD-005 `Delete`) would then need to
+                // special-case the empty-dims shape. `Expr::Error` is the
+                // standard "diagnostic was already emitted" carrier.
                 self.diagnostics.push(Diagnostic::error(
                     E_BAD_STATEMENT,
                     "`New T[…]` requires at least one dimension expression",
-                    Label::new(new_tok.span.merge(close.span)),
+                    Label::new(span),
                 ));
+                return Ok(self.alloc(Node::Expr(Expr::Error), span));
             }
-            let span = new_tok.span.merge(close.span);
             return Ok(self.alloc(
                 Node::Expr(Expr::New(NewKind::Array {
                     elem: elem_id,
@@ -593,7 +659,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W6: type expressions.
+    // Type expressions.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse a full type expression: an atom (primitive, named, fn-ptr, or
@@ -781,7 +847,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W4: statement dispatch + simple statements.
+    // Statement dispatch + simple statements.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse a single statement. On error, push a diagnostic, allocate a
@@ -799,7 +865,8 @@ impl<'t> Parser<'t> {
         // *don't* consume (block-closers, statement-position keywords); when
         // such a token appears in a context that can't actually start a
         // statement, we bump past it once and try again.
-        if self.last_error_pos == Some(self.cursor.pos())
+        if let Some((pos, orig_span)) = self.last_error
+            && pos == self.cursor.pos()
             && !matches!(self.cursor.peek(), TokenKind::Eof)
         {
             let bad = self.cursor.bump();
@@ -808,22 +875,26 @@ impl<'t> Parser<'t> {
             if matches!(self.cursor.peek(), TokenKind::Eof) {
                 // Allocate a placeholder Error so the program still has a node
                 // attributed to this position; the diagnostic was already
-                // emitted on the previous turn.
-                let id = self.alloc(Node::Stmt(Stmt::Error), bad.span);
-                self.last_error_pos = None;
+                // emitted on the previous turn. FD-004 #9: span the Error
+                // from the original error site to the bumped token so the
+                // recovered range is visible.
+                let span = orig_span.merge(bad.span);
+                let id = self.alloc(Node::Stmt(Stmt::Error), span);
+                self.last_error = None;
                 return Some(id);
             }
-            self.last_error_pos = None;
+            self.last_error = None;
         }
         let result = self.parse_stmt_inner();
         match result {
             Ok(id) => {
-                self.last_error_pos = None;
+                self.last_error = None;
                 Some(id)
             }
             Err(err) => {
+                let err_span = err.span;
                 self.diagnostics.push(*err.diag);
-                let id = self.alloc(Node::Stmt(Stmt::Error), err.span);
+                let id = self.alloc(Node::Stmt(Stmt::Error), err_span);
                 let pre_sync = self.cursor.pos();
                 self.sync_to_stmt_boundary();
                 // Track where this recovery left the cursor *only when sync
@@ -834,8 +905,8 @@ impl<'t> Parser<'t> {
                 // statement-position keyword (e.g. `EndFunction` at top level)
                 // — re-entering would just repeat the same diagnostic, so
                 // `parse_stmt` will bump once before retrying.
-                self.last_error_pos = if self.cursor.pos() == pre_sync {
-                    Some(self.cursor.pos())
+                self.last_error = if self.cursor.pos() == pre_sync {
+                    Some((self.cursor.pos(), err_span))
                 } else {
                     None
                 };
@@ -854,14 +925,14 @@ impl<'t> Parser<'t> {
                 Kw::Break => self.parse_break(),
                 Kw::Continue => self.parse_continue(),
 
-                // Block statements (W5).
+                // Block statements.
                 Kw::If => self.parse_if(),
                 Kw::While => self.parse_while(),
                 Kw::Repeat => self.parse_repeat(),
                 Kw::For => self.parse_for(),
                 Kw::Select => self.parse_select(),
 
-                // Declaration statements (W6).
+                // Declaration statements.
                 Kw::Function => self.parse_function(),
                 Kw::Type => self.parse_type_decl(),
                 Kw::Struct => self.parse_struct_decl(),
@@ -919,9 +990,20 @@ impl<'t> Parser<'t> {
             },
             TokenKind::Ident { .. } => self.parse_label_or_expr_stmt(),
 
-            TokenKind::Newline | TokenKind::Eof => unreachable!(
-                "parse_stmt_inner called at a terminator — parse_stmt should have returned"
-            ),
+            // Should be unreachable: `parse_stmt` eats leading newlines and
+            // returns `None` at EOF before calling `parse_stmt_inner`, and the
+            // single-line `If` body guard in `parse_if` handles
+            // `Colon`/`Newline`/`Eof` itself. Demoted from `unreachable!` to a
+            // structured diagnostic so a future invariant violation produces
+            // a clear failure instead of a hard panic.
+            TokenKind::Newline | TokenKind::Eof => Err(ParseError {
+                diag: Box::new(Diagnostic::error(
+                    E_INTERNAL_PARSER,
+                    "internal: `parse_stmt_inner` reached a statement terminator",
+                    Label::new(tok.span),
+                )),
+                span: tok.span,
+            }),
 
             // Lex errors at statement start: skip the offending token with a
             // diagnostic and emit a `Stmt::Error` — but do NOT run the full
@@ -950,7 +1032,8 @@ impl<'t> Parser<'t> {
     }
 
     /// Handle a statement that starts with an `Ident`: either a `Label` (per
-    /// §6.4) or an assignment / expression statement / paren-less call.
+    /// §6.4), an implicit declaration with `As Type =` (per §4.1, FD-004 #4),
+    /// or an assignment / expression statement / paren-less call.
     ///
     /// Uses pure lookahead (`peek_n`); never bumps speculatively.
     fn parse_label_or_expr_stmt(&mut self) -> Result<NodeId, ParseError> {
@@ -979,8 +1062,61 @@ impl<'t> Parser<'t> {
                 }
                 return Ok(self.alloc(Node::Stmt(Stmt::Label { name_span }), span));
             }
+
+            // Implicit declaration with type annotation: `Ident [Sigil] As Type = expr`.
+            // §4.1 explicitly shows `z As String = "asd"` as a first-assignment
+            // form; the bare-`Ident = expr` case continues to go through
+            // `parse_expr_or_assign_stmt` (it lexes as an assignment to a
+            // possibly-new variable).
+            if matches!(self.cursor.peek_n(1), TokenKind::Keyword(Kw::As)) {
+                return self.parse_implicit_decl_stmt(first.span, sigil);
+            }
         }
         self.parse_expr_or_assign_stmt()
+    }
+
+    /// Parse an implicit declaration with `As` annotation:
+    /// `<name>[<sigil>] As <Type> = <expr>` (§4.1, FD-004 #4). Produces a
+    /// single-name `Stmt::Dim` with the type and initializer. The `= <expr>`
+    /// tail is required; without it sema can't tell an implicit decl from a
+    /// dangling `Ident As Type` (which has no statement meaning), and any
+    /// later assignment would conflict. The current token at entry is the
+    /// name `Ident`; `name_tok_span` and `sigil` come from
+    /// `parse_label_or_expr_stmt`'s peek.
+    fn parse_implicit_decl_stmt(
+        &mut self,
+        name_tok_span: Span,
+        sigil: Option<Sigil>,
+    ) -> Result<NodeId, ParseError> {
+        self.cursor.bump(); // consume the name Ident
+        let name_span = bare_name_span(name_tok_span, sigil);
+        self.cursor
+            .expect_kw(Kw::As, "after implicit declaration name")?;
+        let ty = self.parse_type_expr()?;
+        if !matches!(self.cursor.peek(), TokenKind::Op(Op::Eq)) {
+            let tok = self.cursor.peek_tok();
+            return Err(ParseError {
+                diag: Box::new(Diagnostic::error(
+                    E_EXPECTED_TOKEN,
+                    "implicit declaration with `As` requires an initializer; \
+                     use `Dim` to declare without one",
+                    Label::new(tok.span),
+                )),
+                span: tok.span,
+            });
+        }
+        self.cursor.bump(); // `=`
+        let value = self.parse_expr_bp(0)?;
+        let span = name_tok_span.merge(self.arena.span_of(value));
+        self.consume_stmt_sep_or_terminator()?;
+        Ok(self.alloc(
+            Node::Stmt(Stmt::Dim {
+                names: vec![DimName { name_span, sigil }],
+                ty: Some(ty),
+                init: Some(value),
+            }),
+            span,
+        ))
     }
 
     /// Parse the three Ident-starting expression-statement forms:
@@ -1157,7 +1293,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W5: block statements (If / While / Repeat / For / Select).
+    // Block statements (If / While / Repeat / For / Select).
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse statements until any of `closers` appears at the start of a
@@ -1292,10 +1428,19 @@ impl<'t> Parser<'t> {
                 span
             }
             _ => {
-                // Defensive: parse_block_until should only return when a
+                // FD-004 #13: `parse_block_until` should only return when a
                 // closer-shaped token is present (or EOF, which it already
-                // diagnosed). If we somehow land here, return the current
-                // span so the caller can still build a usable node.
+                // diagnosed). If we somehow land here, surface a structured
+                // internal-error diagnostic so a future invariant violation
+                // is loud instead of silently producing a node with a
+                // current-token span.
+                self.diagnostics.push(Diagnostic::error(
+                    E_INTERNAL_PARSER,
+                    format!(
+                        "internal: `consume_block_closer` reached an unexpected token while closing `{opener_name}`",
+                    ),
+                    Label::new(tok.span),
+                ));
                 tok.span
             }
         }
@@ -1334,16 +1479,49 @@ impl<'t> Parser<'t> {
             // "ended at `:` — keep going" from "ended at `Newline`/`Eof`/
             // block-end — stop".
             let mut then_body = Vec::new();
-            loop {
-                then_body.push(self.parse_single_line_body_stmt()?);
-                if self.last_term != LastTerm::Colon {
-                    break;
+            // Guard: `If x Then :` / `If x Then\n` / `If x Then Else …` —
+            // the Then body is empty. Recursing into `parse_single_line_body_stmt`
+            // here would hit `parse_stmt_inner`'s terminator arm with a
+            // confusing error. Emit E0215 and skip the body parse so recovery
+            // continues cleanly. `Eof` is included for completeness even though
+            // `parse_stmt` strips a trailing newline before re-entering.
+            if matches!(
+                self.cursor.peek(),
+                TokenKind::Punct(Punct::Colon)
+                    | TokenKind::Newline
+                    | TokenKind::Eof
+                    | TokenKind::Keyword(Kw::Else | Kw::ElseIf)
+            ) {
+                let here = self.cursor.current_span();
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        E_EMPTY_SINGLE_LINE_IF_BODY,
+                        "single-line `If` requires at least one statement after `Then`",
+                        Label::new(here),
+                    )
+                    .with_secondary(Label::with_message(opener, "single-line `If` opens here")),
+                );
+                // If we landed on a `:` here, eat it so the next statement
+                // after the `If` doesn't get interpreted as a Then-body
+                // statement that ran past the empty arm.
+                if matches!(self.cursor.peek(), TokenKind::Punct(Punct::Colon)) {
+                    self.cursor.bump();
+                    self.last_term = LastTerm::Colon;
                 }
-                if matches!(
-                    self.cursor.peek(),
-                    TokenKind::Keyword(Kw::Else | Kw::ElseIf) | TokenKind::Newline | TokenKind::Eof
-                ) {
-                    break;
+            } else {
+                loop {
+                    then_body.push(self.parse_single_line_body_stmt()?);
+                    if self.last_term != LastTerm::Colon {
+                        break;
+                    }
+                    if matches!(
+                        self.cursor.peek(),
+                        TokenKind::Keyword(Kw::Else | Kw::ElseIf)
+                            | TokenKind::Newline
+                            | TokenKind::Eof
+                    ) {
+                        break;
+                    }
                 }
             }
             // Optional Else on the same line.
@@ -1351,13 +1529,34 @@ impl<'t> Parser<'t> {
             if matches!(self.cursor.peek(), TokenKind::Keyword(Kw::Else)) {
                 self.cursor.bump();
                 let mut body = Vec::new();
-                loop {
-                    body.push(self.parse_single_line_body_stmt()?);
-                    if self.last_term != LastTerm::Colon {
-                        break;
+                // Same guard as the Then arm: an empty Else body (`Else :`,
+                // `Else\n`, `Else <Eof>`) is E0215.
+                if matches!(
+                    self.cursor.peek(),
+                    TokenKind::Punct(Punct::Colon) | TokenKind::Newline | TokenKind::Eof
+                ) {
+                    let here = self.cursor.current_span();
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            E_EMPTY_SINGLE_LINE_IF_BODY,
+                            "single-line `If` requires at least one statement after `Else`",
+                            Label::new(here),
+                        )
+                        .with_secondary(Label::with_message(opener, "single-line `If` opens here")),
+                    );
+                    if matches!(self.cursor.peek(), TokenKind::Punct(Punct::Colon)) {
+                        self.cursor.bump();
+                        self.last_term = LastTerm::Colon;
                     }
-                    if matches!(self.cursor.peek(), TokenKind::Newline | TokenKind::Eof) {
-                        break;
+                } else {
+                    loop {
+                        body.push(self.parse_single_line_body_stmt()?);
+                        if self.last_term != LastTerm::Colon {
+                            break;
+                        }
+                        if matches!(self.cursor.peek(), TokenKind::Newline | TokenKind::Eof) {
+                            break;
+                        }
                     }
                 }
                 else_body = Some(body);
@@ -1577,7 +1776,7 @@ impl<'t> Parser<'t> {
                     here
                 }
             };
-            let next_name = self.parse_optional_next_name();
+            let next_name = self.parse_optional_next_name(sigil);
             let span = opener.merge(close_span);
             let _ = self.consume_stmt_sep_or_terminator();
             return Ok(self.alloc(
@@ -1612,7 +1811,7 @@ impl<'t> Parser<'t> {
                 here
             }
         };
-        let next_name = self.parse_optional_next_name();
+        let next_name = self.parse_optional_next_name(sigil);
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();
         Ok(self.alloc(
@@ -1628,15 +1827,43 @@ impl<'t> Parser<'t> {
         ))
     }
 
-    fn parse_optional_next_name(&mut self) -> Option<Span> {
+    /// Parse an optional name after `Next` (§6.3). Accepts sigilled idents
+    /// (FD-004 #5); when the sigil differs from the loop variable's, emit
+    /// `E0217` so the parser doesn't silently drop the user's name. The
+    /// loop-var name match (e.g. `For i = … Next j`) is sema's job — only the
+    /// sigil is checked here because the parser already has it.
+    ///
+    /// Returns the bare-name span (sigil byte excluded) on success.
+    fn parse_optional_next_name(&mut self, loop_sigil: Option<Sigil>) -> Option<Span> {
         let tok = self.cursor.peek_tok();
-        match tok.kind {
-            TokenKind::Ident { sigil: None } => {
-                self.cursor.bump();
-                Some(tok.span)
-            }
-            _ => None,
+        let TokenKind::Ident { sigil } = tok.kind else {
+            return None;
+        };
+        self.cursor.bump();
+        if sigil != loop_sigil {
+            let msg = match (loop_sigil, sigil) {
+                (Some(l), Some(n)) => format!(
+                    "`Next` name has sigil `{}` but the loop variable has sigil `{}`",
+                    n.as_char(),
+                    l.as_char(),
+                ),
+                (Some(l), None) => format!(
+                    "`Next` name has no sigil but the loop variable has sigil `{}`",
+                    l.as_char(),
+                ),
+                (None, Some(n)) => format!(
+                    "`Next` name has sigil `{}` but the loop variable has no sigil",
+                    n.as_char(),
+                ),
+                (None, None) => unreachable!("sigil != loop_sigil but both are None"),
+            };
+            self.diagnostics.push(Diagnostic::error(
+                E_NEXT_SIGIL_MISMATCH,
+                msg,
+                Label::new(tok.span),
+            ));
         }
+        Some(bare_name_span(tok.span, sigil))
     }
 
     fn parse_select(&mut self) -> Result<NodeId, ParseError> {
@@ -1644,6 +1871,9 @@ impl<'t> Parser<'t> {
         let scrutinee = self.parse_expr_bp(0)?;
         self.cursor.eat_newlines();
         let mut arms = Vec::new();
+        // FD-004 #10: track the span of the first `Default` arm so a second
+        // one can be diagnosed with a secondary label pointing at it.
+        let mut first_default_span: Option<Span> = None;
         loop {
             self.cursor.eat_newlines();
             match self.cursor.peek() {
@@ -1673,7 +1903,26 @@ impl<'t> Parser<'t> {
                     break;
                 }
                 TokenKind::Keyword(Kw::Case) => arms.push(self.parse_case_arm()?),
-                TokenKind::Keyword(Kw::Default) => arms.push(self.parse_default_arm()?),
+                TokenKind::Keyword(Kw::Default) => {
+                    let default_kw_span = self.cursor.peek_tok().span;
+                    let arm_id = self.parse_default_arm()?;
+                    if let Some(prev_span) = first_default_span {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                E_DUPLICATE_DEFAULT,
+                                "`Select` has more than one `Default` arm",
+                                Label::new(default_kw_span),
+                            )
+                            .with_secondary(Label::with_message(
+                                prev_span,
+                                "first `Default` arm here",
+                            )),
+                        );
+                    } else {
+                        first_default_span = Some(default_kw_span);
+                    }
+                    arms.push(arm_id);
+                }
                 _ => {
                     // Stray token — emit a diagnostic and consume one to
                     // make progress.
@@ -1731,7 +1980,7 @@ impl<'t> Parser<'t> {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // W6: declaration statements.
+    // Declaration statements.
     // ──────────────────────────────────────────────────────────────────────
 
     /// Parse `Function name(params) [As ret] body EndFunction`. The
@@ -2201,8 +2450,13 @@ impl<'t> Parser<'t> {
         let target = self.alloc(Node::Expr(Expr::Ident { name_span, sigil }), name_tok.span);
 
         self.cursor.expect_kw(Kw::As, "after `Redim` target")?;
-        // Element type — use `parse_type_atom` so the dim-list `[…]` stays.
-        let elem_ty = self.parse_type_atom()?;
+        // Element type — `parse_type_expr` so the user can carry rank markers
+        // (`Integer[]`) on the element. The bracket-with-expression that
+        // follows (`[N, M]`) is the dim-list, which `parse_array_brackets`
+        // refuses to consume (it only matches empty/comma-only brackets).
+        // FD-004 #8: this was previously `parse_type_atom`, which rejected
+        // `Redim arr As Integer[][10]`.
+        let elem_ty = self.parse_type_expr()?;
         self.cursor
             .expect_punct(Punct::LBracket, "after `Redim` element type")?;
         let mut dims = Vec::new();
@@ -2409,14 +2663,18 @@ fn bare_name_span(tok_span: Span, sigil: Option<Sigil>) -> Span {
     )
 }
 
-/// Whether a keyword names one of the primitive types accepted by the W3
-/// stub type-expression parser.
+/// Whether a keyword names one of the primitive types accepted by the
+/// type-expression parser. `Int`/`Integer` and `UInt`/`UInteger` are both
+/// accepted here as spelling-preserving aliases (FD-004 #3); sema treats
+/// the alias pairs as equivalent.
 fn is_primitive_type_kw(kw: Kw) -> bool {
     matches!(
         kw,
         Kw::Byte
             | Kw::Short
+            | Kw::Int
             | Kw::Integer
+            | Kw::UInt
             | Kw::UInteger
             | Kw::Long
             | Kw::ULong
@@ -2426,13 +2684,19 @@ fn is_primitive_type_kw(kw: Kw) -> bool {
     )
 }
 
+/// Left-binding-power of comparison operators (`=`, `<>`, `<`, `>`, `<=`,
+/// `>=`). Pinned here as a named constant so [`STMT_LHS_MIN_BP`] derives
+/// from it. If the comparison level shifts in [`infix_bp`], update this
+/// constant — the derived statement-LHS gate moves with it.
+const CMP_LBP: u8 = 16;
+
 /// Minimum binding power for the LHS of a statement-level expression /
-/// assignment. Set one above the comparison binding power (16) so the Pratt
-/// loop refuses to consume `=` (and the other comparison operators) into
-/// the LHS — letting `parse_expr_or_assign_stmt` see a top-level `=` and
-/// dispatch to assignment. See the doc on that function for the design
-/// rationale.
-const STMT_LHS_MIN_BP: u8 = 17;
+/// assignment. Set one above [`CMP_LBP`] so the Pratt loop refuses to
+/// consume `=` (and the other comparison operators) into the LHS — letting
+/// `parse_expr_or_assign_stmt` see a top-level `=` and dispatch to
+/// assignment. See the doc on that function for the design rationale.
+/// FD-004 #15: derived from `CMP_LBP` (was a hand-written `17`).
+const STMT_LHS_MIN_BP: u8 = CMP_LBP + 1;
 
 /// Binding powers for infix operators. Returns `(left_bp, right_bp)`; when
 /// `right > left` the operator is right-associative.
@@ -2445,7 +2709,9 @@ fn infix_bp(kind: &TokenKind) -> Option<(u8, u8)> {
         TokenKind::Keyword(Kw::Or) => (10, 11),
         TokenKind::Keyword(Kw::Xor) => (12, 13),
         TokenKind::Keyword(Kw::And) => (14, 15),
-        TokenKind::Op(Op::Eq | Op::NotEq | Op::Lt | Op::Gt | Op::LtEq | Op::GtEq) => (16, 17),
+        TokenKind::Op(Op::Eq | Op::NotEq | Op::Lt | Op::Gt | Op::LtEq | Op::GtEq) => {
+            (CMP_LBP, CMP_LBP + 1)
+        }
         TokenKind::Keyword(Kw::BinOr) => (18, 19),
         TokenKind::Keyword(Kw::BinXor) => (20, 21),
         TokenKind::Keyword(Kw::BinAnd) => (22, 23),
@@ -2577,8 +2843,8 @@ mod tests {
 
     #[test]
     fn unknown_token_at_stmt_start_recovers() {
-        // `*` cannot start a statement; W2 stub recovers by allocating
-        // Stmt::Error and bumping. Real dispatch will replace this in W4.
+        // `*` cannot start a statement; recovery allocates `Stmt::Error`
+        // and bumps past the offending token.
         let src = "*";
         let (tokens, _) = tokenize(src, FileId(0), LexerOptions::default());
         let result = parse(&tokens, src, FileId(0));
@@ -2821,17 +3087,17 @@ mod expr_tests {
         // a.b.c → Field(Field(a, b), c)
         let src = "a.b.c";
         let (arena, root, _) = parse_expr(src);
-        let (outer_target, outer_name) = match expr_of(&arena, root) {
-            Expr::Field { target, name } => (*target, *name),
+        let (outer_target, outer_name_span) = match expr_of(&arena, root) {
+            Expr::Field { target, name_span } => (*target, *name_span),
             other => panic!("expected Field, got {other:?}"),
         };
-        assert_ident(&arena, outer_name, src, "c");
-        let (inner_target, inner_name) = match expr_of(&arena, outer_target) {
-            Expr::Field { target, name } => (*target, *name),
+        assert_eq!(outer_name_span.slice(src), "c");
+        let (inner_target, inner_name_span) = match expr_of(&arena, outer_target) {
+            Expr::Field { target, name_span } => (*target, *name_span),
             other => panic!("expected inner Field, got {other:?}"),
         };
         assert_ident(&arena, inner_target, src, "a");
-        assert_ident(&arena, inner_name, src, "b");
+        assert_eq!(inner_name_span.slice(src), "b");
     }
 
     #[test]
@@ -3024,9 +3290,12 @@ mod stmt_tests {
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Assign { target, value } => {
                 match expr_of(&r.arena, *target) {
-                    Expr::Field { target: t, name } => {
+                    Expr::Field {
+                        target: t,
+                        name_span,
+                    } => {
                         assert_ident(&r.arena, *t, src, "node");
-                        assert_ident(&r.arena, *name, src, "f");
+                        assert_eq!(name_span.slice(src), "f");
                     }
                     other => panic!("expected Field target, got {other:?}"),
                 }
@@ -3396,7 +3665,7 @@ mod stmt_tests {
 
 #[cfg(test)]
 mod block_tests {
-    //! Unit tests for the W5 block-statement parsers: `If` (single-line and
+    //! Unit tests for block-statement parsers: `If` (single-line and
     //! block), `While`, `Repeat`, `For`, `For Each`, and `Select`.
 
     use super::*;
@@ -3988,8 +4257,7 @@ mod block_tests {
 
 #[cfg(test)]
 mod type_expr_tests {
-    //! Unit tests for [`Parser::parse_type_expr`] — the type-expression
-    //! grammar landed in W6.
+    //! Unit tests for [`Parser::parse_type_expr`].
 
     use super::*;
     use crate::ast::{Node, NodeId, Param, TypeExpr};
@@ -4287,7 +4555,7 @@ mod type_expr_tests {
 
 #[cfg(test)]
 mod decl_tests {
-    //! Unit tests for declaration statements (W6): `Function`, `Type`,
+    //! Unit tests for declaration statements: `Function`, `Type`,
     //! `Struct`, `Dim`, `Global`, `Const`, `Redim`, and stray `Field`.
 
     use super::*;
@@ -4585,6 +4853,44 @@ mod decl_tests {
             "expected E0211, got {:?}",
             r.diagnostics
         );
+    }
+
+    /// FD-004 #7: the stray-`Field` recovery loop stops at `:` so a trailing
+    /// statement on the same line still parses. The loop must NOT consume
+    /// past the `:` separator.
+    #[test]
+    fn field_outside_type_body_stops_at_colon() {
+        let src = "Field x : Print y\n";
+        let r = parse_src(src);
+        // One E0211 for the stray Field…
+        assert_eq!(
+            r.diagnostics
+                .iter()
+                .filter(|d| d.code == Some(E_FIELD_OUTSIDE_TYPE_BODY))
+                .count(),
+            1,
+            "expected exactly one E0211, got {:?}",
+            r.diagnostics,
+        );
+        // …and `Print y` recovered as a sibling ExprStmt (paren-less call).
+        let print_stmt_id = r
+            .program
+            .iter()
+            .find_map(|&id| match &r.arena[id] {
+                Node::Stmt(Stmt::ExprStmt { expr }) => Some(*expr),
+                _ => None,
+            })
+            .expect("expected a recovered ExprStmt for `Print y`");
+        match &r.arena[print_stmt_id] {
+            Node::Expr(Expr::Call { callee, args }) => {
+                let callee_span = r.arena.span_of(*callee);
+                assert_eq!(callee_span.slice(src), "Print");
+                assert_eq!(args.len(), 1);
+                let arg_span = r.arena.span_of(args[0]);
+                assert_eq!(arg_span.slice(src), "y");
+            }
+            other => panic!("expected Call(Print, [y]), got {other:?}"),
+        }
     }
 
     #[test]

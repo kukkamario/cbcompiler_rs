@@ -1,0 +1,49 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 541
+expression: "snapshot_parser_fixture(\"next_with_sigil\")"
+---
+Program (5 top-level statements)
+  Stmt::For(has_step=false, has_next_name=true) @ 149..183
+    Expr::Ident(sigil=Integer) @ 153..155
+    Expr::IntLit(0) @ 158..159
+    Expr::IntLit(10) @ 163..165
+    Stmt::ExprStmt @ 170..178
+      Expr::Call(args=1) @ 170..178
+        Expr::Ident(sigil=None) @ 170..175
+        Expr::Ident(sigil=Integer) @ 176..178
+  Stmt::For(has_step=false, has_next_name=true) @ 246..277
+    Expr::Ident(sigil=None) @ 250..251
+    Expr::IntLit(0) @ 254..255
+    Expr::IntLit(5) @ 259..260
+    Stmt::ExprStmt @ 265..272
+      Expr::Call(args=1) @ 265..272
+        Expr::Ident(sigil=None) @ 265..270
+        Expr::Ident(sigil=None) @ 271..272
+  Stmt::For(has_step=false, has_next_name=true) @ 332..365
+    Expr::Ident(sigil=Integer) @ 336..338
+    Expr::IntLit(0) @ 341..342
+    Expr::IntLit(3) @ 346..347
+    Stmt::ExprStmt @ 352..360
+      Expr::Call(args=1) @ 352..360
+        Expr::Ident(sigil=None) @ 352..357
+        Expr::Ident(sigil=Integer) @ 358..360
+  Stmt::For(has_step=false, has_next_name=true) @ 421..452
+    Expr::Ident(sigil=None) @ 425..426
+    Expr::IntLit(0) @ 429..430
+    Expr::IntLit(2) @ 434..435
+    Stmt::ExprStmt @ 440..447
+      Expr::Call(args=1) @ 440..447
+        Expr::Ident(sigil=None) @ 440..445
+        Expr::Ident(sigil=None) @ 446..447
+  Stmt::ForEach(has_next_name=true) @ 493..531
+    Expr::Ident(sigil=Float) @ 497..499
+    Expr::Ident(sigil=None) @ 507..513
+    Stmt::ExprStmt @ 518..526
+      Expr::Call(args=1) @ 518..526
+        Expr::Ident(sigil=None) @ 518..523
+        Expr::Ident(sigil=Float) @ 524..526
+
+--- DIAGNOSTICS ---
+ERROR[E0217] `Next` name has no sigil but the loop variable has sigil `%` @ 366..367
+ERROR[E0217] `Next` name has sigil `#` but the loop variable has no sigil @ 453..455

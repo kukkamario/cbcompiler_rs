@@ -1,0 +1,27 @@
+// FD-004 #5: `Next` accepts sigilled idents and validates the sigil
+// against the loop variable.
+
+// Both sigilled and matching — no diagnostic.
+For i% = 0 To 10
+    Print i%
+Next i%
+
+// Sigilless loop var + sigilless Next — no diagnostic.
+For j = 0 To 5
+    Print j
+Next j
+
+// Loop var has sigil but Next does not — E0217.
+For k% = 0 To 3
+    Print k%
+Next k
+
+// Loop var sigilless but Next has sigil — E0217.
+For m = 0 To 2
+    Print m
+Next m#
+
+// For Each with sigilled iterator.
+For n# = Each Floats
+    Print n#
+Next n#
