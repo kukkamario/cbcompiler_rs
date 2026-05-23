@@ -89,19 +89,39 @@ fn missing_file_exits_two() {
 }
 
 #[test]
-#[ignore = "no warning-emitting frontend construct exists yet (no `Diagnostic::warning` callers in cb-frontend); unblock when sema lands the first warning. FD-006 B3."]
 fn errors_dominate_warnings() {
-    // Intent: when the frontend produces both a Warning- and an
-    // Error-severity diagnostic on the same input, the driver still
-    // exits 1 (errors dominate). Re-enable this once `Severity::Warning`
-    // has at least one producer.
+    // A narrowing conversion (E0318 warning) plus a lex error (@) → exit 1.
     let dir = tempdir().unwrap();
-    let path = write_cb(&dir, "mixed.cb", "Dim x As Int = 1\n@\n");
+    let path = write_cb(&dir, "mixed.cb", "Dim x As Integer\nx = 1.5\n@\n");
     Command::cargo_bin("cb")
         .unwrap()
         .arg(&path)
         .assert()
         .code(1);
+}
+
+#[test]
+fn sema_error_exits_one() {
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "sema.cb", "Dim y As Integer\ny = x + 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stderr(contains("E0300"));
+}
+
+#[test]
+fn sema_narrowing_warning_exits_zero() {
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "warn.cb", "Dim x As Integer\nx = 1.5\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .success()
+        .stderr(contains("E0318"));
 }
 
 #[test]

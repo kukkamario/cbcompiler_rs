@@ -21,6 +21,13 @@ pub use scope::{
 };
 pub use types::Type;
 
+/// Whether a Delete operand is an lvalue (variable/field/index) or rvalue.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum DeleteClass {
+    Lvalue,
+    Rvalue,
+}
+
 /// Run semantic analysis on a parsed program.
 ///
 /// Returns type annotations, symbol tables, implicit conversions, and any
@@ -43,6 +50,8 @@ pub struct SemaResult {
     pub symbols: SymbolTable,
     /// Implicit conversions inserted by the type checker.
     pub conversions: ConversionTable,
+    /// Delete lvalue/rvalue classification for each `Stmt::Delete` node.
+    pub delete_classes: HashMap<NodeId, DeleteClass>,
     /// Diagnostics produced during analysis.
     pub diagnostics: Vec<Diagnostic>,
 }

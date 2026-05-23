@@ -34,10 +34,15 @@ pub(crate) struct Checker<'a> {
     symbols: SymbolTable,
     types: TypeTable,
     conversions: ConversionTable,
+    delete_classes: std::collections::HashMap<NodeId, crate::DeleteClass>,
     diagnostics: Vec<Diagnostic>,
     current_scope: ScopeId,
     /// The return type of the function we're currently inside, if any.
     current_fn_return_ty: Option<Type>,
+    /// Stack of For loop node IDs we're currently inside (for Goto-into-For check).
+    for_loop_stack: Vec<NodeId>,
+    /// For each label symbol, the set of For loop NodeIds containing it.
+    label_for_nesting: std::collections::HashMap<Symbol, Vec<NodeId>>,
 }
 
 impl<'a> Checker<'a> {
@@ -58,9 +63,12 @@ impl<'a> Checker<'a> {
             symbols,
             types: TypeTable::new(),
             conversions: ConversionTable::new(),
+            delete_classes: std::collections::HashMap::new(),
             diagnostics: Vec::new(),
             current_scope: top,
             current_fn_return_ty: None,
+            for_loop_stack: Vec::new(),
+            label_for_nesting: std::collections::HashMap::new(),
         };
 
         checker.pass1(program);
@@ -70,6 +78,7 @@ impl<'a> Checker<'a> {
             types: checker.types,
             symbols: checker.symbols,
             conversions: checker.conversions,
+            delete_classes: checker.delete_classes,
             diagnostics: checker.diagnostics,
         }
     }
@@ -122,6 +131,72 @@ impl<'a> Checker<'a> {
         let top = self.current_scope;
         for &id in program {
             self.pass1_stmt(id, top);
+        }
+        // Collect labels recursively from all top-level statement bodies
+        // (inside For, While, If, etc.) so Goto can resolve them.
+        // Also records which For loops contain each label (for E0321).
+        let mut for_stack = Vec::new();
+        for &id in program {
+            self.collect_labels_recursive(id, top, &mut for_stack);
+        }
+    }
+
+    /// Walk into statement bodies recursively to collect labels in the given scope.
+    /// Also records which For loop NodeIds contain each label for Goto-into-For checking.
+    /// Skips Function bodies (they have their own scope).
+    fn collect_labels_recursive(
+        &mut self,
+        id: NodeId,
+        scope: ScopeId,
+        for_stack: &mut Vec<NodeId>,
+    ) {
+        match self.arena[id].clone() {
+            Node::Stmt(Stmt::Label { name_span }) => {
+                let name = self.intern_span(name_span);
+                if self.symbols.lookup(scope, name).is_none() {
+                    let decl = Declaration {
+                        kind: DeclKind::Label,
+                        ty: Type::Void,
+                        span: name_span,
+                        is_global: false,
+                    };
+                    self.try_declare(scope, name, decl, E_DUPLICATE_DECL);
+                }
+                if !for_stack.is_empty() {
+                    self.label_for_nesting.insert(name, for_stack.clone());
+                }
+            }
+            Node::Stmt(Stmt::If { then_body, elseifs, else_body, .. }) => {
+                for &s in &then_body { self.collect_labels_recursive(s, scope, for_stack); }
+                for ei in &elseifs {
+                    for &s in &ei.body { self.collect_labels_recursive(s, scope, for_stack); }
+                }
+                if let Some(eb) = &else_body {
+                    for &s in eb { self.collect_labels_recursive(s, scope, for_stack); }
+                }
+            }
+            Node::Stmt(Stmt::While { body, .. })
+            | Node::Stmt(Stmt::RepeatForever { body })
+            | Node::Stmt(Stmt::RepeatWhile { body, .. }) => {
+                for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+            }
+            Node::Stmt(Stmt::For { body, .. })
+            | Node::Stmt(Stmt::ForEach { body, .. }) => {
+                for_stack.push(id);
+                for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+                for_stack.pop();
+            }
+            Node::Stmt(Stmt::Select { arms, .. }) => {
+                for &arm_id in &arms {
+                    if let Node::CaseArm(CaseArm::Case { body, .. })
+                    | Node::CaseArm(CaseArm::Default { body }) = &self.arena[arm_id]
+                    {
+                        let body = body.clone();
+                        for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -521,27 +596,27 @@ impl<'a> Checker<'a> {
         // Look up the callee in the scope if it's an ident.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
-            if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
-                if let DeclKind::Function { params, return_ty } = &decl.kind {
-                    let min_args = params.iter().filter(|p| !p.has_default).count();
-                    let max_args = params.len();
-                    if arg_types.len() < min_args || arg_types.len() > max_args {
-                        self.diagnostics.push(Diagnostic::error(
-                            E_WRONG_ARG_COUNT,
-                            format!(
-                                "function expects {} argument(s), got {}",
-                                if min_args == max_args {
-                                    format!("{max_args}")
-                                } else {
-                                    format!("{min_args}..{max_args}")
-                                },
-                                arg_types.len()
-                            ),
-                            Label::new(span),
-                        ));
-                    }
-                    return return_ty.clone();
+            if let Some(decl) = self.symbols.lookup(self.current_scope, name)
+                && let DeclKind::Function { params, return_ty } = &decl.kind
+            {
+                let min_args = params.iter().filter(|p| !p.has_default).count();
+                let max_args = params.len();
+                if arg_types.len() < min_args || arg_types.len() > max_args {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_WRONG_ARG_COUNT,
+                        format!(
+                            "function expects {} argument(s), got {}",
+                            if min_args == max_args {
+                                format!("{max_args}")
+                            } else {
+                                format!("{min_args}..{max_args}")
+                            },
+                            arg_types.len()
+                        ),
+                        Label::new(span),
+                    ));
                 }
+                return return_ty.clone();
             }
         }
 
@@ -764,12 +839,10 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Dim { names, ty, init }) => {
                 self.check_dim(&names, ty, init);
             }
-            Node::Stmt(Stmt::Global { names: _, ty: _, init }) => {
-                // Globals are already hoisted in pass 1; just check the initializer.
-                if let Some(init_id) = init {
-                    self.check_expr(init_id);
-                }
+            Node::Stmt(Stmt::Global { names: _, ty: _, init: Some(init_id) }) => {
+                self.check_expr(init_id);
             }
+            Node::Stmt(Stmt::Global { .. }) => {}
             Node::Stmt(Stmt::Const {
                 name_span,
                 sigil,
@@ -831,12 +904,12 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             }) => {
-                self.check_for(var, from, to, step, &body);
+                self.check_for(id, var, from, to, step, &body);
             }
             Node::Stmt(Stmt::ForEach {
                 var, source, body, ..
             }) => {
-                self.check_for_each(var, source, &body);
+                self.check_for_each(id, var, source, &body);
             }
             Node::Stmt(Stmt::Select { scrutinee, arms }) => {
                 self.check_select(scrutinee, &arms);
@@ -857,7 +930,7 @@ impl<'a> Checker<'a> {
                 self.check_goto(label_span);
             }
             Node::Stmt(Stmt::Delete { operand }) => {
-                self.check_delete(operand);
+                self.check_delete(id, operand);
             }
             Node::Stmt(Stmt::Redim {
                 target,
@@ -866,11 +939,18 @@ impl<'a> Checker<'a> {
             }) => {
                 self.check_redim(target, elem_ty, &dims);
             }
+            Node::Stmt(Stmt::Label { name_span })
+                if !self.for_loop_stack.is_empty() =>
+            {
+                let name = self.intern_span(name_span);
+                self.label_for_nesting
+                    .insert(name, self.for_loop_stack.clone());
+            }
+            Node::Stmt(Stmt::Label { .. }) => {}
             // Statements that are already handled or require no type checking:
             Node::Stmt(Stmt::Type { .. })
             | Node::Stmt(Stmt::Struct { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
-            | Node::Stmt(Stmt::Label { .. })
             | Node::Stmt(Stmt::Break { .. })
             | Node::Stmt(Stmt::Continue)
             | Node::Stmt(Stmt::Include { .. })
@@ -1018,6 +1098,7 @@ impl<'a> Checker<'a> {
 
     fn check_for(
         &mut self,
+        for_id: NodeId,
         var: NodeId,
         from: NodeId,
         to: NodeId,
@@ -1080,12 +1161,14 @@ impl<'a> Checker<'a> {
             }
         }
 
+        self.for_loop_stack.push(for_id);
         for &s in body {
             self.check_stmt(s);
         }
+        self.for_loop_stack.pop();
     }
 
-    fn check_for_each(&mut self, var: NodeId, source: NodeId, body: &[NodeId]) {
+    fn check_for_each(&mut self, for_id: NodeId, var: NodeId, source: NodeId, body: &[NodeId]) {
         // The iteration variable is implicitly declared.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
             let name = self.intern_ident(*name_span, *sigil);
@@ -1105,9 +1188,11 @@ impl<'a> Checker<'a> {
         // Source should be an array variable or a Type name.
         self.check_expr(source);
 
+        self.for_loop_stack.push(for_id);
         for &s in body {
             self.check_stmt(s);
         }
+        self.for_loop_stack.pop();
     }
 
     fn check_select(&mut self, scrutinee: NodeId, arms: &[NodeId]) {
@@ -1240,6 +1325,21 @@ impl<'a> Checker<'a> {
                     ),
                     Label::new(label_span),
                 ));
+            } else {
+                // Goto-into-For check (E0321): if the target label is inside
+                // a For loop that this Goto is NOT inside, reject.
+                if let Some(label_fors) = self.label_for_nesting.get(&name) {
+                    for &for_id in label_fors {
+                        if !self.for_loop_stack.contains(&for_id) {
+                            self.diagnostics.push(Diagnostic::error(
+                                E_GOTO_INTO_FOR,
+                                "cannot Goto into a For loop from outside",
+                                Label::new(label_span),
+                            ));
+                            break;
+                        }
+                    }
+                }
             }
         } else {
             self.diagnostics.push(Diagnostic::error(
@@ -1253,7 +1353,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_delete(&mut self, operand: NodeId) {
+    fn check_delete(&mut self, stmt_id: NodeId, operand: NodeId) {
         let op_ty = self.check_expr(operand);
         if !op_ty.is_error() && !matches!(op_ty, Type::TypeRef { .. }) {
             self.diagnostics.push(Diagnostic::error(
@@ -1262,6 +1362,14 @@ impl<'a> Checker<'a> {
                 Label::new(self.arena.span_of(operand)),
             ));
         }
+        // Classify lvalue vs rvalue.
+        let class = match &self.arena[operand] {
+            Node::Expr(Expr::Ident { .. })
+            | Node::Expr(Expr::Field { .. })
+            | Node::Expr(Expr::Index { .. }) => crate::DeleteClass::Lvalue,
+            _ => crate::DeleteClass::Rvalue,
+        };
+        self.delete_classes.insert(stmt_id, class);
     }
 
     fn check_redim(&mut self, target: NodeId, elem_ty_node: NodeId, dims: &[NodeId]) {
@@ -1772,6 +1880,70 @@ mod tests {
     #[test]
     fn const_eval_string_concat() {
         let result = analyze_src("Const x$ = \"hello\" + \" world\"\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── M5 tests: Delete classification ─────────────────────────────────
+
+    #[test]
+    fn delete_lvalue_variable() {
+        let result = analyze_src(
+            "Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nDelete obj\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        // Find the Delete statement's NodeId and check its classification.
+        let has_lvalue = result
+            .delete_classes
+            .values()
+            .any(|c| *c == crate::DeleteClass::Lvalue);
+        assert!(has_lvalue, "expected Lvalue classification for Delete var");
+    }
+
+    #[test]
+    fn delete_rvalue_call() {
+        let result = analyze_src(
+            "Type MyObj\nField x As Integer\nEndType\n\
+             Function first() As MyObj\nReturn Null\nEndFunction\n\
+             Delete first()\n",
+        );
+        // E0310 won't fire because first() returns MyObj which is TypeRef.
+        // But it's an rvalue because it's a call expression.
+        let has_rvalue = result
+            .delete_classes
+            .values()
+            .any(|c| *c == crate::DeleteClass::Rvalue);
+        assert!(
+            has_rvalue,
+            "expected Rvalue classification for Delete call(); classes: {:?}",
+            result.delete_classes
+        );
+    }
+
+    // ── M5 tests: Goto-into-For ─────────────────────────────────────────
+
+    #[test]
+    fn goto_into_for_e0321() {
+        let result = analyze_src(
+            "Goto inner\nFor i = 0 To 10\ninner:\nNext\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0321"),
+            "expected E0321, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn goto_same_scope_ok() {
+        let result = analyze_src("Goto target\ntarget:\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn goto_within_for_ok() {
+        let result = analyze_src(
+            "For i = 0 To 10\nGoto skip\nskip:\nNext\n",
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }

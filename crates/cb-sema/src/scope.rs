@@ -159,15 +159,11 @@ impl SymbolTable {
         value: ConstValue,
     ) {
         let s = &mut self.scopes[scope.0 as usize];
-        if let Some(decl) = s.symbols.get_mut(&name) {
-            if let DeclKind::Constant { value: ref mut v } = decl.kind {
-                *v = value;
-            }
+        if let Some(decl) = s.symbols.get_mut(&name)
+            && let DeclKind::Constant { value: ref mut v } = decl.kind
+        {
+            *v = value;
         }
     }
 
-    /// Get the kind of a scope.
-    pub(crate) fn scope_kind(&self, scope: ScopeId) -> ScopeKind {
-        self.scopes[scope.0 as usize].kind
-    }
 }
