@@ -13,6 +13,7 @@ These are design constraints the user stated up front. They predate the code, so
   - **LLVM backend** (`cb-backend-llvm`) — for AOT/optimized native codegen. Expect to use the `inkwell` crate (safe LLVM bindings) unless a strong reason emerges to go lower-level. `inkwell` is intentionally not yet a dependency so the workspace builds without an LLVM toolchain installed; add it when codegen starts.
   - **Interpreter backend** (`cb-backend-interp`) — explicitly prioritized for **debuggability**, not raw speed. It should be the easy path for stepping, inspecting locals, and reproducing miscompiles found in the LLVM path. Treat it as the reference implementation when the two backends disagree.
 - Shared IR between backends is the natural seam. Keep the IR backend-agnostic; do not leak LLVM types into it.
+- The driver (`cb-driver`) wires the backends behind cargo features — `interp` is the default, `llvm` is opt-in via `cargo build --features llvm`. `cargo build` without overrides produces an interp-only `cb` binary; `--no-default-features` yields a no-backend dump-only binary suitable for AST inspection. The runtime `--backend <name>` flag rejects values whose feature is not compiled in.
 
 ## Workspace layout
 

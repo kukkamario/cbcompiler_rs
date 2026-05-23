@@ -9,12 +9,17 @@ publish.workspace = true
 name = "cb"
 path = "src/main.rs"
 
+[features]
+default = ["interp"]
+interp = ["dep:cb-backend-interp"]
+llvm = ["dep:cb-backend-llvm"]
+
 [dependencies]
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-frontend = { path = "../cb-frontend" }
 cb-ir = { path = "../cb-ir" }
-cb-backend-interp = { path = "../cb-backend-interp" }
-cb-backend-llvm = { path = "../cb-backend-llvm" }
+cb-backend-interp = { path = "../cb-backend-interp", optional = true }
+cb-backend-llvm = { path = "../cb-backend-llvm", optional = true }
 codespan-reporting.workspace = true
 
 [lints]

@@ -14,12 +14,119 @@ use cb_frontend::parser::ParseResult;
 use cb_frontend::{LexerOptions, parse, tokenize};
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 
+#[cfg(feature = "interp")]
+const HAS_INTERP: bool = true;
+#[cfg(not(feature = "interp"))]
+const HAS_INTERP: bool = false;
+#[cfg(feature = "llvm")]
+const HAS_LLVM: bool = true;
+#[cfg(not(feature = "llvm"))]
+const HAS_LLVM: bool = false;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Backend {
+    #[cfg(feature = "interp")]
+    Interp,
+    #[cfg(feature = "llvm")]
+    Llvm,
+}
+
+fn available_backends() -> &'static str {
+    match (HAS_INTERP, HAS_LLVM) {
+        (true, true) => "interp, llvm",
+        (true, false) => "interp",
+        (false, true) => "llvm",
+        (false, false) => "(none)",
+    }
+}
+
+fn default_backend() -> Option<Backend> {
+    #[cfg(feature = "interp")]
+    {
+        Some(Backend::Interp)
+    }
+    #[cfg(all(not(feature = "interp"), feature = "llvm"))]
+    {
+        Some(Backend::Llvm)
+    }
+    #[cfg(not(any(feature = "interp", feature = "llvm")))]
+    {
+        None
+    }
+}
+
+fn parse_backend(name: &str) -> Result<Backend, String> {
+    match name {
+        #[cfg(feature = "interp")]
+        "interp" => Ok(Backend::Interp),
+        #[cfg(feature = "llvm")]
+        "llvm" => Ok(Backend::Llvm),
+        #[cfg(not(feature = "interp"))]
+        "interp" => Err(format!(
+            "backend 'interp' not compiled in (rebuild with --features interp); \
+             available backends in this build: {}",
+            available_backends()
+        )),
+        #[cfg(not(feature = "llvm"))]
+        "llvm" => Err(format!(
+            "backend 'llvm' not compiled in (rebuild with --features llvm); \
+             available backends in this build: {}",
+            available_backends()
+        )),
+        other => Err(format!(
+            "unknown backend '{other}'; available backends in this build: {}",
+            available_backends()
+        )),
+    }
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let Some(path_arg) = args.next() else {
-        eprintln!("usage: cb <file.cb>");
+    let mut backend_arg: Option<String> = None;
+    let mut positional: Option<String> = None;
+    while let Some(a) = args.next() {
+        if a == "--backend" {
+            match args.next() {
+                Some(v) => backend_arg = Some(v),
+                None => {
+                    eprintln!("cb: --backend requires a value");
+                    return ExitCode::from(2);
+                }
+            }
+        } else if let Some(rest) = a.strip_prefix("--backend=") {
+            backend_arg = Some(rest.to_string());
+        } else if positional.is_none() {
+            positional = Some(a);
+        } else {
+            eprintln!("cb: unexpected argument: {a}");
+            return ExitCode::from(2);
+        }
+    }
+
+    let Some(path_arg) = positional else {
+        eprintln!("usage: cb [--backend <name>] <file.cb>");
         return ExitCode::from(2);
     };
+
+    let _backend = match backend_arg {
+        Some(name) => match parse_backend(&name) {
+            Ok(b) => b,
+            Err(msg) => {
+                eprintln!("cb: {msg}");
+                return ExitCode::from(2);
+            }
+        },
+        None => match default_backend() {
+            Some(b) => b,
+            None => {
+                eprintln!(
+                    "cb: no backend compiled in; rebuild with --features interp or --features llvm"
+                );
+                return ExitCode::from(2);
+            }
+        },
+    };
+
     let path = PathBuf::from(&path_arg);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
