@@ -1,0 +1,40 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 535
+expression: "snapshot_parser_fixture_preserve_trivia(\"continuation_multi_line\")"
+---
+Program (4 top-level statements)
+  Stmt::Assign @ 169..204
+    Expr::Ident(sigil=None) @ 169..174
+    Expr::BinOp(Add) @ 177..204
+      Expr::BinOp(Add) @ 177..200
+        Expr::BinOp(Add) @ 177..196
+          Expr::BinOp(Add) @ 177..186
+            Expr::BinOp(Add) @ 177..182
+              Expr::Ident(sigil=None) @ 177..178
+              Expr::Ident(sigil=None) @ 181..182
+            Expr::Ident(sigil=None) @ 185..186
+          Expr::Ident(sigil=None) @ 195..196
+        Expr::Ident(sigil=None) @ 199..200
+      Expr::Ident(sigil=None) @ 203..204
+  Stmt::Assign @ 273..300
+    Expr::Ident(sigil=None) @ 273..276
+    Expr::BinOp(Add) @ 279..300
+      Expr::BinOp(Add) @ 279..290
+        Expr::IntLit(1) @ 279..280
+        Expr::IntLit(2) @ 289..290
+      Expr::IntLit(3) @ 299..300
+  Stmt::Assign @ 343..376
+    Expr::Ident(sigil=None) @ 343..349
+    Expr::Call(args=3) @ 352..376
+      Expr::Ident(sigil=None) @ 352..355
+      Expr::Ident(sigil=None) @ 356..357
+      Expr::Ident(sigil=None) @ 365..366
+      Expr::Ident(sigil=None) @ 374..375
+  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 435..460
+    Expr::BinOp(Gt) @ 438..443
+      Expr::Ident(sigil=None) @ 438..439
+      Expr::IntLit(0) @ 442..443
+    Stmt::Assign @ 455..460
+      Expr::Ident(sigil=None) @ 455..456
+      Expr::IntLit(1) @ 459..460

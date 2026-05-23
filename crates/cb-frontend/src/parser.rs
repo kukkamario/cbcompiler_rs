@@ -33,6 +33,13 @@ pub const E_FIELD_OUTSIDE_TYPE_BODY: &str = "E0211";
 pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: &str = "E0212";
 pub const E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL: &str = "E0213";
 pub const E_LABEL_HAS_SIGIL: &str = "E0214";
+pub const E_EMPTY_SINGLE_LINE_IF_BODY: &str = "E0215";
+pub const E_DUPLICATE_DEFAULT: &str = "E0216";
+/// Internal compiler error — emitted only from defensive branches that
+/// should be unreachable by the parser invariants. Surfaced (rather than
+/// `panic!`) so a future change that violates the invariants produces a
+/// clear failure instead of a hard crash.
+pub const E_INTERNAL_PARSER: &str = "E0299";
 
 /// Internal error type that propagates up to `parse_stmt`'s recovery point.
 /// Carries a structured diagnostic and the span where parsing failed. The
@@ -65,11 +72,28 @@ pub(crate) struct Cursor<'t> {
 
 impl<'t> Cursor<'t> {
     pub(crate) fn new(tokens: &'t [Token], src: &'t str, file: FileId) -> Self {
-        Self {
+        let mut c = Self {
             tokens,
             pos: 0,
             src,
             file,
+        };
+        c.skip_continuations();
+        c
+    }
+
+    /// Advance `pos` past any [`TokenKind::Continuation`] tokens at the front
+    /// of the lookahead. Per `cb_syntax.md` §1.1 the `\` line-continuation
+    /// fuses the surrounding lines unconditionally, so the parser must treat
+    /// the token as invisible. Maintained as an invariant: every public
+    /// `Cursor` mutation leaves `pos` either past the slice or on a
+    /// non-Continuation token. Constructors and [`Cursor::bump`] call this;
+    /// [`Cursor::peek_n`] walks past them in its own lookup.
+    fn skip_continuations(&mut self) {
+        while self.pos < self.tokens.len()
+            && matches!(self.tokens[self.pos].kind, TokenKind::Continuation)
+        {
+            self.pos += 1;
         }
     }
 
@@ -78,19 +102,33 @@ impl<'t> Cursor<'t> {
         self.peek_tok().kind
     }
 
-    /// Kind of the token `n` positions ahead. Returns `Eof` past end of stream.
+    /// Kind of the token `n` positions ahead, skipping any
+    /// [`TokenKind::Continuation`] tokens in between. Returns `Eof` past end
+    /// of stream.
     pub(crate) fn peek_n(&self, n: usize) -> TokenKind {
-        let idx = self.pos.saturating_add(n);
-        if idx < self.tokens.len() {
-            self.tokens[idx].kind
-        } else {
-            TokenKind::Eof
+        let mut remaining = n;
+        let mut idx = self.pos;
+        while idx < self.tokens.len() {
+            if matches!(self.tokens[idx].kind, TokenKind::Continuation) {
+                idx += 1;
+                continue;
+            }
+            if remaining == 0 {
+                return self.tokens[idx].kind;
+            }
+            remaining -= 1;
+            idx += 1;
         }
+        TokenKind::Eof
     }
 
     /// The current token. When the cursor is past the end of the token stream
     /// (or the stream is empty), returns a synthetic zero-length Eof token at
     /// the end of the source so the rest of the parser can stay uniform.
+    ///
+    /// Invariant: `pos` is never on a [`TokenKind::Continuation`]; the
+    /// constructor and [`Cursor::bump`] both call `skip_continuations` after
+    /// every position change.
     pub(crate) fn peek_tok(&self) -> Token {
         if self.pos < self.tokens.len() {
             self.tokens[self.pos]
@@ -102,10 +140,19 @@ impl<'t> Cursor<'t> {
     /// Advance one token and return the consumed token. Past end-of-stream
     /// this returns the (real or synthetic) Eof token repeatedly without
     /// advancing `pos`, which keeps error-recovery loops bounded.
+    ///
+    /// Caller contract: do NOT accumulate `bump().span` in a loop without
+    /// a separate termination guard. At Eof this function returns the same
+    /// zero-length span repeatedly without advancing `pos`; callers that
+    /// merge those spans (e.g. into a span-of-recovered-tokens) get a fixed
+    /// zero-length region. The forced-progress guard in [`Parser::parse_stmt`]
+    /// owns the only legitimate at-Eof recovery loop and exits via an
+    /// explicit Eof check.
     pub(crate) fn bump(&mut self) -> Token {
         let tok = self.peek_tok();
         if self.pos < self.tokens.len() && !matches!(tok.kind, TokenKind::Eof) {
             self.pos += 1;
+            self.skip_continuations();
         }
         tok
     }
@@ -919,9 +966,20 @@ impl<'t> Parser<'t> {
             },
             TokenKind::Ident { .. } => self.parse_label_or_expr_stmt(),
 
-            TokenKind::Newline | TokenKind::Eof => unreachable!(
-                "parse_stmt_inner called at a terminator — parse_stmt should have returned"
-            ),
+            // Should be unreachable: `parse_stmt` eats leading newlines and
+            // returns `None` at EOF before calling `parse_stmt_inner`, and the
+            // single-line `If` body guard in `parse_if` handles
+            // `Colon`/`Newline`/`Eof` itself. Demoted from `unreachable!` to a
+            // structured diagnostic so a future invariant violation produces
+            // a clear failure instead of a hard panic.
+            TokenKind::Newline | TokenKind::Eof => Err(ParseError {
+                diag: Box::new(Diagnostic::error(
+                    E_INTERNAL_PARSER,
+                    "internal: `parse_stmt_inner` reached a statement terminator",
+                    Label::new(tok.span),
+                )),
+                span: tok.span,
+            }),
 
             // Lex errors at statement start: skip the offending token with a
             // diagnostic and emit a `Stmt::Error` — but do NOT run the full
@@ -1334,16 +1392,49 @@ impl<'t> Parser<'t> {
             // "ended at `:` — keep going" from "ended at `Newline`/`Eof`/
             // block-end — stop".
             let mut then_body = Vec::new();
-            loop {
-                then_body.push(self.parse_single_line_body_stmt()?);
-                if self.last_term != LastTerm::Colon {
-                    break;
+            // Guard: `If x Then :` / `If x Then\n` / `If x Then Else …` —
+            // the Then body is empty. Recursing into `parse_single_line_body_stmt`
+            // here would hit `parse_stmt_inner`'s terminator arm with a
+            // confusing error. Emit E0215 and skip the body parse so recovery
+            // continues cleanly. `Eof` is included for completeness even though
+            // `parse_stmt` strips a trailing newline before re-entering.
+            if matches!(
+                self.cursor.peek(),
+                TokenKind::Punct(Punct::Colon)
+                    | TokenKind::Newline
+                    | TokenKind::Eof
+                    | TokenKind::Keyword(Kw::Else | Kw::ElseIf)
+            ) {
+                let here = self.cursor.current_span();
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        E_EMPTY_SINGLE_LINE_IF_BODY,
+                        "single-line `If` requires at least one statement after `Then`",
+                        Label::new(here),
+                    )
+                    .with_secondary(Label::with_message(opener, "single-line `If` opens here")),
+                );
+                // If we landed on a `:` here, eat it so the next statement
+                // after the `If` doesn't get interpreted as a Then-body
+                // statement that ran past the empty arm.
+                if matches!(self.cursor.peek(), TokenKind::Punct(Punct::Colon)) {
+                    self.cursor.bump();
+                    self.last_term = LastTerm::Colon;
                 }
-                if matches!(
-                    self.cursor.peek(),
-                    TokenKind::Keyword(Kw::Else | Kw::ElseIf) | TokenKind::Newline | TokenKind::Eof
-                ) {
-                    break;
+            } else {
+                loop {
+                    then_body.push(self.parse_single_line_body_stmt()?);
+                    if self.last_term != LastTerm::Colon {
+                        break;
+                    }
+                    if matches!(
+                        self.cursor.peek(),
+                        TokenKind::Keyword(Kw::Else | Kw::ElseIf)
+                            | TokenKind::Newline
+                            | TokenKind::Eof
+                    ) {
+                        break;
+                    }
                 }
             }
             // Optional Else on the same line.
@@ -1351,13 +1442,34 @@ impl<'t> Parser<'t> {
             if matches!(self.cursor.peek(), TokenKind::Keyword(Kw::Else)) {
                 self.cursor.bump();
                 let mut body = Vec::new();
-                loop {
-                    body.push(self.parse_single_line_body_stmt()?);
-                    if self.last_term != LastTerm::Colon {
-                        break;
+                // Same guard as the Then arm: an empty Else body (`Else :`,
+                // `Else\n`, `Else <Eof>`) is E0215.
+                if matches!(
+                    self.cursor.peek(),
+                    TokenKind::Punct(Punct::Colon) | TokenKind::Newline | TokenKind::Eof
+                ) {
+                    let here = self.cursor.current_span();
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            E_EMPTY_SINGLE_LINE_IF_BODY,
+                            "single-line `If` requires at least one statement after `Else`",
+                            Label::new(here),
+                        )
+                        .with_secondary(Label::with_message(opener, "single-line `If` opens here")),
+                    );
+                    if matches!(self.cursor.peek(), TokenKind::Punct(Punct::Colon)) {
+                        self.cursor.bump();
+                        self.last_term = LastTerm::Colon;
                     }
-                    if matches!(self.cursor.peek(), TokenKind::Newline | TokenKind::Eof) {
-                        break;
+                } else {
+                    loop {
+                        body.push(self.parse_single_line_body_stmt()?);
+                        if self.last_term != LastTerm::Colon {
+                            break;
+                        }
+                        if matches!(self.cursor.peek(), TokenKind::Newline | TokenKind::Eof) {
+                            break;
+                        }
                     }
                 }
                 else_body = Some(body);

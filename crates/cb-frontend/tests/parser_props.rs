@@ -37,6 +37,9 @@ fn safe_source() -> impl Strategy<Value = String> {
     // Each element is a guaranteed-well-formed CB statement (no escaping
     // hazards, no edge whitespace tricks). The strategy joins 0..6 of them
     // with no separator — each piece already ends with a newline.
+    //
+    // A few entries embed `\` line continuations so the
+    // `continuation_is_transparent` property has something to exercise.
     let stmt = prop_oneof![
         Just("Print 1\n".to_string()),
         (1u32..1000).prop_map(|n| format!("x = {n}\n")),
@@ -47,6 +50,8 @@ fn safe_source() -> impl Strategy<Value = String> {
         Just("Continue\n".to_string()),
         Just("Return\n".to_string()),
         Just("Break\n".to_string()),
+        Just("x = 1 + \\\n    2\n".to_string()),
+        Just("y = foo(1, \\\n    2, \\\n    3)\n".to_string()),
     ];
     prop::collection::vec(stmt, 0..6).prop_map(|stmts| stmts.concat())
 }
@@ -429,5 +434,34 @@ proptest! {
         let (toks_b, _) = tokenize(&src, FileId(0), LexerOptions::default());
         let r_b = parse(&toks_b, &src, FileId(0));
         prop_assert_eq!(pretty(&r_a.arena, &r_a.program), pretty(&r_b.arena, &r_b.program));
+    }
+
+    /// Continuation tokens must be transparent to the parser (FD-004 #1).
+    /// Parsing a well-formed source with `preserve_trivia=true` (so
+    /// `\` line-continuations survive as `TokenKind::Continuation` tokens
+    /// in the stream) must yield the same AST as parsing it with the
+    /// default (where the lexer discards the continuation entirely).
+    /// Trivia (Whitespace, Comment) is stripped from both runs to isolate
+    /// the Continuation question; safe_source does not contain those anyway.
+    #[test]
+    fn continuation_is_transparent(src in safe_source()) {
+        let (toks_default, _) = tokenize(&src, FileId(0), LexerOptions::default());
+        let r_default = parse(&toks_default, &src, FileId(0));
+
+        let opts = LexerOptions { preserve_trivia: true };
+        let (toks_preserve, _) = tokenize(&src, FileId(0), opts);
+        let toks_preserve: Vec<_> = toks_preserve
+            .into_iter()
+            .filter(|t| !matches!(
+                t.kind,
+                cb_frontend::TokenKind::Whitespace | cb_frontend::TokenKind::Comment(_),
+            ))
+            .collect();
+        let r_preserve = parse(&toks_preserve, &src, FileId(0));
+
+        prop_assert_eq!(
+            pretty(&r_default.arena, &r_default.program),
+            pretty(&r_preserve.arena, &r_preserve.program),
+        );
     }
 }
