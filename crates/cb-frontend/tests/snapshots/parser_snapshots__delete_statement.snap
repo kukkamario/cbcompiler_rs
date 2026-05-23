@@ -1,0 +1,34 @@
+---
+source: crates/cb-frontend/tests/parser_snapshots.rs
+assertion_line: 563
+expression: "snapshot_parser_fixture(\"delete_statement\")"
+---
+Program (8 top-level statements)
+  Stmt::Delete @ 315..323
+    Expr::Ident(sigil=None) @ 322..323
+  Stmt::Delete @ 324..339
+    Expr::Field @ 331..339
+      Expr::Ident(sigil=None) @ 331..332
+  Stmt::Delete @ 340..353
+    Expr::Index(rank=1) @ 347..353
+      Expr::Ident(sigil=None) @ 347..350
+      Expr::IntLit(0) @ 351..352
+  Stmt::Delete @ 520..540
+    Expr::Call(args=1) @ 527..540
+      Expr::Ident(sigil=None) @ 527..532
+      Expr::Ident(sigil=None) @ 533..539
+  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 680..703
+    Expr::Field @ 683..689
+      Expr::Ident(sigil=None) @ 683..684
+    Stmt::Delete @ 695..703
+      Expr::Ident(sigil=None) @ 702..703
+  Stmt::Error @ 827..828
+  Stmt::Error @ 1028..1029
+  Stmt::ExprStmt @ 1030..1037
+    Expr::Call(args=1) @ 1030..1037
+      Expr::Ident(sigil=None) @ 1030..1035
+      Expr::IntLit(1) @ 1036..1037
+
+--- DIAGNOSTICS ---
+ERROR[E0206] expected expression, found end of line @ 827..828
+ERROR[E0206] expected expression, found `:` @ 1028..1029

@@ -924,6 +924,7 @@ impl<'t> Parser<'t> {
                 Kw::Include => self.parse_include(),
                 Kw::Break => self.parse_break(),
                 Kw::Continue => self.parse_continue(),
+                Kw::Delete => self.parse_delete(),
 
                 // Block statements.
                 Kw::If => self.parse_if(),
@@ -1290,6 +1291,18 @@ impl<'t> Parser<'t> {
         let span = self.cursor.bump().span;
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(Node::Stmt(Stmt::Continue), span))
+    }
+
+    /// Parse `Delete <expr>` (§3.3). The operand is parsed as a full
+    /// expression; lvalue vs. rvalue classification — and any §9.2 trap
+    /// diagnostics — are sema's job, matching how `Stmt::Assign` keeps the
+    /// parser permissive on `target` shape.
+    fn parse_delete(&mut self) -> Result<NodeId, ParseError> {
+        let start = self.cursor.bump().span; // consume `Delete`
+        let operand = self.parse_expr_bp(0)?;
+        let span = start.merge(self.arena.span_of(operand));
+        self.consume_stmt_sep_or_terminator()?;
+        Ok(self.alloc(Node::Stmt(Stmt::Delete { operand }), span))
     }
 
     // ──────────────────────────────────────────────────────────────────────

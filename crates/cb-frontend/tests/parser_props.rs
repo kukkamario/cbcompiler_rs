@@ -120,6 +120,7 @@ fn node_header(node: &Node) -> &'static str {
             Stmt::Break { .. } => "Stmt::Break",
             Stmt::Continue => "Stmt::Continue",
             Stmt::Include { .. } => "Stmt::Include",
+            Stmt::Delete { .. } => "Stmt::Delete",
             Stmt::Error => "Stmt::Error",
         },
         Node::TypeExpr(t) => match t {
