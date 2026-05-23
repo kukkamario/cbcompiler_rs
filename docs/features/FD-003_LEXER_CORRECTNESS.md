@@ -46,7 +46,7 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
 | 3 | Parse integer/hex/binary literals into `u64` (or store the raw lexeme bytes as a `Span` + base tag). Range-check against the inferred type in sema. Lexer emits `NumberMalformed` only for shapes that no type could accept (e.g. > 2^64 unsigned literal). The `NumberOverflow` code reserved at `lexer.rs` should be re-tasked or retired. |
 | 4 | Behaviour is already spec-conformant; pin it. Add one `\r`-only fixture per context: top-level statements separated by `\r`, `\` continuation followed by a `\r`-only line ending, and a single-line string containing a bare `\r` (must produce `NewlineInString`). Do not change the lexer code for this issue. |
 | 5 | In both `scan_number_hex` and `scan_number_binary`, when `raw.is_empty()` after consuming a leading `_`, emit the "expected hex/binary digits after `$`/`%`" diagnostic *in addition to* `InvalidDigitSeparator`. |
-| 6 | (a) For unterminated block comments, extend the label span to `[opener.start, self.pos)` so the user sees the swallowed region. (b) For unterminated raw strings, add a sync rule: stop at the next newline that ends with only whitespace before another `"""`-or-EOF; emit the unterminated diagnostic with a label on the opener and an additional secondary label on the cursor. |
+| 6 | (a) For unterminated block comments, extend the label span to `[opener.start, self.pos)` so the user sees the swallowed region. (b) For unterminated raw strings, improve label quality: primary label on the opener (where the literal began), secondary label at the EOF cursor (where scanning gave up). A sync rule that recovers mid-file is deferred — see "Out of scope" below. |
 | 7 | Wrap `FloatLit` in a newtype that hashes via raw bits (`f64::to_bits`) and implements `Eq` via bit-equality. NaN-equality becomes "same NaN payload" rather than "never equal" — sufficient for parser-side `==` and far less surprising. Alternative: intern float literals and reference them by index. |
 | 8 | Either compute `LONGEST_KEYWORD_LEN` via a `const fn` over the keyword table, or add a `#[test]` that asserts it equals the longest entry. The const-fn option is preferred. |
 | 9 | Decide whether the variants are load-bearing. Recommended: collapse into a single `UnexpectedChar` variant — the distinction adds no information that the call site's message doesn't already convey, and there is no consumer that switches on the variant. Drop the stale "different message later" comment in `token.rs`. |
@@ -57,6 +57,8 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
 - The `Token` representation rework is bounded: keep `Token` `Copy` if possible by using a `FloatBits(u64)` newtype rather than interning.
 - Bare `\r` test corpus stays small (one fixture per context); not adding a Mac-line-endings linting feature.
 - Integer-literal range checking in sema is *not* implemented here — only the migration of the typing decision out of the lexer. Sema will land alongside the IR/sema FD.
+- Raw-string mid-file recovery (the "sync rule" originally sketched in issue 6(b)): deferred. The heuristic ("stop at the next newline that ends with only whitespace before another `\"\"\"`-or-EOF") is non-trivial to define crisply and has no concrete bug forcing it today. FD-003 lands label-quality improvements only; a follow-up FD can revisit recovery if real-world unterminated-raw-string cases prove disruptive.
+- Dedicated snapshot fixtures `bare_cr.cb` / `numeric_boundaries.cb`: coverage of those code paths landed as unit tests in `tests/lexer_units.rs` instead. Pinning them in snapshots adds no signal beyond what the unit assertions already give.
 
 ## Files to Create/Modify
 
@@ -65,8 +67,7 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
 | `crates/cb-frontend/src/lexer.rs` | MODIFY | Fix bump_char panic reachability, scan_one recovery, hex/binary UX, block-comment / raw-string span quality, `u64` literal parsing, `debug_assert!` on input size. |
 | `crates/cb-frontend/src/token.rs` | MODIFY | `FloatBits(u64)` newtype for `FloatLit`. Collapse `InvalidChar` into `UnexpectedChar` and drop the stale comment. Update `IntLit` to `u64`. |
 | `crates/cb-frontend/src/keywords.rs` | MODIFY | Replace `LONGEST_KEYWORD_LEN` constant with a derived const-fn or add a test. |
-| `crates/cb-frontend/tests/lexer_units.rs` | MODIFY | Add unit tests per issue (see Verification). |
-| `crates/cb-frontend/tests/lexer_snapshots.rs` + fixtures | MODIFY | Add `bare_cr.cb`, `numeric_boundaries.cb` fixtures. |
+| `crates/cb-frontend/tests/lexer_units.rs` | MODIFY | Add unit tests per issue (see Verification). The bare-`\r` and numeric-boundary cases land here rather than as snapshot fixtures — see "Out of scope". |
 | `crates/cb-frontend/tests/lexer_props.rs` | MODIFY | Add property: every non-Eof token span satisfies `start < end <= src.len()`. |
 | `crates/cb-frontend/src/parser.rs` | MODIFY | Adjust any `==` comparison on `Token`/`TokenKind` that depended on the dropped `Eq` impl (likely none — verify). |
 | `docs/cb_syntax.md` | MODIFY | If error-code semantics for integer overflow change, document the new lexer-vs-sema responsibility split. |
@@ -81,7 +82,7 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
   - `\r`-only newline fixture: a 3-line file using only `\r` separators tokenizes into the same shape as `\n`/`\r\n`.
   - `$_`, `%_` (prefix + underscore + no digits) emit *two* diagnostics in order: "expected hex/binary digits after `$`/`%`" and `InvalidDigitSeparator`.
   - Unterminated `/* …` with 1 KiB of contents produces a diagnostic whose label covers the full 1 KiB, not just 2 bytes.
-  - Unterminated `"""…` does not silently swallow content past a sync point; a subsequent valid statement on the next line still tokenizes.
+  - Unterminated `"""…` emits a diagnostic with a primary label on the 3-byte opener and a secondary label at the EOF cursor (mid-file recovery is deferred — see "Out of scope").
   - `FloatBits` round-trip test: two `FloatLit(NaN)` tokens with the same payload compare equal; with different payloads, unequal.
   - `LONGEST_KEYWORD_LEN` invariant test (or const-fn derivation makes the test redundant).
 - Bench-eyeball: `cargo bench` does not exist yet; a microbenchmark is out of scope. Just confirm tokenizer wall time on `tests/fixtures/parser_*.cb` is unchanged within noise.
