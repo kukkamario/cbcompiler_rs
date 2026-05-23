@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-005](FD-005_DELETE_STATEMENT.md) | `Delete` statement (§3.3) | Open | Medium | Medium |
+| [FD-005](FD-005_DELETE_STATEMENT.md) | `Delete` statement (§3.3) | Pending Verification | Medium | Medium |
 | [FD-006](FD-006_DIAGNOSTICS_DRIVER_HARDENING.md) | Diagnostics & driver hardening | Open | Medium | Medium |
 
 ## Completed
