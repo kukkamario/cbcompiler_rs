@@ -51,6 +51,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         local_map: HashMap::new(),
         context_stack: Vec::new(),
         label_blocks: HashMap::new(),
+        next_temp: 0,
 
         functions: Vec::new(),
         type_defs: Vec::new(),
@@ -92,6 +93,7 @@ struct Lowerer<'a> {
     local_map: HashMap<Symbol, LocalId>,
     context_stack: Vec<ControlContext>,
     label_blocks: HashMap<Symbol, BlockId>,
+    next_temp: u32,
 
     // Collected output
     functions: Vec<Function>,
@@ -181,6 +183,13 @@ impl<'a> Lowerer<'a> {
         self.local_map.get(&name).copied()
     }
 
+    fn alloc_temp(&mut self, prefix: &str, ty: IrType) -> LocalId {
+        let n = self.next_temp;
+        self.next_temp += 1;
+        let name = self.interner.intern(&format!("{prefix}_{n}"));
+        self.alloc_local(name, ty, false, false)
+    }
+
     fn intern_span(&mut self, span: Span) -> Symbol {
         let text = span.slice(self.source);
         self.interner.intern(text)
@@ -238,6 +247,7 @@ impl<'a> Lowerer<'a> {
         self.local_map.clear();
         self.context_stack.clear();
         self.label_blocks.clear();
+        self.next_temp = 0;
     }
 
     fn current_block_is_terminated(&self) -> bool {
@@ -773,13 +783,8 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_short_circuit(&mut self, op: BinOp, lhs: NodeId, rhs: NodeId, span: Span) -> Reg {
-        // Allocate a temp local for the result.
-        let tmp_name = self.interner.intern("@sc_tmp");
-        let tmp = if let Some(id) = self.lookup_local(tmp_name) {
-            id
-        } else {
-            self.alloc_local(tmp_name, IrType::Bool, false, false)
-        };
+        // Allocate a unique temp local for the result.
+        let tmp = self.alloc_temp("@sc", IrType::Bool);
 
         let lhs_reg = self.lower_expr(lhs);
 
@@ -1358,28 +1363,19 @@ impl<'a> Lowerer<'a> {
             span,
         );
 
-        // Cache "to" value in a temp local.
+        // Cache "to" value in a unique temp local (safe for nested For loops).
         let to_reg = self.lower_expr(to);
-        let to_name = self.interner.intern("@for_to");
-        let to_local = if let Some(id) = self.lookup_local(to_name) {
-            id
-        } else {
-            self.alloc_local(to_name, self.locals[var_local.0 as usize].ty.clone(), false, false)
-        };
+        let var_ty = self.locals[var_local.0 as usize].ty.clone();
+        let to_local = self.alloc_temp("@for_to", var_ty.clone());
         self.emit_void(InstKind::StoreLocal { local: to_local, value: to_reg }, span);
 
-        // Cache "step" value (default 1).
+        // Cache "step" value (default 1) in a unique temp local.
         let step_reg = if let Some(step_id) = step {
             self.lower_expr(step_id)
         } else {
             self.emit(InstKind::ConstInt(1), span)
         };
-        let step_name = self.interner.intern("@for_step");
-        let step_local = if let Some(id) = self.lookup_local(step_name) {
-            id
-        } else {
-            self.alloc_local(step_name, self.locals[var_local.0 as usize].ty.clone(), false, false)
-        };
+        let step_local = self.alloc_temp("@for_step", var_ty);
         self.emit_void(
             InstKind::StoreLocal {
                 local: step_local,
@@ -1605,23 +1601,13 @@ impl<'a> Lowerer<'a> {
         let step_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
-        // Allocate index temp.
-        let idx_name = self.interner.intern("@foreach_idx");
-        let idx_local = if let Some(id) = self.lookup_local(idx_name) {
-            id
-        } else {
-            self.alloc_local(idx_name, IrType::Int, false, false)
-        };
+        // Allocate unique temps (safe for nested ForEach loops).
+        let idx_local = self.alloc_temp("@foreach_idx", IrType::Int);
 
         // Init: idx = 0, compute length
         let arr = self.lower_expr(source);
         let len = self.emit(InstKind::Len { array: arr, dim: None }, span);
-        let len_name = self.interner.intern("@foreach_len");
-        let len_local = if let Some(id) = self.lookup_local(len_name) {
-            id
-        } else {
-            self.alloc_local(len_name, IrType::Int, false, false)
-        };
+        let len_local = self.alloc_temp("@foreach_len", IrType::Int);
         self.emit_void(InstKind::StoreLocal { local: len_local, value: len }, span);
 
         let zero = self.emit(InstKind::ConstInt(0), span);
