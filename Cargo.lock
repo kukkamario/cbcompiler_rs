@@ -95,6 +95,7 @@ name = "cb-diagnostics"
 version = "0.1.0"
 dependencies = [
  "codespan-reporting",
+ "insta",
 ]
 
 [[package]]

@@ -59,6 +59,14 @@ impl<W: WriteColor> CliRenderer<W> {
     pub fn config_mut(&mut self) -> &mut term::Config {
         &mut self.config
     }
+
+    /// Consume the renderer and return its writer.
+    ///
+    /// Useful in tests: after rendering into a `NoColor<Vec<u8>>` buffer,
+    /// pull the buffer back out for assertion against snapshot output.
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 impl<W: WriteColor> Renderer for CliRenderer<W> {

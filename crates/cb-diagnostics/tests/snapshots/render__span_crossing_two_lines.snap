@@ -1,0 +1,12 @@
+---
+source: crates/cb-diagnostics/tests/render.rs
+assertion_line: 49
+expression: out
+---
+error[E0002]: spans two lines
+  ┌─ two_lines.cb:1:6
+  │  
+1 │   line one
+  │ ╭──────^
+2 │ │ line two
+  │ ╰─────^ crosses newline
