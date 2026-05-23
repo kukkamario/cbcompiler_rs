@@ -145,6 +145,41 @@ impl<'a> Checker<'a> {
     /// Walk into statement bodies recursively to collect labels in the given scope.
     /// Also records which For loop NodeIds contain each label for Goto-into-For checking.
     /// Skips Function bodies (they have their own scope).
+    fn collect_consts_recursive(&mut self, id: NodeId, scope: ScopeId) {
+        match self.arena[id].clone() {
+            Node::Stmt(Stmt::Const { name_span, sigil, ty, is_global, .. }) => {
+                self.pass1_const(scope, name_span, sigil, ty, is_global);
+            }
+            Node::Stmt(Stmt::If { then_body, elseifs, else_body, .. }) => {
+                for &s in &then_body { self.collect_consts_recursive(s, scope); }
+                for ei in &elseifs {
+                    for &s in &ei.body { self.collect_consts_recursive(s, scope); }
+                }
+                if let Some(eb) = &else_body {
+                    for &s in eb { self.collect_consts_recursive(s, scope); }
+                }
+            }
+            Node::Stmt(Stmt::While { body, .. })
+            | Node::Stmt(Stmt::RepeatForever { body })
+            | Node::Stmt(Stmt::RepeatWhile { body, .. })
+            | Node::Stmt(Stmt::For { body, .. })
+            | Node::Stmt(Stmt::ForEach { body, .. }) => {
+                for &s in &body { self.collect_consts_recursive(s, scope); }
+            }
+            Node::Stmt(Stmt::Select { arms, .. }) => {
+                for &arm_id in &arms {
+                    if let Node::CaseArm(CaseArm::Case { body, .. })
+                    | Node::CaseArm(CaseArm::Default { body }) = &self.arena[arm_id]
+                    {
+                        let body = body.clone();
+                        for &s in &body { self.collect_consts_recursive(s, scope); }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn collect_labels_recursive(
         &mut self,
         id: NodeId,
@@ -288,6 +323,7 @@ impl<'a> Checker<'a> {
             kind: DeclKind::Function {
                 params: param_infos,
                 return_ty: ret_ty,
+                scope: None,
             },
             ty: fn_type,
             span: name_span,
@@ -543,7 +579,7 @@ impl<'a> Checker<'a> {
         if lty.is_error() || rty.is_error() {
             return Type::Error;
         }
-        types::binary_result_type(op, &lty, &rty).unwrap_or_else(|| {
+        let result_ty = types::binary_result_type(op, &lty, &rty).unwrap_or_else(|| {
             self.diagnostics.push(Diagnostic::error(
                 E_TYPE_MISMATCH,
                 format!(
@@ -553,7 +589,27 @@ impl<'a> Checker<'a> {
                 Label::new(span),
             ));
             Type::Error
-        })
+        });
+        if !result_ty.is_error() && !matches!(op, BinOp::Shl | BinOp::Shr | BinOp::Sar) {
+            let operand_ty = match op {
+                BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+                    if lty.is_numeric() && rty.is_numeric() {
+                        types::numeric_promote(&lty, &rty)
+                    } else {
+                        lty.clone()
+                    }
+                }
+                BinOp::And | BinOp::Or | BinOp::Xor => Type::Bool,
+                _ => result_ty.clone(),
+            };
+            if lty != operand_ty {
+                self.coerce(lhs, &lty, &operand_ty);
+            }
+            if rty != operand_ty {
+                self.coerce(rhs, &rty, &operand_ty);
+            }
+        }
+        result_ty
     }
 
     fn check_unary(&mut self, op: UnOp, operand: NodeId, span: Span) -> Type {
@@ -598,7 +654,7 @@ impl<'a> Checker<'a> {
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
             if let Some(decl) = self.symbols.lookup(self.current_scope, name)
-                && let DeclKind::Function { params, return_ty } = &decl.kind
+                && let DeclKind::Function { params, return_ty, .. } = &decl.kind
             {
                 let min_args = params.iter().filter(|p| !p.has_default).count();
                 let max_args = params.len();
@@ -1223,7 +1279,7 @@ impl<'a> Checker<'a> {
 
     fn check_function(
         &mut self,
-        _name_span: Span,
+        name_span: Span,
         return_sigil: Option<Sigil>,
         params: &[NodeId],
         return_ty_node: Option<NodeId>,
@@ -1233,6 +1289,9 @@ impl<'a> Checker<'a> {
         let fn_scope = self.symbols.push_scope(ScopeKind::Function, Some(top));
         let prev_scope = self.current_scope;
         self.current_scope = fn_scope;
+
+        let func_name = self.intern_span(name_span);
+        self.symbols.update_function_scope(top, func_name, fn_scope);
 
         // Resolve return type for this function.
         let as_ret = return_ty_node.map(|tid| self.resolve_type_expr(tid));
@@ -1262,7 +1321,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Hoist labels from the entire function body (including nested control flow).
+        // Hoist constants and labels from the entire function body.
+        for &s in body {
+            self.collect_consts_recursive(s, fn_scope);
+        }
         let mut for_stack = Vec::new();
         for &s in body {
             self.collect_labels_recursive(s, fn_scope, &mut for_stack);

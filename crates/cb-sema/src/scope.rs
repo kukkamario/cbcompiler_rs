@@ -42,7 +42,7 @@ pub struct Declaration {
 pub enum DeclKind {
     Variable,
     Constant { value: ConstValue },
-    Function { params: Vec<ParamInfo>, return_ty: Type },
+    Function { params: Vec<ParamInfo>, return_ty: Type, scope: Option<ScopeId> },
     TypeDef { fields: Vec<FieldInfo> },
     StructDef { fields: Vec<FieldInfo> },
     Label,
@@ -161,6 +161,21 @@ impl SymbolTable {
             .symbols
             .iter()
             .map(|(&sym, decl)| (sym, decl))
+    }
+
+    /// Store the scope ID in a function declaration (set during pass 2).
+    pub(crate) fn update_function_scope(
+        &mut self,
+        scope: ScopeId,
+        name: Symbol,
+        fn_scope: ScopeId,
+    ) {
+        let s = &mut self.scopes[scope.0 as usize];
+        if let Some(decl) = s.symbols.get_mut(&name)
+            && let DeclKind::Function { scope: ref mut s, .. } = decl.kind
+        {
+            *s = Some(fn_scope);
+        }
     }
 
     /// Update the ConstValue of an existing Constant declaration.

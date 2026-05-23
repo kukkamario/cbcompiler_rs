@@ -43,6 +43,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         conversions,
         delete_classes,
 
+        current_scope: ScopeId(0),
         locals: Vec::new(),
         blocks: Vec::new(),
         current_block: BlockId(0),
@@ -85,6 +86,7 @@ struct Lowerer<'a> {
     delete_classes: &'a HashMap<NodeId, DeleteClass>,
 
     // Per-function state (reset between functions)
+    current_scope: ScopeId,
     locals: Vec<Local>,
     blocks: Vec<BasicBlock>,
     current_block: BlockId,
@@ -240,6 +242,7 @@ impl<'a> Lowerer<'a> {
     }
 
     fn reset_function_state(&mut self) {
+        self.current_scope = ScopeId(0);
         self.locals.clear();
         self.blocks.clear();
         self.next_reg = 0;
@@ -369,33 +372,23 @@ impl<'a> Lowerer<'a> {
 
         let func_name = self.intern_ident(name_span, None);
 
-        // Look up the function declaration to get param/return types.
+        // Look up the function declaration to get param/return types and scope.
         let decl = self.symbols.lookup(ScopeId(0), func_name).cloned();
-        let (param_types, ret_type) = if let Some(ref d) = decl
+        let (param_types, ret_type, param_infos) = if let Some(ref d) = decl
             && let DeclKind::Function {
                 params: ref param_infos,
                 ref return_ty,
+                ref scope,
             } = d.kind
         {
+            if let Some(fn_scope) = scope {
+                self.current_scope = *fn_scope;
+            }
             let pt: Vec<_> = param_infos.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
             let rt = self.sema_type_to_ir(return_ty);
-            (pt, rt)
+            (pt, rt, param_infos.clone())
         } else {
-            (Vec::new(), IrType::Void)
-        };
-
-        // Find the function's scope (it's the first Function scope whose parent is top-level).
-        // The checker created it when processing this function. We find it by looking up
-        // the function's parameters — they're in the function scope.
-        // For now, we look up parameters from the declaration info.
-        let param_infos: Vec<_> = if let Some(ref d) = decl
-            && let DeclKind::Function {
-                params: ref infos, ..
-            } = d.kind
-        {
-            infos.clone()
-        } else {
-            Vec::new()
+            (Vec::new(), IrType::Void, Vec::new())
         };
 
         // Allocate locals for parameters.
@@ -699,7 +692,7 @@ impl<'a> Lowerer<'a> {
         let name = self.intern_ident(name_span, sigil);
 
         // Check if this is a constant — inline its value.
-        if let Some(decl) = self.symbols.lookup(ScopeId(0), name)
+        if let Some(decl) = self.symbols.lookup(self.current_scope, name)
             && let DeclKind::Constant { value } = &decl.kind
         {
             return match *value {
@@ -726,8 +719,8 @@ impl<'a> Lowerer<'a> {
         let rhs_reg = self.lower_expr(rhs);
 
         // Check if this is a string operation by looking at operand types.
-        let lhs_ty = self.types.get(lhs);
-        let is_string = lhs_ty.is_some_and(|t| matches!(t, Type::String));
+        let is_string = self.types.get(lhs).is_some_and(|t| matches!(t, Type::String))
+            || self.types.get(rhs).is_some_and(|t| matches!(t, Type::String));
 
         let ir_op = if is_string {
             match op {
@@ -902,7 +895,7 @@ impl<'a> Lowerer<'a> {
         // Check if callee is an identifier referring to a known function.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
-            if let Some(decl) = self.symbols.lookup(ScopeId(0), name)
+            if let Some(decl) = self.symbols.lookup(self.current_scope, name)
                 && matches!(decl.kind, DeclKind::Function { .. })
             {
                 let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();

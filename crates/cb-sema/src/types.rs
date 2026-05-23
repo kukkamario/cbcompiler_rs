@@ -194,7 +194,7 @@ pub fn resolve_return_type(
 }
 
 /// Numeric promotion: given two numeric types, return the wider one.
-fn numeric_promote(a: &Type, b: &Type) -> Type {
+pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
     fn rank(t: &Type) -> u8 {
         match t {
             Type::Byte => 1,
