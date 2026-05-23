@@ -340,14 +340,19 @@ impl<'src> Lexer<'src> {
                     self.bump_char();
                 }
                 (None, _) => {
-                    // EOF inside block comment.
+                    // EOF inside block comment. Primary label spans the full
+                    // consumed region so the user sees every byte that got
+                    // swallowed; the opener is kept as a secondary anchor.
                     let opener = Span::new(start, start + 2, self.file);
                     let span = self.current_span(start);
-                    self.diagnostics.push(Diagnostic::error(
-                        E_UNTERMINATED_BLOCK_COMMENT,
-                        "unterminated block comment",
-                        Label::new(opener),
-                    ));
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            E_UNTERMINATED_BLOCK_COMMENT,
+                            "unterminated block comment",
+                            Label::with_message(span, "reached end of file inside block comment"),
+                        )
+                        .with_secondary(Label::with_message(opener, "block comment opened here")),
+                    );
                     self.push_token(
                         TokenKind::Error(LexErrorKind::UnterminatedBlockComment),
                         span,
@@ -459,13 +464,24 @@ impl<'src> Lexer<'src> {
                 return;
             }
             if self.at_eof() {
+                // Primary label on the opener (where the literal began);
+                // secondary label at EOF tells the user where scanning gave
+                // up. The token span still covers the full consumed region
+                // so the parser advances past it.
                 let opener = Span::new(start, start + 3, self.file);
+                let eof_span = Span::new(self.pos, self.pos, self.file);
                 let span = self.current_span(start);
-                self.diagnostics.push(Diagnostic::error(
-                    E_UNTERMINATED_STRING,
-                    "unterminated raw string literal",
-                    Label::new(opener),
-                ));
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        E_UNTERMINATED_STRING,
+                        "unterminated raw string literal",
+                        Label::with_message(opener, "raw string opened here"),
+                    )
+                    .with_secondary(Label::with_message(
+                        eof_span,
+                        "reached end of file without `\"\"\"` closer",
+                    )),
+                );
                 self.push_token(TokenKind::Error(LexErrorKind::UnterminatedString), span);
                 return;
             }
@@ -780,7 +796,15 @@ impl<'src> Lexer<'src> {
         let span = self.current_span(start);
         let raw = &self.bytes[run_lo as usize..run_hi as usize];
         if raw.is_empty() {
-            // `$_` form — no digits scanned.
+            // `$_` form — separator was diagnosed at the pre-check, but the
+            // deeper problem is that the literal has no hex digits at all.
+            // Emit the "expected hex digits" diagnostic too so the user
+            // doesn't have to guess what's wrong.
+            self.diagnostics.push(Diagnostic::error(
+                E_UNEXPECTED_CHAR,
+                "expected hexadecimal digits after `$`",
+                Label::new(span),
+            ));
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }
@@ -842,6 +866,12 @@ impl<'src> Lexer<'src> {
         let span = self.current_span(start);
         let raw = &self.bytes[run_lo as usize..run_hi as usize];
         if raw.is_empty() {
+            // `%_` form — see comment in `scan_number_hex` above.
+            self.diagnostics.push(Diagnostic::error(
+                E_UNEXPECTED_CHAR,
+                "expected binary digits after `%`",
+                Label::new(span),
+            ));
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }

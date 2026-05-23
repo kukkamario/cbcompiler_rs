@@ -838,6 +838,7 @@ mod trivia {
 
 mod newlines {
     use super::*;
+    use cb_frontend::LexErrorKind;
 
     #[test]
     fn lf_newline_one_byte() {
@@ -874,6 +875,53 @@ mod newlines {
                 TokenKind::Ident { sigil: None },
                 TokenKind::Eof,
             ]
+        );
+    }
+
+    // --- bare `\r` line-terminator coverage (`cb_syntax.md` §1.1) ----------
+    // All three contexts already behave correctly today; these tests pin the
+    // behaviour so a future regression in any one path fails loudly.
+
+    #[test]
+    fn bare_cr_separates_top_level_statements() {
+        // Three statements separated by bare `\r` must tokenize to the same
+        // shape as the `\n` variant.
+        let with_cr = lex("x = 1\ry = 2\rz = 3");
+        let with_lf = lex("x = 1\ny = 2\nz = 3");
+        assert_eq!(kinds(&with_cr), kinds(&with_lf));
+    }
+
+    #[test]
+    fn bare_cr_after_continuation_backslash() {
+        // `\` followed by bare `\r` is a valid line continuation: in
+        // trivia-preserving mode it emits a `Continuation` token; in the
+        // default (non-trivia) mode the operands fuse into a single
+        // expression. Verify both.
+        let trivia = lex_trivia("a + \\\rb");
+        assert!(
+            trivia.iter().any(|t| t.kind == TokenKind::Continuation),
+            "expected a Continuation token; got {trivia:?}"
+        );
+        let toks = lex("a + \\\rb");
+        // Default mode strips trivia: should be `Ident + Op(Plus) + Ident + Eof`,
+        // with no Newline interrupting the expression.
+        assert!(
+            !toks.iter().any(|t| t.kind == TokenKind::Newline),
+            "continuation should suppress the newline; got {toks:?}"
+        );
+    }
+
+    #[test]
+    fn bare_cr_inside_string_is_newline_in_string() {
+        let (toks, diags) = lex_with_diags("\"abc\rdef\"");
+        assert!(
+            toks.iter()
+                .any(|t| t.kind == TokenKind::Error(LexErrorKind::NewlineInString)),
+            "bare `\\r` inside a single-line string must error; got {toks:?}"
+        );
+        assert!(
+            diags.iter().any(|d| d.code == Some("E0101")),
+            "expected E0101 diagnostic; got {diags:?}"
         );
     }
 }
@@ -1152,6 +1200,107 @@ mod errors {
         assert!(
             toks.len() >= 2,
             "lexer must continue past invalid char; got {toks:?}"
+        );
+    }
+
+    #[test]
+    fn hex_underscore_only_emits_both_diagnostics() {
+        // `$_` with no following hex digits is two distinct problems: a
+        // misplaced digit separator AND a literal with no hex digits at all.
+        // The user should hear about both.
+        let (toks, diags) = lex_with_diags("$_");
+        assert!(
+            has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
+            "expected InvalidDigitSeparator token; got {toks:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0105"),
+            "expected E0105 (separator) diagnostic; got {diags:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0106"),
+            "expected E0106 (expected hex digits) diagnostic; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn binary_underscore_only_emits_both_diagnostics() {
+        let (toks, diags) = lex_with_diags("%_");
+        assert!(
+            has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
+            "expected InvalidDigitSeparator token; got {toks:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0105"),
+            "expected E0105 (separator) diagnostic; got {diags:?}"
+        );
+        assert!(
+            has_diag_code(&diags, "E0106"),
+            "expected E0106 (expected binary digits) diagnostic; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn unterminated_block_comment_label_covers_full_body() {
+        // 1 KiB of content inside `/* …` (no closer) must produce a
+        // diagnostic whose *primary* label covers the entire consumed range,
+        // not just the 2-byte opener.
+        let body: String = "x".repeat(1024);
+        let src = format!("/* {body}");
+        let (_, diags) = lex_with_diags(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some("E0103"))
+            .expect("expected E0103 diagnostic");
+        assert_eq!(
+            d.primary.span.start, 0,
+            "primary label should start at the opener"
+        );
+        assert_eq!(
+            d.primary.span.end as usize,
+            src.len(),
+            "primary label should extend through end of consumed input"
+        );
+        // The opener is preserved as a secondary anchor for context.
+        assert!(
+            d.secondary
+                .iter()
+                .any(|l| l.span.start == 0 && l.span.end == 2),
+            "expected secondary label on the 2-byte opener; got {:?}",
+            d.secondary
+        );
+    }
+
+    #[test]
+    fn unterminated_raw_string_diagnostic_has_opener_and_eof_labels() {
+        let src = "\"\"\"abc\ndef";
+        let (toks, diags) = lex_with_diags(src);
+        assert!(
+            has_error_kind(&toks, LexErrorKind::UnterminatedString),
+            "expected UnterminatedString token; got {toks:?}"
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some("E0102"))
+            .expect("expected E0102 diagnostic");
+        assert_eq!(
+            d.primary.span.start, 0,
+            "primary label should start at the opener"
+        );
+        assert_eq!(
+            d.primary.span.end, 3,
+            "primary label should cover the 3-byte opener"
+        );
+        // Secondary label points at the EOF cursor so the user sees both
+        // where the literal opened and where the lexer gave up.
+        let eof_label = d
+            .secondary
+            .iter()
+            .find(|l| l.span.start as usize == src.len() && l.span.end as usize == src.len());
+        assert!(
+            eof_label.is_some(),
+            "expected secondary label at EOF cursor; got {:?}",
+            d.secondary
         );
     }
 }

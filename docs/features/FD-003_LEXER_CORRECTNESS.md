@@ -17,17 +17,17 @@ A workspace-wide code review (2026-05-23) of the lexer surfaced several issues t
 
 3. **Lexer makes a typing decision sema should make.** Integer literals are parsed via `stripped.parse::<i64>()` (`lexer.rs:716`; also `:780` hex, `:839` binary). Valid `ULong` literals like `9_223_372_036_854_775_808` (= 2^63) emit `NumberOverflow` *at the lexer*, before the type inferrer ever sees them. The lexer is committing the literal to a signed-64 representation.
 
-4. **Bare `\r` handling is context-inconsistent.** `lexer.rs:212-227` accepts `\r` as a newline, but inside string scanning (`lexer.rs:385`) a bare `\r` produces `NewlineInString`, and the continuation path (`lexer.rs:236-249`) routes it differently again. `cb_syntax.md` §1.1 explicitly says bare `\r` is a line terminator — at minimum this needs fixtures pinning each context.
+4. **Bare `\r` behaviour is not pinned by tests.** All three contexts actually agree with `cb_syntax.md` §1.1 today: `scan_newline` (`lexer.rs:212-227`) and `scan_continuation_or_backslash` (`lexer.rs:236-249`) both treat bare `\r` as a line terminator, and `scan_string` (`lexer.rs:385`) correctly errors on it as `NewlineInString`. The risk is that *no fixture pins any of this end-to-end* — a future regression in any one context (e.g. dropping the `Some(b'\r')` arm) would lex silently differently and only show up far downstream. Need one fixture per context.
 
-5. **Hex/binary "underscore only after prefix" UX is inconsistent.** `$_` with no following digits emits only `InvalidDigitSeparator` (`lexer.rs:760`), no "expected hex digits". Contrast with the no-`_`-no-digit arm at `:743` that gives a clear message. Same in `scan_number_binary` (`:822-824`).
+5. **Hex/binary "underscore only after prefix" UX is incomplete.** `$_` (prefix + underscore + no digits) emits exactly one diagnostic — "digit separator cannot appear before any hexadecimal digit" pushed at `lexer.rs:732-737`, then the `raw.is_empty()` arm at `:760` short-circuits to an error token *without* the "expected hex digits after `$`" message that the no-`_`-no-digit path gets at `:743`. The user sees a separator complaint when the deeper problem is "no hex digits at all". Same shape in `scan_number_binary` at `:794-799` / `:822-824`.
 
 6. **Unterminated block-comment / raw-string diagnostics have poor span quality.** `scan_block_comment` labels only the 2-byte opener (`lexer.rs:324`) regardless of how many MB were consumed. `scan_raw_string` runs to EOF without a recovery point, so anything after a stray `"""` is silently swallowed (`lexer.rs:441-450`).
 
 7. **`Token` carries `f64` and so cannot be `Eq`** (`token.rs:18`). Comment acknowledges it. Parser `==` sites comparing `FloatLit` tokens silently treat NaN-float-lit tokens as never equal — a latent footgun.
 
-8. **`LONGEST_KEYWORD_LEN = 11` is a magic constant** tied to `endfunction`'s length (`keywords.rs:86-90`). A longer keyword added later silently breaks lookup; no test asserts the invariant.
+8. **`LONGEST_KEYWORD_LEN = 11` is a magic constant** tied to `endfunction`'s length (defined at `keywords.rs:75`, used at `:83-90` to short-circuit and size the lowercase scratch buffer). A longer keyword added later silently breaks lookup; no test asserts the invariant.
 
-9. **Minor: `UnexpectedChar` vs `InvalidChar` distinction is dead.** Both produce the same `E_UNEXPECTED_CHAR` diagnostic at `lexer.rs:173, 188, 745, 809`; comment at `token.rs:296-297` says "in case we want a different message later". Either give them different messages or collapse the variants.
+9. **Minor: `UnexpectedChar` vs `InvalidChar` distinction is muddled.** They share the `E_UNEXPECTED_CHAR` error code (`E0106`) but already carry different messages at call sites: `InvalidChar` is paired with "unexpected character \`X\`" (`lexer.rs:173`, `:188`, `:996-1001`); `UnexpectedChar` is paired with "expected hex/binary digits after `$`/`%`" (`:745`, `:809`). The comment at `token.rs:296-297` ("in case we want a different message later") is stale — they already diverge in message, just not in error code. Pick one: (a) split into distinct error codes so renderers can dispatch on them, or (b) collapse the variants and key message choice off the call site.
 
 10. **Minor: `peek_byte_at` does `self.pos as usize + offset` with no overflow guard** (`lexer.rs:79-81`). The lexer uses `u32` byte offsets pervasively; a `debug_assert!(src.len() <= u32::MAX as usize)` at the top of `tokenize` would catch misuse cleanly.
 
@@ -44,12 +44,12 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
 | 1 | Replace the `expect` in `bump_char` with a saturating advance + internal `Diagnostic` (or `debug_assert!` + cursor-clamp in release). Audit every caller to confirm pre-bump invariants. |
 | 2 | Replace `self.pos += 1` recovery in `scan_one` with an unconditional `bump_char` so a "should be impossible" event still advances by a full codepoint. |
 | 3 | Parse integer/hex/binary literals into `u64` (or store the raw lexeme bytes as a `Span` + base tag). Range-check against the inferred type in sema. Lexer emits `NumberMalformed` only for shapes that no type could accept (e.g. > 2^64 unsigned literal). The `NumberOverflow` code reserved at `lexer.rs` should be re-tasked or retired. |
-| 4 | Decide once: bare `\r` is a line terminator everywhere outside string literals, *and* inside `Continuation`. Inside a single-line string, bare `\r` continues to produce `NewlineInString` (the string was unterminated on the same line). Add a `\r`-only fixture per context. |
+| 4 | Behaviour is already spec-conformant; pin it. Add one `\r`-only fixture per context: top-level statements separated by `\r`, `\` continuation followed by a `\r`-only line ending, and a single-line string containing a bare `\r` (must produce `NewlineInString`). Do not change the lexer code for this issue. |
 | 5 | In both `scan_number_hex` and `scan_number_binary`, when `raw.is_empty()` after consuming a leading `_`, emit the "expected hex/binary digits after `$`/`%`" diagnostic *in addition to* `InvalidDigitSeparator`. |
 | 6 | (a) For unterminated block comments, extend the label span to `[opener.start, self.pos)` so the user sees the swallowed region. (b) For unterminated raw strings, add a sync rule: stop at the next newline that ends with only whitespace before another `"""`-or-EOF; emit the unterminated diagnostic with a label on the opener and an additional secondary label on the cursor. |
 | 7 | Wrap `FloatLit` in a newtype that hashes via raw bits (`f64::to_bits`) and implements `Eq` via bit-equality. NaN-equality becomes "same NaN payload" rather than "never equal" — sufficient for parser-side `==` and far less surprising. Alternative: intern float literals and reference them by index. |
 | 8 | Either compute `LONGEST_KEYWORD_LEN` via a `const fn` over the keyword table, or add a `#[test]` that asserts it equals the longest entry. The const-fn option is preferred. |
-| 9 | Collapse `UnexpectedChar` and `InvalidChar` into one variant, or split their messages. Pick one. |
+| 9 | Decide whether the variants are load-bearing. Recommended: collapse into a single `UnexpectedChar` variant — the distinction adds no information that the call site's message doesn't already convey, and there is no consumer that switches on the variant. Drop the stale "different message later" comment in `token.rs`. |
 | 10 | Add `debug_assert!(src.len() <= u32::MAX as usize, "source too large for u32 offsets")` at the top of `tokenize`. |
 
 ### Out of scope
@@ -63,7 +63,7 @@ Touch `crates/cb-frontend` only. No public-API breaking changes except:
 | File | Action | Purpose |
 |------|--------|---------|
 | `crates/cb-frontend/src/lexer.rs` | MODIFY | Fix bump_char panic reachability, scan_one recovery, hex/binary UX, block-comment / raw-string span quality, `u64` literal parsing, `debug_assert!` on input size. |
-| `crates/cb-frontend/src/token.rs` | MODIFY | `FloatBits(u64)` newtype for `FloatLit`. Possibly collapse `UnexpectedChar`/`InvalidChar`. Update `IntLit` to `u64`. |
+| `crates/cb-frontend/src/token.rs` | MODIFY | `FloatBits(u64)` newtype for `FloatLit`. Collapse `InvalidChar` into `UnexpectedChar` and drop the stale comment. Update `IntLit` to `u64`. |
 | `crates/cb-frontend/src/keywords.rs` | MODIFY | Replace `LONGEST_KEYWORD_LEN` constant with a derived const-fn or add a test. |
 | `crates/cb-frontend/tests/lexer_units.rs` | MODIFY | Add unit tests per issue (see Verification). |
 | `crates/cb-frontend/tests/lexer_snapshots.rs` + fixtures | MODIFY | Add `bare_cr.cb`, `numeric_boundaries.cb` fixtures. |
