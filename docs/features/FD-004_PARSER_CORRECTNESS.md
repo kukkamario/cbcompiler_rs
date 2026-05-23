@@ -1,6 +1,6 @@
 # FD-004: Parser Correctness & Small Spec Gaps
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Closes correctness bugs and small spec gaps found in the post-FD-002 code review. Fixes one panic-reachability case in the statement parser, makes the `\` line-continuation token actually work, and lifts several documented-but-unparseable forms.
