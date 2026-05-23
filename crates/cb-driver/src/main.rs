@@ -210,6 +210,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             }
             Stmt::Return { value: Some(v) } => out.push(*v),
             Stmt::Include { path } => out.push(*path),
+            Stmt::Delete { operand } => out.push(*operand),
             _ => {}
         },
         Node::TypeExpr(t) => match t {
@@ -288,6 +289,7 @@ fn stmt_variant_name(s: &cb_frontend::ast::Stmt) -> &'static str {
         Stmt::Break { .. } => "Break",
         Stmt::Continue => "Continue",
         Stmt::Include { .. } => "Include",
+        Stmt::Delete { .. } => "Delete",
         Stmt::Error => "Error",
     }
 }

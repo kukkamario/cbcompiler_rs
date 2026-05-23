@@ -18,6 +18,7 @@ static KEYWORDS: phf::Map<&'static str, Kw> = phf_map! {
     "const" => Kw::Const,
     "continue" => Kw::Continue,
     "default" => Kw::Default,
+    "delete" => Kw::Delete,
     "dim" => Kw::Dim,
     "each" => Kw::Each,
     "else" => Kw::Else,

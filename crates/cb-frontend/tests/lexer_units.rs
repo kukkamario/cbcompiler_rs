@@ -387,6 +387,21 @@ mod keywords {
     }
 
     #[test]
+    fn delete_is_keyword_case_insensitive() {
+        // FD-005: pre-FD-005, `Delete` lexed as `Ident` and the parser
+        // misread `Delete x` as a paren-less call. Pin the keyword status
+        // across the three canonical case variants.
+        for src in ["delete", "Delete", "DELETE"] {
+            let toks = lex(src);
+            assert_eq!(
+                kinds(&toks),
+                vec![TokenKind::Keyword(Kw::Delete), TokenKind::Eof],
+                "case variant `{src}` should lex to Keyword(Delete)"
+            );
+        }
+    }
+
+    #[test]
     fn ident_followed_by_keyword() {
         let toks = lex("myFunc If");
         assert_eq!(

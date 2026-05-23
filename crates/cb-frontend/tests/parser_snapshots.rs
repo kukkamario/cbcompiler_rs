@@ -210,6 +210,7 @@ fn format_stmt(s: &Stmt) -> String {
         },
         Stmt::Continue => "Continue".to_string(),
         Stmt::Include { .. } => "Include".to_string(),
+        Stmt::Delete { .. } => "Delete".to_string(),
         Stmt::Error => "Error".to_string(),
     }
 }
@@ -429,6 +430,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             }
             Stmt::Return { value: Some(v) } => out.push(*v),
             Stmt::Include { path } => out.push(*path),
+            Stmt::Delete { operand } => out.push(*operand),
             _ => {}
         },
         Node::TypeExpr(t) => match t {
@@ -554,6 +556,11 @@ fn select_duplicate_default() {
 #[test]
 fn case_comma_list() {
     insta::assert_snapshot!(snapshot_parser_fixture("case_comma_list"));
+}
+
+#[test]
+fn delete_statement() {
+    insta::assert_snapshot!(snapshot_parser_fixture("delete_statement"));
 }
 
 #[test]

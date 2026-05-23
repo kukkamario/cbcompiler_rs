@@ -1,0 +1,27 @@
+// FD-005: `Delete` statement (§3.3). The parser is permissive on operand
+// shape — lvalue/rvalue classification and the §9.2 trap diagnostics are
+// sema's job.
+
+// Lvalue operands: plain variable, field, indexed. (`field` is a CB
+// keyword, hence the `.field1` spelling — matches the §3.3 spec example.)
+Delete x
+Delete y.field1
+Delete arr[0]
+
+// Rvalue operand: call expression. Sema will later flag the rvalue form
+// per §3.3 ("any CB variable or field still holding the freed reference
+// now dangles").
+Delete First(MyType)
+
+// `Delete` inside a single-line `If` — the canonical loop-cleanup pattern
+// from §3.3's worked examples ("If n.dead Then Delete n").
+If n.dead Then Delete n
+
+// Recovery: missing operand on its own line — diagnostic, statement is
+// `Stmt::Error` and the parser moves on.
+Delete
+
+// Recovery: missing operand before `:` separator. `Print` is not a keyword
+// in this language, so the following `Print 1` parses as a paren-less call
+// to a user-defined sub named `Print`.
+Delete : Print 1

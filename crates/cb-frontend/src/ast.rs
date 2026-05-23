@@ -237,6 +237,14 @@ pub enum Stmt {
     Include {
         path: NodeId,
     },
+    /// `Delete <expr>` — removes a `Type` node from its linked list and frees
+    /// it (`cb_syntax.md` §3.3). The parser is permissive on operand shape;
+    /// sema classifies lvalue (rewinds the variable + marks deleted) vs
+    /// rvalue (frees only) and emits runtime-trap diagnostics where it can
+    /// prove them statically.
+    Delete {
+        operand: NodeId,
+    },
     Error,
 }
 
