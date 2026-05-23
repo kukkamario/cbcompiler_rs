@@ -309,29 +309,3 @@ pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
     }
 }
 
-/// Quick check whether `from` can be implicitly assigned to `to`.
-///
-/// Full conversion logic (with ConversionTable population) is in M4.
-/// This is a simplified version for basic type-compatibility checks.
-pub fn is_implicitly_convertible(from: &Type, to: &Type) -> bool {
-    if from == to {
-        return true;
-    }
-    // Numeric widening / narrowing — all numeric-to-numeric is allowed implicitly.
-    if from.is_numeric() && to.is_numeric() {
-        return true;
-    }
-    // Bool ↔ numeric
-    if (*from == Type::Bool && to.is_numeric()) || (from.is_numeric() && *to == Type::Bool) {
-        return true;
-    }
-    // Null → any reference type
-    if *from == Type::Null && to.is_reference() {
-        return true;
-    }
-    // Numeric/Bool → String (via + context, but allow for assignment too for now)
-    if from.is_numeric() && *to == Type::String {
-        return true;
-    }
-    false
-}

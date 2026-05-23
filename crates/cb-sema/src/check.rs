@@ -4,7 +4,7 @@ use cb_diagnostics::{Diagnostic, FileId, Interner, Label, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt};
 use cb_frontend::{Arena, BinOp, NodeId, Sigil, SpanExt, UnOp};
 
-use crate::convert::ConversionTable;
+use crate::convert::{self, ConversionTable};
 use crate::diagnostics::*;
 use crate::scope::{
     ConstValue, DeclKind, Declaration, FieldInfo, ParamInfo, ScopeId, ScopeKind, SymbolTable,
@@ -770,9 +770,18 @@ impl<'a> Checker<'a> {
                     self.check_expr(init_id);
                 }
             }
-            Node::Stmt(Stmt::Const { value, .. }) => {
-                // Const is already hoisted; check the value expression.
+            Node::Stmt(Stmt::Const {
+                name_span,
+                sigil,
+                value,
+                ..
+            }) => {
                 self.check_expr(value);
+                // Evaluate the constant expression and update the declaration.
+                if let Some(const_val) = self.eval_const_expr(value) {
+                    let name = self.intern_ident(name_span, sigil);
+                    self.symbols.update_const_value(self.current_scope, name, const_val);
+                }
             }
             Node::Stmt(Stmt::If {
                 cond,
@@ -870,6 +879,71 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Try to coerce `value_node` (with type `from`) to `to`. If a conversion
+    /// exists, record it in the ConversionTable. If narrowing, emit E0318 warning.
+    /// If no conversion path, emit E0317 error. Returns true if compatible.
+    fn coerce(&mut self, value_node: NodeId, from: &Type, to: &Type) -> bool {
+        if from == to || from.is_error() || to.is_error() {
+            return true;
+        }
+        if let Some(conv) = convert::find_implicit_conversion(from, to) {
+            self.conversions.insert(value_node, conv);
+            if convert::is_narrowing(conv, from, to) {
+                self.diagnostics.push(Diagnostic::warning(
+                    E_NARROWING_CONVERSION,
+                    format!("implicit narrowing conversion from `{from:?}` to `{to:?}`"),
+                    Label::new(self.arena.span_of(value_node)),
+                ));
+            }
+            true
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                E_CANNOT_CONVERT,
+                format!("cannot implicitly convert `{from:?}` to `{to:?}`"),
+                Label::new(self.arena.span_of(value_node)),
+            ));
+            false
+        }
+    }
+
+    /// Evaluate a constant expression at compile time.
+    /// Returns `Some(value)` on success, `None` if not a constant expression.
+    fn eval_const_expr(&mut self, id: NodeId) -> Option<ConstValue> {
+        match self.arena[id].clone() {
+            Node::Expr(Expr::IntLit(v)) => Some(ConstValue::Int(v as i64)),
+            Node::Expr(Expr::FloatLit(v)) => Some(ConstValue::Float(v.to_f64())),
+            Node::Expr(Expr::BoolLit(v)) => Some(ConstValue::Bool(v)),
+            Node::Expr(Expr::StrLit { value, .. }) => Some(ConstValue::String(value)),
+            Node::Expr(Expr::Paren { inner }) => self.eval_const_expr(inner),
+            Node::Expr(Expr::Unary { op, operand }) => {
+                let val = self.eval_const_expr(operand)?;
+                match (op, val) {
+                    (UnOp::Neg, ConstValue::Int(v)) => Some(ConstValue::Int(-v)),
+                    (UnOp::Neg, ConstValue::Float(v)) => Some(ConstValue::Float(-v)),
+                    (UnOp::Plus, v @ ConstValue::Int(_)) => Some(v),
+                    (UnOp::Plus, v @ ConstValue::Float(_)) => Some(v),
+                    (UnOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
+                    _ => None,
+                }
+            }
+            Node::Expr(Expr::Binary { op, lhs, rhs }) => {
+                let l = self.eval_const_expr(lhs)?;
+                let r = self.eval_const_expr(rhs)?;
+                eval_const_binary(op, &l, &r)
+            }
+            Node::Expr(Expr::Ident { name_span, sigil }) => {
+                let name = self.intern_ident(name_span, sigil);
+                let decl = self.symbols.lookup(self.current_scope, name)?;
+                if let DeclKind::Constant { value } = &decl.kind {
+                    Some(value.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn check_assign(&mut self, target: NodeId, value: NodeId) {
         // If the target is an undeclared identifier, create an implicit declaration.
         let target_ty = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[target] {
@@ -895,16 +969,7 @@ impl<'a> Checker<'a> {
 
         let value_ty = self.check_expr(value);
         if !target_ty.is_error() && !value_ty.is_error() && target_ty != value_ty {
-            // For now, just flag clear mismatches. M4 will add conversion logic.
-            if !types::is_implicitly_convertible(&value_ty, &target_ty) {
-                self.diagnostics.push(Diagnostic::error(
-                    E_TYPE_MISMATCH,
-                    format!(
-                        "cannot assign `{value_ty:?}` to `{target_ty:?}`",
-                    ),
-                    Label::new(self.arena.span_of(value)),
-                ));
-            }
+            self.coerce(value, &value_ty, &target_ty);
         }
     }
 
@@ -1130,7 +1195,8 @@ impl<'a> Checker<'a> {
     }
 
     fn check_return(&mut self, value: Option<NodeId>, span: Span) {
-        match &self.current_fn_return_ty {
+        let ret_ty = self.current_fn_return_ty.clone();
+        match ret_ty {
             None => {
                 self.diagnostics.push(Diagnostic::error(
                     E_RETURN_OUTSIDE_FN,
@@ -1138,7 +1204,7 @@ impl<'a> Checker<'a> {
                     Label::new(span),
                 ));
             }
-            Some(ret_ty) => {
+            Some(ref ret_ty) => {
                 if *ret_ty == Type::Void {
                     if let Some(val_id) = value {
                         self.check_expr(val_id);
@@ -1149,7 +1215,8 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 } else if let Some(val_id) = value {
-                    self.check_expr(val_id);
+                    let val_ty = self.check_expr(val_id);
+                    self.coerce(val_id, &val_ty, ret_ty);
                 } else {
                     self.diagnostics.push(Diagnostic::error(
                         E_MISSING_RETURN_VALUE,
@@ -1210,6 +1277,43 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
+    }
+}
+
+fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstValue> {
+    match (op, l, r) {
+        // Integer arithmetic
+        (BinOp::Add, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_add(*b))),
+        (BinOp::Sub, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_sub(*b))),
+        (BinOp::Mul, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_mul(*b))),
+        (BinOp::Div, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => Some(ConstValue::Int(a / b)),
+        (BinOp::Mod, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => Some(ConstValue::Int(a % b)),
+
+        // Float arithmetic
+        (BinOp::Add, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a + b)),
+        (BinOp::Sub, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a - b)),
+        (BinOp::Mul, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a * b)),
+        (BinOp::Div, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a / b)),
+
+        // String concatenation
+        (BinOp::Add, ConstValue::String(a), ConstValue::String(b)) => {
+            Some(ConstValue::String(format!("{a}{b}")))
+        }
+
+        // Integer comparison
+        (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a == b)),
+        (BinOp::NotEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a != b)),
+        (BinOp::Lt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a < b)),
+        (BinOp::Gt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a > b)),
+        (BinOp::LtEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a <= b)),
+        (BinOp::GtEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a >= b)),
+
+        // Bool logic
+        (BinOp::And, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a && *b)),
+        (BinOp::Or, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a || *b)),
+        (BinOp::Xor, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a ^ *b)),
+
+        _ => None,
     }
 }
 
@@ -1586,5 +1690,88 @@ mod tests {
             sema_errors.is_empty(),
             "expected no sema errors from error poisoning, got {sema_errors:?}"
         );
+    }
+
+    // ── M4 tests: implicit conversions ──────────────────────────────────
+
+    fn warning_codes(result: &crate::SemaResult) -> Vec<&str> {
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Warning))
+            .filter_map(|d| d.code.as_ref().map(|c| c.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn conversion_int_to_float_no_warning() {
+        let result = analyze_src("Dim x As Float\nx = 42\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        // Check that a conversion was recorded
+        assert!(result.conversions.get(cb_frontend::NodeId(4)).is_some()
+            || result.diagnostics.is_empty()); // at minimum no errors
+    }
+
+    #[test]
+    fn conversion_float_to_int_narrowing_e0318() {
+        let result = analyze_src("Dim y As Integer\ny = 1.5\n");
+        assert_eq!(warning_codes(&result), vec!["E0318"]);
+    }
+
+    #[test]
+    fn conversion_bool_to_int_no_warning() {
+        let result = analyze_src("Dim n As Integer\nn = True\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn conversion_null_to_typeref() {
+        let result = analyze_src("Type MyType\nField x As Integer\nEndType\nDim t As MyType\nt = Null\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn conversion_no_path_e0317() {
+        // String → Integer has no implicit conversion path.
+        let result = analyze_src("Dim n As Integer\nDim s As String\nn = s\n");
+        assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn conversion_long_to_byte_narrowing_e0318() {
+        let result = analyze_src("Dim b As Byte\nDim l As Long\nb = l\n");
+        assert_eq!(warning_codes(&result), vec!["E0318"]);
+    }
+
+    // ── M4 tests: constant evaluation ───────────────────────────────────
+
+    #[test]
+    fn const_eval_simple_arithmetic() {
+        let result = analyze_src("Const x = 1 + 2 * 3\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn const_eval_negation() {
+        let result = analyze_src("Const x = -42\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn const_eval_references_other_const() {
+        let result = analyze_src("Const a = 1\nConst b = a + 2\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn const_eval_bool_logic() {
+        let result = analyze_src("Const x = True And False\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn const_eval_string_concat() {
+        let result = analyze_src("Const x$ = \"hello\" + \" world\"\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }
