@@ -2,7 +2,7 @@
 
 use cb_diagnostics::{Interner, Symbol};
 use cb_frontend::ast::{Node, TypeExpr};
-use cb_frontend::{Arena, Kw, NodeId, Sigil};
+use cb_frontend::{Arena, BinOp, Kw, NodeId, Sigil, UnOp};
 
 /// Resolved type of a CoolBasic expression or variable.
 #[derive(Clone, Debug, PartialEq)]
@@ -191,4 +191,147 @@ pub fn resolve_return_type(
             }
         }
     }
+}
+
+/// Numeric promotion: given two numeric types, return the wider one.
+fn numeric_promote(a: &Type, b: &Type) -> Type {
+    fn rank(t: &Type) -> u8 {
+        match t {
+            Type::Byte => 1,
+            Type::Short => 2,
+            Type::Int | Type::UInt => 3,
+            Type::Long | Type::ULong => 4,
+            Type::Float => 5,
+            _ => 0,
+        }
+    }
+    if rank(a) >= rank(b) { a.clone() } else { b.clone() }
+}
+
+/// Determine the result type of a binary operation, or `None` if the types
+/// are incompatible for this operator.
+pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
+    match op {
+        // Arithmetic
+        BinOp::Add => {
+            if *lhs == Type::String || *rhs == Type::String {
+                Some(Type::String)
+            } else if lhs.is_numeric() && rhs.is_numeric() {
+                Some(numeric_promote(lhs, rhs))
+            } else {
+                None
+            }
+        }
+        BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow | BinOp::Mod => {
+            if lhs.is_numeric() && rhs.is_numeric() {
+                Some(numeric_promote(lhs, rhs))
+            } else {
+                None
+            }
+        }
+        BinOp::IntDiv => {
+            if lhs.is_numeric() && rhs.is_numeric() {
+                Some(Type::Int)
+            } else {
+                None
+            }
+        }
+
+        // Bitwise
+        BinOp::BinAnd | BinOp::BinOr | BinOp::BinXor => {
+            if lhs.is_integer() && rhs.is_integer() {
+                Some(numeric_promote(lhs, rhs))
+            } else {
+                None
+            }
+        }
+        BinOp::Shl | BinOp::Shr | BinOp::Sar => {
+            if lhs.is_integer() && rhs.is_integer() {
+                Some(lhs.clone())
+            } else {
+                None
+            }
+        }
+
+        // Comparison — result is always Bool
+        BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+            if (lhs.is_numeric() && rhs.is_numeric())
+                || (*lhs == Type::String && *rhs == Type::String)
+                || (*lhs == Type::Bool && *rhs == Type::Bool)
+                || (lhs.is_reference() && rhs.is_reference())
+                || (*lhs == Type::Null && rhs.is_reference())
+                || (lhs.is_reference() && *rhs == Type::Null)
+                || (*lhs == Type::Null && *rhs == Type::Null)
+            {
+                Some(Type::Bool)
+            } else {
+                None
+            }
+        }
+
+        // Logical
+        BinOp::And | BinOp::Or | BinOp::Xor => {
+            if (*lhs == Type::Bool || lhs.is_numeric())
+                && (*rhs == Type::Bool || rhs.is_numeric())
+            {
+                Some(Type::Bool)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Determine the result type of a unary operation.
+pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
+    match op {
+        UnOp::Plus | UnOp::Neg => {
+            if operand.is_numeric() {
+                Some(operand.clone())
+            } else {
+                None
+            }
+        }
+        UnOp::Not => {
+            if *operand == Type::Bool || operand.is_numeric() {
+                Some(Type::Bool)
+            } else {
+                None
+            }
+        }
+        UnOp::BinNot => {
+            if operand.is_integer() {
+                Some(operand.clone())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Quick check whether `from` can be implicitly assigned to `to`.
+///
+/// Full conversion logic (with ConversionTable population) is in M4.
+/// This is a simplified version for basic type-compatibility checks.
+pub fn is_implicitly_convertible(from: &Type, to: &Type) -> bool {
+    if from == to {
+        return true;
+    }
+    // Numeric widening / narrowing — all numeric-to-numeric is allowed implicitly.
+    if from.is_numeric() && to.is_numeric() {
+        return true;
+    }
+    // Bool ↔ numeric
+    if (*from == Type::Bool && to.is_numeric()) || (from.is_numeric() && *to == Type::Bool) {
+        return true;
+    }
+    // Null → any reference type
+    if *from == Type::Null && to.is_reference() {
+        return true;
+    }
+    // Numeric/Bool → String (via + context, but allow for assignment too for now)
+    if from.is_numeric() && *to == Type::String {
+        return true;
+    }
+    false
 }

@@ -477,6 +477,20 @@ impl<'t> Parser<'t> {
                 self.cursor.bump();
                 Ok(self.alloc(Node::Expr(Expr::NullLit), tok.span))
             }
+            // Type keywords used as intrinsic conversion calls: Int(v), Float(v), Bool(v).
+            // Only when followed by `(` — otherwise fall through to the error arm.
+            TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool)
+                if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
+            {
+                self.cursor.bump();
+                Ok(self.alloc(
+                    Node::Expr(Expr::Ident {
+                        name_span: tok.span,
+                        sigil: None,
+                    }),
+                    tok.span,
+                ))
+            }
             TokenKind::Ident { sigil } => {
                 self.cursor.bump();
                 let name_span = bare_name_span(tok.span, sigil);
