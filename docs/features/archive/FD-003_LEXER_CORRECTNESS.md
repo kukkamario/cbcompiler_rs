@@ -1,6 +1,7 @@
 # FD-003: Lexer Correctness & Robustness Pass
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-23
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Closes correctness gaps and panic-reachability issues identified in the post-FD-001/FD-002 code review. Tightens the lexer's contract ("never aborts") and removes typing decisions that belong in sema, before the IR/sema layer starts depending on lexer output.
