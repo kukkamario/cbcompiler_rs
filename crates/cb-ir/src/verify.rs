@@ -12,6 +12,7 @@ use crate::{BlockId, Program, Reg};
 pub fn verify(program: &Program) {
     let func_table_len = program.func_table.len() as u32;
     let num_type_defs = program.type_defs.len() as u32;
+    let num_globals = program.globals.len() as u32;
 
     for func in &program.functions {
         let num_locals = func.locals.len() as u32;
@@ -33,6 +34,7 @@ pub fn verify(program: &Program) {
                 verify_inst_regs(&inst.kind, &defined_regs);
                 verify_inst_func_ids(&inst.kind, func_table_len);
                 verify_inst_type_defs(&inst.kind, num_type_defs);
+                verify_inst_globals(&inst.kind, num_globals);
             }
 
             if let Some(ref term) = block.terminator {
@@ -87,6 +89,24 @@ fn verify_inst_type_defs(kind: &InstKind, num_type_defs: u32) {
     }
 }
 
+fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
+    let check = |id: crate::GlobalId| {
+        assert!(
+            id.0 < num_globals,
+            "GlobalId({}) out of range (program has {num_globals} globals)",
+            id.0,
+        );
+    };
+
+    match kind {
+        InstKind::LoadGlobal { global }
+        | InstKind::StoreGlobal { global, .. }
+        | InstKind::DeleteLvalueGlobal { global }
+        | InstKind::RedimGlobal { global, .. } => check(*global),
+        _ => {}
+    }
+}
+
 fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
     let check = |r: Reg| {
         assert!(defined.contains(&r), "register {r} used before definition");
@@ -98,7 +118,7 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
             check(*rhs);
         }
         InstKind::UnOp { operand, .. } => check(*operand),
-        InstKind::StoreLocal { value, .. } => check(*value),
+        InstKind::StoreLocal { value, .. } | InstKind::StoreGlobal { value, .. } => check(*value),
         InstKind::GetField { object, .. } => check(*object),
         InstKind::SetField { object, value, .. } => {
             check(*object);
@@ -148,16 +168,18 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
                 check(*a);
             }
         }
-        InstKind::Redim { dims, .. } => {
+        InstKind::Redim { dims, .. } | InstKind::RedimGlobal { dims, .. } => {
             for d in dims {
                 check(*d);
             }
         }
         InstKind::LoadLocal { .. }
+        | InstKind::LoadGlobal { .. }
         | InstKind::NewType { .. }
         | InstKind::First { .. }
         | InstKind::Last { .. }
         | InstKind::DeleteLvalue { .. }
+        | InstKind::DeleteLvalueGlobal { .. }
         | InstKind::ConstInt(_)
         | InstKind::ConstFloat(_)
         | InstKind::ConstBool(_)
@@ -219,6 +241,7 @@ mod tests {
         Program {
             func_table: Vec::new(),
             functions: vec![func],
+            globals: Vec::new(),
             type_defs: Vec::new(),
             struct_defs: Vec::new(),
         }
@@ -278,7 +301,6 @@ mod tests {
             vec![Local {
                 name: dummy_sym(),
                 ty: IrType::Int,
-                is_global: false,
                 is_param: false,
             }],
             Terminator::Return { value: None },

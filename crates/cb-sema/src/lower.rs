@@ -12,8 +12,8 @@ use cb_frontend::{Arena, BinOp, NewKind, NodeId, SpanExt, UnOp};
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator};
 use cb_ir::types::{FnSig, IrType};
 use cb_ir::{
-    BasicBlock, BlockId, FuncDecl, FuncId, FuncKind, Function, Inst, Local, LocalId, Program, Reg,
-    StructDefInfo, TypeDefId, TypeDefInfo,
+    BasicBlock, BlockId, FuncDecl, FuncId, FuncKind, Function, Global, GlobalId, Inst, Local,
+    LocalId, Program, Reg, StructDefInfo, TypeDefId, TypeDefInfo,
 };
 
 use crate::convert::ConversionTable;
@@ -61,6 +61,8 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         func_id_map: HashMap::new(),
         runtime_func_map: HashMap::new(),
         functions: Vec::new(),
+        globals: Vec::new(),
+        global_map: HashMap::new(),
         type_defs: Vec::new(),
         type_def_map: HashMap::new(),
         struct_defs: Vec::new(),
@@ -79,6 +81,14 @@ enum ControlContext {
     Select {
         next_arm_body: Option<BlockId>,
     },
+}
+
+// ── Variable reference ──────────────────────────────────────────────────
+
+#[derive(Copy, Clone)]
+enum VarRef {
+    Local(LocalId),
+    Global(GlobalId),
 }
 
 // ── Lowerer ─────────────────────────────────────────────────────────────
@@ -105,11 +115,13 @@ struct Lowerer<'a> {
     label_blocks: HashMap<Symbol, BlockId>,
     next_temp: u32,
 
-    // Collected output
+    // Collected output (program-scoped)
     func_table: Vec<FuncDecl>,
     func_id_map: HashMap<Symbol, FuncId>,
     runtime_func_map: HashMap<String, FuncId>,
     functions: Vec<Function>,
+    globals: Vec<Global>,
+    global_map: HashMap<Symbol, GlobalId>,
     type_defs: Vec<TypeDefInfo>,
     type_def_map: HashMap<Symbol, TypeDefId>,
     struct_defs: Vec<StructDefInfo>,
@@ -174,22 +186,41 @@ impl<'a> Lowerer<'a> {
         self.current_block = block;
     }
 
-    fn alloc_local(
-        &mut self,
-        name: Symbol,
-        ty: IrType,
-        is_global: bool,
-        is_param: bool,
-    ) -> LocalId {
+    fn alloc_local(&mut self, name: Symbol, ty: IrType, is_param: bool) -> LocalId {
         let id = LocalId(self.locals.len() as u32);
         self.locals.push(Local {
             name,
             ty,
-            is_global,
             is_param,
         });
         self.local_map.insert(name, id);
         id
+    }
+
+    fn resolve_var(&self, name: Symbol) -> Option<VarRef> {
+        if let Some(&g) = self.global_map.get(&name) {
+            Some(VarRef::Global(g))
+        } else {
+            self.lookup_local(name).map(VarRef::Local)
+        }
+    }
+
+    fn emit_load_var(&mut self, var: VarRef, span: Span) -> Reg {
+        match var {
+            VarRef::Local(id) => self.emit(InstKind::LoadLocal { local: id }, span),
+            VarRef::Global(id) => self.emit(InstKind::LoadGlobal { global: id }, span),
+        }
+    }
+
+    fn emit_store_var(&mut self, var: VarRef, value: Reg, span: Span) {
+        match var {
+            VarRef::Local(id) => {
+                self.emit_void(InstKind::StoreLocal { local: id, value }, span);
+            }
+            VarRef::Global(id) => {
+                self.emit_void(InstKind::StoreGlobal { global: id, value }, span);
+            }
+        }
     }
 
     fn lookup_local(&self, name: Symbol) -> Option<LocalId> {
@@ -200,7 +231,7 @@ impl<'a> Lowerer<'a> {
         let n = self.next_temp;
         self.next_temp += 1;
         let name = self.interner.intern(&format!("{prefix}_{n}"));
-        self.alloc_local(name, ty, false, false)
+        self.alloc_local(name, ty, false)
     }
 
     fn intern_span(&mut self, span: Span) -> Symbol {
@@ -310,6 +341,16 @@ impl<'a> Lowerer<'a> {
             self.type_def_map.insert(td.name, TypeDefId(i as u32));
         }
 
+        // Collect global variables.
+        for (sym, decl) in self.symbols.iter_scope(top_scope) {
+            if matches!(decl.kind, DeclKind::Variable) && decl.is_global {
+                let ir_ty = self.sema_type_to_ir(&decl.ty);
+                let gid = GlobalId(self.globals.len() as u32);
+                self.globals.push(Global { name: sym, ty: ir_ty });
+                self.global_map.insert(sym, gid);
+            }
+        }
+
         // Build func_table: runtime functions first, then user-defined.
         self.build_func_table(program, top_scope);
 
@@ -329,6 +370,7 @@ impl<'a> Lowerer<'a> {
         Program {
             func_table: std::mem::take(&mut self.func_table),
             functions: std::mem::take(&mut self.functions),
+            globals: std::mem::take(&mut self.globals),
             type_defs: std::mem::take(&mut self.type_defs),
             struct_defs: std::mem::take(&mut self.struct_defs),
         }
@@ -452,8 +494,11 @@ impl<'a> Lowerer<'a> {
             .collect();
         top_vars.sort_by_key(|(_, decl)| decl.span.start);
         for (sym, decl) in top_vars {
+            if decl.is_global {
+                continue;
+            }
             let ir_ty = self.sema_type_to_ir(&decl.ty);
-            self.alloc_local(sym, ir_ty, decl.is_global, false);
+            self.alloc_local(sym, ir_ty, false);
         }
 
         // Lower non-function/type/struct top-level statements.
@@ -522,7 +567,7 @@ impl<'a> Lowerer<'a> {
 
         // Allocate locals for parameters.
         for (i, pi) in param_infos.iter().enumerate() {
-            self.alloc_local(pi.name, param_types[i].clone(), false, true);
+            self.alloc_local(pi.name, param_types[i].clone(), true);
         }
 
         // Find the function's scope to collect local variables.
@@ -567,26 +612,15 @@ impl<'a> Lowerer<'a> {
                                 .get(id)
                                 .map(|t| self.sema_type_to_ir(t))
                                 .unwrap_or_else(|| {
-                                    // Resolve from sigil/As — fallback
                                     let _ = ty;
                                     IrType::Int
                                 });
-                            self.alloc_local(name, var_ty, false, false);
+                            self.alloc_local(name, var_ty, false);
                         }
                     }
                 }
-                Node::Stmt(Stmt::Global { names, .. }) => {
-                    for dn in &names {
-                        let name = self.intern_ident(dn.name_span, dn.sigil);
-                        if self.lookup_local(name).is_none() {
-                            let var_ty = self
-                                .types
-                                .get(id)
-                                .map(|t| self.sema_type_to_ir(t))
-                                .unwrap_or(IrType::Int);
-                            self.alloc_local(name, var_ty, true, false);
-                        }
-                    }
+                Node::Stmt(Stmt::Global { .. }) => {
+                    // Globals are collected at program level — no local slot needed.
                 }
                 // Recurse into nested bodies for variables declared in blocks.
                 // CoolBasic has function-level scoping so all Dims in the function
@@ -634,7 +668,7 @@ impl<'a> Lowerer<'a> {
                                 .get(target)
                                 .map(|t| self.sema_type_to_ir(t))
                                 .unwrap_or(IrType::Int);
-                            self.alloc_local(name, var_ty, false, false);
+                            self.alloc_local(name, var_ty, false);
                         }
                     }
                 }
@@ -839,10 +873,9 @@ impl<'a> Lowerer<'a> {
         }
 
         // Regular variable load.
-        if let Some(local) = self.lookup_local(name) {
-            self.emit(InstKind::LoadLocal { local }, span)
+        if let Some(var) = self.resolve_var(name) {
+            self.emit_load_var(var, span)
         } else {
-            // Variable not found — shouldn't happen after sema, but handle gracefully.
             self.emit(InstKind::ConstNull, span)
         }
     }
@@ -1106,11 +1139,11 @@ impl<'a> Lowerer<'a> {
                 ..
             }) => {
                 let val = self.lower_expr(init_id);
+                let span = self.arena.span_of(id);
                 for dn in &names {
                     let name = self.intern_ident(dn.name_span, dn.sigil);
-                    if let Some(local) = self.lookup_local(name) {
-                        let span = self.arena.span_of(id);
-                        self.emit_void(InstKind::StoreLocal { local, value: val }, span);
+                    if let Some(var) = self.resolve_var(name) {
+                        self.emit_store_var(var, val, span);
                     }
                 }
             }
@@ -1129,8 +1162,14 @@ impl<'a> Lowerer<'a> {
                         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[operand]
                         {
                             let name = self.intern_ident(*name_span, *sigil);
-                            if let Some(local) = self.lookup_local(name) {
-                                self.emit_void(InstKind::DeleteLvalue { local }, span);
+                            match self.resolve_var(name) {
+                                Some(VarRef::Local(local)) => {
+                                    self.emit_void(InstKind::DeleteLvalue { local }, span);
+                                }
+                                Some(VarRef::Global(global)) => {
+                                    self.emit_void(InstKind::DeleteLvalueGlobal { global }, span);
+                                }
+                                None => {}
                             }
                         }
                     }
@@ -1146,22 +1185,33 @@ impl<'a> Lowerer<'a> {
                 let span = self.arena.span_of(id);
                 if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[target] {
                     let name = self.intern_ident(*name_span, *sigil);
-                    if let Some(local) = self.lookup_local(name) {
-                        let elem_type = self.locals[local.0 as usize].ty.clone();
-                        let elem_ir = if let IrType::Array { elem, .. } = &elem_type {
-                            *elem.clone()
-                        } else {
-                            IrType::Int
-                        };
-                        let dim_regs: Vec<_> = dims.iter().map(|&d| self.lower_expr(d)).collect();
-                        self.emit_void(
-                            InstKind::Redim {
-                                local,
-                                elem_type: elem_ir,
-                                dims: dim_regs,
-                            },
-                            span,
-                        );
+                    let dim_regs: Vec<_> = dims.iter().map(|&d| self.lower_expr(d)).collect();
+                    match self.resolve_var(name) {
+                        Some(VarRef::Local(local)) => {
+                            let elem_type = self.locals[local.0 as usize].ty.clone();
+                            let elem_ir = if let IrType::Array { elem, .. } = &elem_type {
+                                *elem.clone()
+                            } else {
+                                IrType::Int
+                            };
+                            self.emit_void(
+                                InstKind::Redim { local, elem_type: elem_ir, dims: dim_regs },
+                                span,
+                            );
+                        }
+                        Some(VarRef::Global(global)) => {
+                            let elem_type = self.globals[global.0 as usize].ty.clone();
+                            let elem_ir = if let IrType::Array { elem, .. } = &elem_type {
+                                *elem.clone()
+                            } else {
+                                IrType::Int
+                            };
+                            self.emit_void(
+                                InstKind::RedimGlobal { global, elem_type: elem_ir, dims: dim_regs },
+                                span,
+                            );
+                        }
+                        None => {}
                     }
                 }
             }
@@ -1285,8 +1335,8 @@ impl<'a> Lowerer<'a> {
         match self.arena[target].clone() {
             Node::Expr(Expr::Ident { name_span, sigil }) => {
                 let name = self.intern_ident(name_span, sigil);
-                if let Some(local) = self.lookup_local(name) {
-                    self.emit_void(InstKind::StoreLocal { local, value: val }, span);
+                if let Some(var) = self.resolve_var(name) {
+                    self.emit_store_var(var, val, span);
                 }
             }
             Node::Expr(Expr::Field { target: obj, name_span }) => {
@@ -1499,26 +1549,23 @@ impl<'a> Lowerer<'a> {
         let span = self.arena.span_of(stmt_id);
 
         // Get the loop variable.
-        let var_local = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
+        let var_ref = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
             let name = self.intern_ident(*name_span, *sigil);
-            self.lookup_local(name).unwrap_or(LocalId(0))
+            self.resolve_var(name).unwrap_or(VarRef::Local(LocalId(0)))
         } else {
-            LocalId(0)
+            VarRef::Local(LocalId(0))
         };
 
         // Initialize: var = from
         let from_reg = self.lower_expr(from);
-        self.emit_void(
-            InstKind::StoreLocal {
-                local: var_local,
-                value: from_reg,
-            },
-            span,
-        );
+        self.emit_store_var(var_ref, from_reg, span);
 
         // Cache "to" value in a unique temp local (safe for nested For loops).
         let to_reg = self.lower_expr(to);
-        let var_ty = self.locals[var_local.0 as usize].ty.clone();
+        let var_ty = match var_ref {
+            VarRef::Local(id) => self.locals[id.0 as usize].ty.clone(),
+            VarRef::Global(id) => self.globals[id.0 as usize].ty.clone(),
+        };
         let to_local = self.alloc_temp("@for_to", var_ty.clone());
         self.emit_void(InstKind::StoreLocal { local: to_local, value: to_reg }, span);
 
@@ -1566,7 +1613,7 @@ impl<'a> Lowerer<'a> {
 
         // Ascending check: var <= to
         self.switch_to(cond_up_block);
-        let var_val = self.emit(InstKind::LoadLocal { local: var_local }, span);
+        let var_val = self.emit_load_var(var_ref, span);
         let to_val = self.emit(InstKind::LoadLocal { local: to_local }, span);
         let cmp_up = self.emit(
             InstKind::BinOp {
@@ -1584,7 +1631,7 @@ impl<'a> Lowerer<'a> {
 
         // Descending check: var >= to
         self.switch_to(cond_down_block);
-        let var_val2 = self.emit(InstKind::LoadLocal { local: var_local }, span);
+        let var_val2 = self.emit_load_var(var_ref, span);
         let to_val2 = self.emit(InstKind::LoadLocal { local: to_local }, span);
         let cmp_down = self.emit(
             InstKind::BinOp {
@@ -1616,7 +1663,7 @@ impl<'a> Lowerer<'a> {
 
         // Step block: var = var + step
         self.switch_to(step_block);
-        let cur_var = self.emit(InstKind::LoadLocal { local: var_local }, span);
+        let cur_var = self.emit_load_var(var_ref, span);
         let cur_step = self.emit(InstKind::LoadLocal { local: step_local }, span);
         let new_var = self.emit(
             InstKind::BinOp {
@@ -1626,13 +1673,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.emit_void(
-            InstKind::StoreLocal {
-                local: var_local,
-                value: new_var,
-            },
-            span,
-        );
+        self.emit_store_var(var_ref, new_var, span);
         self.terminate(Terminator::Goto(cond_check_block), span);
 
         self.switch_to(exit_block);
@@ -1648,19 +1689,19 @@ impl<'a> Lowerer<'a> {
         let span = self.arena.span_of(stmt_id);
         let source_ty = self.types.get(source).cloned().unwrap_or(Type::Void);
 
-        let var_local = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
+        let var_ref = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
             let name = self.intern_ident(*name_span, *sigil);
-            self.lookup_local(name).unwrap_or(LocalId(0))
+            self.resolve_var(name).unwrap_or(VarRef::Local(LocalId(0)))
         } else {
-            LocalId(0)
+            VarRef::Local(LocalId(0))
         };
 
         match &source_ty {
             Type::TypeRef { name } => {
-                self.lower_for_each_type(*name, var_local, body, span);
+                self.lower_for_each_type(*name, var_ref, body, span);
             }
             Type::Array { .. } => {
-                self.lower_for_each_array(source, var_local, body, span);
+                self.lower_for_each_array(source, var_ref, body, span);
             }
             _ => {
                 // Shouldn't happen after sema, but handle gracefully.
@@ -1674,7 +1715,7 @@ impl<'a> Lowerer<'a> {
     fn lower_for_each_type(
         &mut self,
         type_name: Symbol,
-        var_local: LocalId,
+        var_ref: VarRef,
         body: &[NodeId],
         span: Span,
     ) {
@@ -1686,18 +1727,12 @@ impl<'a> Lowerer<'a> {
         // Init: var = First(T)
         let type_def = self.type_def_map[&type_name];
         let first = self.emit(InstKind::First { type_def }, span);
-        self.emit_void(
-            InstKind::StoreLocal {
-                local: var_local,
-                value: first,
-            },
-            span,
-        );
+        self.emit_store_var(var_ref, first, span);
         self.terminate(Terminator::Goto(cond_block), span);
 
         // Cond: var != null
         self.switch_to(cond_block);
-        let cur = self.emit(InstKind::LoadLocal { local: var_local }, span);
+        let cur = self.emit_load_var(var_ref, span);
         let null = self.emit(InstKind::ConstNull, span);
         let not_null = self.emit(
             InstKind::BinOp {
@@ -1729,15 +1764,9 @@ impl<'a> Lowerer<'a> {
 
         // Step: var = Next(var)
         self.switch_to(step_block);
-        let cur2 = self.emit(InstKind::LoadLocal { local: var_local }, span);
+        let cur2 = self.emit_load_var(var_ref, span);
         let next = self.emit(InstKind::Next { object: cur2 }, span);
-        self.emit_void(
-            InstKind::StoreLocal {
-                local: var_local,
-                value: next,
-            },
-            span,
-        );
+        self.emit_store_var(var_ref, next, span);
         self.terminate(Terminator::Goto(cond_block), span);
 
         self.switch_to(exit_block);
@@ -1746,7 +1775,7 @@ impl<'a> Lowerer<'a> {
     fn lower_for_each_array(
         &mut self,
         source: NodeId,
-        var_local: LocalId,
+        var_ref: VarRef,
         body: &[NodeId],
         span: Span,
     ) {
@@ -1797,13 +1826,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.emit_void(
-            InstKind::StoreLocal {
-                local: var_local,
-                value: elem,
-            },
-            span,
-        );
+        self.emit_store_var(var_ref, elem, span);
 
         self.context_stack.push(ControlContext::Loop {
             continue_block: step_block,

@@ -3,7 +3,7 @@
 use cb_diagnostics::Symbol;
 
 use crate::types::IrType;
-use crate::{BlockId, FuncId, LocalId, Reg, TypeDefId};
+use crate::{BlockId, FuncId, GlobalId, LocalId, Reg, TypeDefId};
 
 /// The operation performed by an instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +15,8 @@ pub enum InstKind {
     // ── Memory & Variables ──────────────────────────────────────────
     LoadLocal { local: LocalId },
     StoreLocal { local: LocalId, value: Reg },
+    LoadGlobal { global: GlobalId },
+    StoreGlobal { global: GlobalId, value: Reg },
 
     NewType { type_def: TypeDefId },
     NewArray { elem_type: IrType, dims: Vec<Reg> },
@@ -32,6 +34,7 @@ pub enum InstKind {
     Previous { object: Reg },
 
     DeleteLvalue { local: LocalId },
+    DeleteLvalueGlobal { global: GlobalId },
     DeleteRvalue { value: Reg },
 
     // ── Compiler Intrinsics ─────────────────────────────────────────
@@ -52,6 +55,7 @@ pub enum InstKind {
 
     // ── Array ───────────────────────────────────────────────────────
     Redim { local: LocalId, elem_type: IrType, dims: Vec<Reg> },
+    RedimGlobal { global: GlobalId, elem_type: IrType, dims: Vec<Reg> },
 }
 
 /// Binary operators in the IR.
