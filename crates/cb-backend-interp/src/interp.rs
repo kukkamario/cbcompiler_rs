@@ -9,23 +9,23 @@ use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg};
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
 use crate::heap::{ArrayObj, Slab, TypeInstanceObj, TypeList};
+use crate::observer::{NoopObserver, Observer};
 use crate::value::{Value, default_value};
 
-type Slot = (Value, bool);
+pub type Slot = (Value, bool);
 type FrameBuf = (Vec<Value>, Vec<Slot>);
 
-struct Frame {
-    #[allow(dead_code)]
-    func_id: FuncId,
-    body_index: usize,
-    registers: Vec<Value>,
-    locals: Vec<Slot>,
-    current_block: BlockId,
-    pc: usize,
-    return_reg: Option<Reg>,
+pub struct Frame {
+    pub func_id: FuncId,
+    pub body_index: usize,
+    pub registers: Vec<Value>,
+    pub locals: Vec<Slot>,
+    pub current_block: BlockId,
+    pub pc: usize,
+    pub return_reg: Option<Reg>,
 }
 
-pub struct Interpreter<'a> {
+pub struct Interpreter<'a, O: Observer = NoopObserver> {
     program: &'a Program,
     interner: &'a Interner,
     globals: Vec<Slot>,
@@ -34,9 +34,10 @@ pub struct Interpreter<'a> {
     heap: Slab,
     type_lists: Vec<TypeList>,
     stdout: Box<dyn Write + 'a>,
+    observer: O,
 }
 
-impl<'a> Interpreter<'a> {
+impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
         let struct_defs = &program.struct_defs;
         let globals = program
@@ -62,12 +63,29 @@ impl<'a> Interpreter<'a> {
             heap,
             type_lists,
             stdout: Box::new(std::io::stdout()),
+            observer: NoopObserver,
         }
     }
+}
 
+impl<'a, O: Observer> Interpreter<'a, O> {
     pub fn with_stdout(mut self, stdout: Box<dyn Write + 'a>) -> Self {
         self.stdout = stdout;
         self
+    }
+
+    pub fn with_observer<O2: Observer>(self, observer: O2) -> Interpreter<'a, O2> {
+        Interpreter {
+            program: self.program,
+            interner: self.interner,
+            globals: self.globals,
+            call_stack: self.call_stack,
+            frame_pool: self.frame_pool,
+            heap: self.heap,
+            type_lists: self.type_lists,
+            stdout: self.stdout,
+            observer,
+        }
     }
 
     pub fn run(&mut self) -> Result<(), InterpError> {
@@ -143,12 +161,23 @@ impl<'a> Interpreter<'a> {
 
             if frame.pc < block.insts.len() {
                 let inst = block.insts[frame.pc].clone();
+                self.observer.before_inst(
+                    self.call_stack.last().unwrap(),
+                    &inst.kind,
+                    inst.span,
+                );
                 let prev_depth = self.call_stack.len();
                 let result = self.exec_inst(&inst.kind, inst.result, inst.span)?;
                 // If a user-defined Call pushed a new frame, don't store
                 // the result — the Return handler writes it via return_reg.
                 let pushed_frame = self.call_stack.len() > prev_depth;
                 if !pushed_frame {
+                    self.observer.after_inst(
+                        self.call_stack.last().unwrap(),
+                        &inst.kind,
+                        &result,
+                        inst.span,
+                    );
                     let frame = self.call_stack.last_mut().unwrap();
                     if let Some(reg) = inst.result {
                         let idx = reg.0 as usize;
@@ -202,6 +231,11 @@ impl<'a> Interpreter<'a> {
                             .unwrap_or(Value::Void);
                         let return_reg = frame.return_reg;
 
+                        self.observer.on_return(
+                            self.call_stack.last().unwrap(),
+                            &ret_val,
+                        );
+
                         let old_frame = self.call_stack.pop().unwrap();
                         self.frame_pool
                             .push((old_frame.registers, old_frame.locals));
@@ -220,6 +254,11 @@ impl<'a> Interpreter<'a> {
                         }
                     }
                     Some(Terminator::Trap(kind)) => {
+                        self.observer.on_trap(
+                            self.call_stack.last().unwrap(),
+                            &kind,
+                            term_span,
+                        );
                         return Err(self.trap_error(kind, term_span));
                     }
                     None => {
@@ -303,6 +342,12 @@ impl<'a> Interpreter<'a> {
                     .iter()
                     .map(|r| frame.registers[r.0 as usize].clone())
                     .collect();
+
+                self.observer.on_call(
+                    self.call_stack.last().unwrap(),
+                    *callee,
+                    &arg_vals,
+                );
 
                 let decl = &self.program.func_table[callee.0 as usize];
                 match &decl.kind {
@@ -608,6 +653,13 @@ impl<'a> Interpreter<'a> {
                             .iter()
                             .map(|r| frame.registers[r.0 as usize].clone())
                             .collect();
+
+                        self.observer.on_call(
+                            self.call_stack.last().unwrap(),
+                            func_id,
+                            &arg_vals,
+                        );
+
                         let decl = &self.program.func_table[func_id.0 as usize];
                         match &decl.kind {
                             FuncKind::UserDefined { body_index } => {

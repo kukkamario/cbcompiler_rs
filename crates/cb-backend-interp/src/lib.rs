@@ -6,10 +6,12 @@
 pub mod error;
 pub mod heap;
 pub mod interp;
+pub mod observer;
 pub mod value;
 
 pub use error::InterpError;
 pub use interp::Interpreter;
+pub use observer::{NoopObserver, Observer};
 
 use cb_diagnostics::Interner;
 use cb_ir::Program;

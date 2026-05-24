@@ -1,7 +1,11 @@
 use std::io::Write;
 
-use cb_diagnostics::SourceMap;
+use cb_backend_interp::observer::Observer;
+use cb_backend_interp::interp::Frame;
+use cb_diagnostics::{SourceMap, Span};
 use cb_frontend::{LexerOptions, parse, tokenize};
+use cb_ir::FuncId;
+use cb_ir::inst::InstKind;
 
 fn run(src: &str) -> String {
     let mut sources = SourceMap::new();
@@ -273,4 +277,124 @@ fn null_comparison() {
          EndIf"
     );
     assert_eq!(out, "null\n");
+}
+
+// ── Observer tests ─────────────────────────────────────────────────
+
+struct CountingObserver {
+    before_count: usize,
+    after_count: usize,
+    call_count: usize,
+    return_count: usize,
+}
+
+impl CountingObserver {
+    fn new() -> Self {
+        Self {
+            before_count: 0,
+            after_count: 0,
+            call_count: 0,
+            return_count: 0,
+        }
+    }
+}
+
+impl Observer for CountingObserver {
+    fn before_inst(&mut self, _frame: &Frame, _inst: &InstKind, _span: Span) {
+        self.before_count += 1;
+    }
+    fn after_inst(
+        &mut self,
+        _frame: &Frame,
+        _inst: &InstKind,
+        _result: &cb_backend_interp::value::Value,
+        _span: Span,
+    ) {
+        self.after_count += 1;
+    }
+    fn on_call(&mut self, _caller: &Frame, _callee: FuncId, _args: &[cb_backend_interp::value::Value]) {
+        self.call_count += 1;
+    }
+    fn on_return(&mut self, _frame: &Frame, _value: &cb_backend_interp::value::Value) {
+        self.return_count += 1;
+    }
+}
+
+fn compile_program(src: &str) -> (cb_ir::Program, cb_diagnostics::Interner) {
+    let mut sources = SourceMap::new();
+    let file = sources.add("test.cb".into(), src.into());
+
+    let (tokens, lex_diags) = tokenize(src, file, LexerOptions::default());
+    assert!(
+        lex_diags.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        "lex errors: {lex_diags:?}"
+    );
+
+    let parse_result = parse(&tokens, src, file);
+    assert!(
+        parse_result.diagnostics.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        "parse errors: {:?}",
+        parse_result.diagnostics
+    );
+
+    let runtime_catalog = cb_runtime_sys::load_catalog().expect("load catalog");
+    let mut sema = cb_sema::analyze(
+        &parse_result.arena,
+        &parse_result.program,
+        src,
+        file,
+        &runtime_catalog,
+    );
+
+    let sema_errors: Vec<_> = sema.diagnostics.iter()
+        .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
+        .collect();
+    assert!(sema_errors.is_empty(), "sema errors: {sema_errors:?}");
+
+    let ir = cb_sema::lower::lower(
+        &parse_result.arena,
+        &parse_result.program,
+        src,
+        &mut sema,
+    );
+
+    #[cfg(debug_assertions)]
+    cb_ir::verify::verify(&ir);
+
+    (ir, sema.interner)
+}
+
+#[test]
+fn observer_counts_instructions() {
+    let (ir, interner) = compile_program(r#"Print "hello""#);
+
+    let mut output = Vec::new();
+    {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(CountingObserver::new());
+        interp.run().expect("should succeed");
+    }
+    let output_str = String::from_utf8(output).unwrap();
+    assert_eq!(output_str, "hello\n");
+}
+
+#[test]
+fn observer_sees_function_calls() {
+    let (ir, interner) = compile_program(
+        "Function double(x As Integer) As Integer\n\
+         Return x * 2\n\
+         EndFunction\n\
+         Print Str(double(21))"
+    );
+
+    let mut output = Vec::new();
+    {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(CountingObserver::new());
+        interp.run().expect("should succeed");
+    }
+    let output_str = String::from_utf8(output).unwrap();
+    assert_eq!(output_str, "42\n");
 }
