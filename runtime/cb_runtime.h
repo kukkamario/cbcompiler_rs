@@ -47,9 +47,22 @@ typedef struct {
 
 const CbCatalog* cb_runtime_get_catalog(void);
 
+/* System */
 void cb_rt_print(const char* text);
 int32_t cb_rt_abs_int(int32_t x);
 double cb_rt_abs_float(double x);
+
+/* Graphics */
+void cb_rt_screen(int32_t w, int32_t h);
+void cb_rt_drawscreen(void);
+void cb_rt_color(int32_t r, int32_t g, int32_t b);
+void cb_rt_line(float x1, float y1, float x2, float y2);
+int32_t cb_rt_screen_width(void);
+int32_t cb_rt_screen_height(void);
+
+/* Input */
+int32_t cb_rt_mouse_x(void);
+int32_t cb_rt_mouse_y(void);
 
 /* Test handle functions for opaque type testing */
 uint64_t cb_rt_create_test_handle(void);

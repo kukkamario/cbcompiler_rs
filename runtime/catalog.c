@@ -1,9 +1,15 @@
 #include "cb_runtime.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-/* Stub implementations (catalog-only milestone, no execution yet) */
+/* System function implementations */
 
 void cb_rt_print(const char* text) {
-    (void)text;
+    if (text) {
+        printf("%s\n", text);
+    } else {
+        printf("\n");
+    }
 }
 
 int32_t cb_rt_abs_int(int32_t x) {
@@ -30,7 +36,7 @@ static const CbTypeDesc catalog_types[] = {
     { "TestHandle", CB_TYPE_TEST_HANDLE },
 };
 
-/* Static catalog data */
+/* Static catalog data — parameter descriptors */
 
 static const CbParamDesc print_params[] = {
     { "text", CB_TYPE_STRING }
@@ -47,6 +53,26 @@ static const CbParamDesc abs_float_params[] = {
 static const CbParamDesc use_test_handle_params[] = {
     { "handle", CB_TYPE_TEST_HANDLE }
 };
+
+static const CbParamDesc screen_params[] = {
+    { "width", CB_TYPE_INT },
+    { "height", CB_TYPE_INT }
+};
+
+static const CbParamDesc color_params[] = {
+    { "r", CB_TYPE_INT },
+    { "g", CB_TYPE_INT },
+    { "b", CB_TYPE_INT }
+};
+
+static const CbParamDesc line_params[] = {
+    { "x1", CB_TYPE_FLOAT },
+    { "y1", CB_TYPE_FLOAT },
+    { "x2", CB_TYPE_FLOAT },
+    { "y2", CB_TYPE_FLOAT }
+};
+
+/* Function catalog */
 
 static const CbFuncDesc catalog_funcs[] = {
     {
@@ -74,6 +100,70 @@ static const CbFuncDesc catalog_funcs[] = {
         0
     },
     {
+        "screen",
+        "cb_rt_screen",
+        screen_params,
+        2,
+        CB_TYPE_VOID,
+        0
+    },
+    {
+        "drawscreen",
+        "cb_rt_drawscreen",
+        NULL,
+        0,
+        CB_TYPE_VOID,
+        0
+    },
+    {
+        "color",
+        "cb_rt_color",
+        color_params,
+        3,
+        CB_TYPE_VOID,
+        0
+    },
+    {
+        "line",
+        "cb_rt_line",
+        line_params,
+        4,
+        CB_TYPE_VOID,
+        0
+    },
+    {
+        "screenwidth",
+        "cb_rt_screen_width",
+        NULL,
+        0,
+        CB_TYPE_INT,
+        0
+    },
+    {
+        "screenheight",
+        "cb_rt_screen_height",
+        NULL,
+        0,
+        CB_TYPE_INT,
+        0
+    },
+    {
+        "mousex",
+        "cb_rt_mouse_x",
+        NULL,
+        0,
+        CB_TYPE_INT,
+        0
+    },
+    {
+        "mousey",
+        "cb_rt_mouse_y",
+        NULL,
+        0,
+        CB_TYPE_INT,
+        0
+    },
+    {
         "createtesthandle",
         "cb_rt_create_test_handle",
         NULL,
@@ -95,7 +185,7 @@ static const CbCatalog catalog = {
     CB_CATALOG_VERSION,
     1,
     catalog_types,
-    5,
+    13,
     catalog_funcs
 };
 

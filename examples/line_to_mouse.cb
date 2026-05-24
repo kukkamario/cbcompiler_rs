@@ -1,0 +1,7 @@
+Screen 800, 600
+
+Repeat
+    Color 255, 255, 255
+    Line ScreenWidth() / 2, ScreenHeight() / 2, MouseX(), MouseY()
+    DrawScreen
+Forever

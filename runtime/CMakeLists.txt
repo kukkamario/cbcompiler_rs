@@ -8,6 +8,8 @@ find_package(Allegro CONFIG REQUIRED)
 
 add_library(cb_runtime STATIC
     catalog.c
+    gfx.c
+    input.c
 )
 
 target_include_directories(cb_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

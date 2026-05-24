@@ -61,6 +61,18 @@ const CB_TYPE_STRING: u32 = 9;
 
 unsafe extern "C" {
     pub fn cb_runtime_get_catalog() -> *const CbCatalog;
+
+    // Graphics
+    pub fn cb_rt_screen(w: i32, h: i32);
+    pub fn cb_rt_drawscreen();
+    pub fn cb_rt_color(r: i32, g: i32, b: i32);
+    pub fn cb_rt_line(x1: f32, y1: f32, x2: f32, y2: f32);
+    pub fn cb_rt_screen_width() -> i32;
+    pub fn cb_rt_screen_height() -> i32;
+
+    // Input
+    pub fn cb_rt_mouse_x() -> i32;
+    pub fn cb_rt_mouse_y() -> i32;
 }
 
 // ── Safe conversion ────────────────────────────────────────────────────
@@ -223,7 +235,7 @@ mod tests {
         assert_eq!(catalog.types[0].tag, 10);
 
         // Functions
-        assert_eq!(catalog.functions.len(), 5);
+        assert_eq!(catalog.functions.len(), 13);
 
         assert_eq!(catalog.functions[0].name, "print");
         assert_eq!(catalog.functions[0].c_symbol, "cb_rt_print");
@@ -241,19 +253,38 @@ mod tests {
         assert_eq!(catalog.functions[2].params[0].ty, IrType::Float);
         assert_eq!(catalog.functions[2].return_ty, IrType::Float);
 
+        // Graphics functions
+        assert_eq!(catalog.functions[3].name, "screen");
+        assert_eq!(catalog.functions[3].c_symbol, "cb_rt_screen");
+        assert_eq!(catalog.functions[3].params.len(), 2);
+
+        assert_eq!(catalog.functions[4].name, "drawscreen");
+        assert_eq!(catalog.functions[4].c_symbol, "cb_rt_drawscreen");
+
+        assert_eq!(catalog.functions[5].name, "color");
+        assert_eq!(catalog.functions[5].params.len(), 3);
+
+        assert_eq!(catalog.functions[6].name, "line");
+        assert_eq!(catalog.functions[6].params.len(), 4);
+
+        assert_eq!(catalog.functions[7].name, "screenwidth");
+        assert_eq!(catalog.functions[8].name, "screenheight");
+        assert_eq!(catalog.functions[9].name, "mousex");
+        assert_eq!(catalog.functions[10].name, "mousey");
+
         // Test handle functions use runtime type
-        assert_eq!(catalog.functions[3].name, "createtesthandle");
-        assert_eq!(catalog.functions[3].params.len(), 0);
+        assert_eq!(catalog.functions[11].name, "createtesthandle");
+        assert_eq!(catalog.functions[11].params.len(), 0);
         assert_eq!(
-            catalog.functions[3].return_ty,
+            catalog.functions[11].return_ty,
             IrType::RuntimeType("TestHandle".to_string())
         );
 
-        assert_eq!(catalog.functions[4].name, "usetesthandle");
+        assert_eq!(catalog.functions[12].name, "usetesthandle");
         assert_eq!(
-            catalog.functions[4].params[0].ty,
+            catalog.functions[12].params[0].ty,
             IrType::RuntimeType("TestHandle".to_string())
         );
-        assert_eq!(catalog.functions[4].return_ty, IrType::Int);
+        assert_eq!(catalog.functions[12].return_ty, IrType::Int);
     }
 }

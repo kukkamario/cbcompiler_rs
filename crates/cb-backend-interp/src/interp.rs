@@ -1132,6 +1132,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let v = args.first().map(|v| self.value_to_f64(v)).unwrap_or(0.0);
                 Ok(Value::Float(v.abs()))
             }
+            "cb_rt_screen" | "cb_rt_drawscreen" | "cb_rt_color" | "cb_rt_line"
+            | "cb_rt_screen_width" | "cb_rt_screen_height" | "cb_rt_mouse_x"
+            | "cb_rt_mouse_y" => {
+                return self.call_runtime_ffi(symbol, args);
+            }
             "cb_rt_create_test_handle" => Ok(Value::OpaqueHandle(42)),
             "cb_rt_use_test_handle" => {
                 let h = match args.first() {
@@ -1145,6 +1150,54 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 InterpErrorKind::RuntimeError(format!("unknown runtime function: {symbol}")),
                 span,
             )),
+        }
+    }
+
+    #[allow(unsafe_code)]
+    fn call_runtime_ffi(&mut self, symbol: &str, args: &[Value]) -> Result<Value, InterpError> {
+        match symbol {
+            "cb_rt_screen" => {
+                let w = args.first().map(|v| self.value_to_i64(v)).unwrap_or(640) as i32;
+                let h = args.get(1).map(|v| self.value_to_i64(v)).unwrap_or(480) as i32;
+                unsafe { cb_runtime_sys::cb_rt_screen(w, h) };
+                Ok(Value::Void)
+            }
+            "cb_rt_drawscreen" => {
+                unsafe { cb_runtime_sys::cb_rt_drawscreen() };
+                Ok(Value::Void)
+            }
+            "cb_rt_color" => {
+                let r = args.first().map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
+                let g = args.get(1).map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
+                let b = args.get(2).map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
+                unsafe { cb_runtime_sys::cb_rt_color(r, g, b) };
+                Ok(Value::Void)
+            }
+            "cb_rt_line" => {
+                let x1 = args.first().map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
+                let y1 = args.get(1).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
+                let x2 = args.get(2).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
+                let y2 = args.get(3).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
+                unsafe { cb_runtime_sys::cb_rt_line(x1, y1, x2, y2) };
+                Ok(Value::Void)
+            }
+            "cb_rt_screen_width" => {
+                let w = unsafe { cb_runtime_sys::cb_rt_screen_width() };
+                Ok(Value::Int(w))
+            }
+            "cb_rt_screen_height" => {
+                let h = unsafe { cb_runtime_sys::cb_rt_screen_height() };
+                Ok(Value::Int(h))
+            }
+            "cb_rt_mouse_x" => {
+                let x = unsafe { cb_runtime_sys::cb_rt_mouse_x() };
+                Ok(Value::Int(x))
+            }
+            "cb_rt_mouse_y" => {
+                let y = unsafe { cb_runtime_sys::cb_rt_mouse_y() };
+                Ok(Value::Int(y))
+            }
+            _ => unreachable!(),
         }
     }
 

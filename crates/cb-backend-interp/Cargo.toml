@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-ir = { path = "../cb-ir" }
+cb-runtime-sys = { path = "../cb-runtime-sys" }
 
 [dev-dependencies]
 cb-frontend = { path = "../cb-frontend" }
