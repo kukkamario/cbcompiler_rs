@@ -603,18 +603,15 @@ impl<'a> Lowerer<'a> {
     fn scan_body_for_locals(&mut self, body: &[NodeId]) {
         for &id in body {
             match self.arena[id].clone() {
-                Node::Stmt(Stmt::Dim { names, ty, .. }) => {
+                Node::Stmt(Stmt::Dim { names, ty: _, .. }) => {
                     for dn in &names {
                         let name = self.intern_ident(dn.name_span, dn.sigil);
                         if self.lookup_local(name).is_none() {
                             let var_ty = self
-                                .types
-                                .get(id)
-                                .map(|t| self.sema_type_to_ir(t))
-                                .unwrap_or_else(|| {
-                                    let _ = ty;
-                                    IrType::Int
-                                });
+                                .symbols
+                                .lookup(self.current_scope, name)
+                                .map(|decl| self.sema_type_to_ir(&decl.ty))
+                                .unwrap_or(IrType::Int);
                             self.alloc_local(name, var_ty, false);
                         }
                     }
@@ -788,8 +785,8 @@ impl<'a> Lowerer<'a> {
             Node::Expr(Expr::Paren { inner }) => return self.lower_expr(inner),
 
             Node::Expr(Expr::New(kind)) => match kind {
-                NewKind::Type(type_expr_id) => {
-                    let ty = self.types.get(type_expr_id).cloned().unwrap_or(Type::Void);
+                NewKind::Type(_type_expr_id) => {
+                    let ty = self.types.get(id).cloned().unwrap_or(Type::Void);
                     let type_name = match ty {
                         Type::TypeRef { name } => name,
                         _ => self.interner.intern("<unknown>"),
@@ -1059,6 +1056,27 @@ impl<'a> Lowerer<'a> {
                         },
                         span,
                     );
+                }
+                "first" | "last" => {
+                    let ty = self.types.get(args[0]).cloned().unwrap_or(Type::Void);
+                    let type_name = match ty {
+                        Type::TypeRef { name } => name,
+                        _ => self.interner.intern("<unknown>"),
+                    };
+                    let type_def = self.type_def_map[&type_name];
+                    return if name_str == "first" {
+                        self.emit(InstKind::First { type_def }, span)
+                    } else {
+                        self.emit(InstKind::Last { type_def }, span)
+                    };
+                }
+                "next" => {
+                    let obj = self.lower_expr(args[0]);
+                    return self.emit(InstKind::Next { object: obj }, span);
+                }
+                "previous" => {
+                    let obj = self.lower_expr(args[0]);
+                    return self.emit(InstKind::Previous { object: obj }, span);
                 }
                 _ => {}
             }

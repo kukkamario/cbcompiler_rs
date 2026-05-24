@@ -20,10 +20,10 @@ const INTRINSIC_INTEGER: &str = "integer";
 const INTRINSIC_FLOAT: &str = "float";
 const INTRINSIC_STR: &str = "str";
 const INTRINSIC_BOOL: &str = "bool";
-// Type-list intrinsics are parsed as keywords and have dedicated AST nodes,
-// but First/Last/Next/Previous are called like regular functions when the user
-// writes them in expression position. We don't handle those yet — they'll be
-// recognized once the runtime/intrinsic call infrastructure is in place.
+const INTRINSIC_FIRST: &str = "first";
+const INTRINSIC_LAST: &str = "last";
+const INTRINSIC_NEXT: &str = "next";
+const INTRINSIC_PREVIOUS: &str = "previous";
 
 /// Drives semantic analysis over a parsed AST.
 pub(crate) struct Checker<'a> {
@@ -943,6 +943,48 @@ impl<'a> Checker<'a> {
             INTRINSIC_FLOAT => self.check_conversion_intrinsic(args, span, Type::Float),
             INTRINSIC_STR => self.check_conversion_intrinsic(args, span, Type::String),
             INTRINSIC_BOOL => self.check_conversion_intrinsic(args, span, Type::Bool),
+            INTRINSIC_FIRST | INTRINSIC_LAST => {
+                if args.len() != 1 {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_WRONG_ARG_COUNT,
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                        Label::new(span),
+                    ));
+                    return Some(Type::Error);
+                }
+                let ty = self.check_expr(args[0]);
+                if matches!(ty, Type::TypeRef { .. }) || ty.is_error() {
+                    Some(ty)
+                } else {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_TYPE_MISMATCH,
+                        format!("{name} expects a Type name"),
+                        Label::new(self.arena.span_of(args[0])),
+                    ));
+                    Some(Type::Error)
+                }
+            }
+            INTRINSIC_NEXT | INTRINSIC_PREVIOUS => {
+                if args.len() != 1 {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_WRONG_ARG_COUNT,
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                        Label::new(span),
+                    ));
+                    return Some(Type::Error);
+                }
+                let ty = self.check_expr(args[0]);
+                if matches!(ty, Type::TypeRef { .. }) || ty.is_error() {
+                    Some(ty)
+                } else {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_TYPE_MISMATCH,
+                        format!("{name} expects a Type instance"),
+                        Label::new(self.arena.span_of(args[0])),
+                    ));
+                    Some(Type::Error)
+                }
+            }
             _ => None,
         }
     }
@@ -1436,11 +1478,21 @@ impl<'a> Checker<'a> {
     }
 
     fn check_for_each(&mut self, for_id: NodeId, var: NodeId, source: NodeId, body: &[NodeId]) {
+        // Check the source first to determine the iteration type.
+        let source_ty = self.check_expr(source);
+
         // The iteration variable is implicitly declared.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
             let name = self.intern_ident(*name_span, *sigil);
             if self.symbols.lookup(self.current_scope, name).is_none() {
-                let (vt, _) = types::resolve_var_type(*sigil, None);
+                let vt = match &source_ty {
+                    Type::TypeRef { .. } => source_ty.clone(),
+                    Type::Array { elem, .. } => (**elem).clone(),
+                    _ => {
+                        let (resolved, _) = types::resolve_var_type(*sigil, None);
+                        resolved
+                    }
+                };
                 let decl = Declaration {
                     kind: DeclKind::Variable,
                     ty: vt.clone(),
@@ -1451,9 +1503,6 @@ impl<'a> Checker<'a> {
                 self.types.insert(var, vt);
             }
         }
-
-        // Source should be an array variable or a Type name.
-        self.check_expr(source);
 
         self.for_loop_stack.push(for_id);
         for &s in body {

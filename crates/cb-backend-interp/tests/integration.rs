@@ -161,7 +161,6 @@ fn multiple_prints() {
 // ── Heap type tests ────────────────────────────────────────────────
 
 #[test]
-#[ignore = "lowerer panics: type_def_map key not found — Type lowering not yet complete"]
 fn type_new_and_field_access() {
     let out = run(
         "Type Enemy\n\
@@ -175,7 +174,6 @@ fn type_new_and_field_access() {
 }
 
 #[test]
-#[ignore = "parser treats Next() as loop keyword — needs parser fix for Next-as-builtin"]
 fn type_linked_list_first_next() {
     let out = run(
         "Type Node\n\
@@ -197,7 +195,6 @@ fn type_linked_list_first_next() {
 }
 
 #[test]
-#[ignore = "sema types ForEach variable as Int instead of TypeRef — needs sema fix"]
 fn type_for_each() {
     let out = run(
         "Type Item\n\
@@ -215,7 +212,6 @@ fn type_for_each() {
 }
 
 #[test]
-#[ignore = "depends on ForEach typing fix — same as type_for_each"]
 fn type_delete_and_continue_iteration() {
     let out = run(
         "Type Obj\n\
@@ -263,14 +259,13 @@ fn array_len() {
 }
 
 #[test]
-#[ignore = "sema doesn't handle uninitialized Type variable as TypeRef — needs sema fix"]
 fn null_comparison() {
     let out = run(
-        "Type T\n\
+        "Type MyObj\n\
            Field x As Int\n\
          EndType\n\
-         Dim t As T\n\
-         If t = Null Then\n\
+         Dim obj As MyObj\n\
+         If obj = Null Then\n\
            Print \"null\"\n\
          Else\n\
            Print \"not null\"\n\
