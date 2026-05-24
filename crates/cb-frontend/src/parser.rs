@@ -477,9 +477,9 @@ impl<'t> Parser<'t> {
                 self.cursor.bump();
                 Ok(self.alloc(Node::Expr(Expr::NullLit), tok.span))
             }
-            // Type keywords used as intrinsic conversion calls: Int(v), Float(v), Bool(v).
+            // Keywords used as intrinsic calls: Int(v), Float(v), Bool(v), Next(n).
             // Only when followed by `(` — otherwise fall through to the error arm.
-            TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool)
+            TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::Next)
                 if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
             {
                 self.cursor.bump();

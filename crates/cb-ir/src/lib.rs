@@ -58,6 +58,14 @@ pub struct LocalId(pub u32);
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct BlockId(pub u32);
 
+/// Index into `Program::type_defs`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct TypeDefId(pub u32);
+
+/// Index into `Program::globals`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct GlobalId(pub u32);
+
 impl fmt::Display for Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "r{}", self.0)
@@ -76,15 +84,33 @@ impl fmt::Display for BlockId {
     }
 }
 
+impl fmt::Display for TypeDefId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "typedef{}", self.0)
+    }
+}
+
+impl fmt::Display for GlobalId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "global{}", self.0)
+    }
+}
+
 // ── IR structures ───────────────────────────────────────────────────────
 
-/// A local variable slot (parameters + Dim/Global declarations).
+/// A local variable slot (parameters + Dim declarations).
 #[derive(Clone, Debug)]
 pub struct Local {
     pub name: Symbol,
     pub ty: IrType,
-    pub is_global: bool,
     pub is_param: bool,
+}
+
+/// A global variable slot. Indexed by `GlobalId`.
+#[derive(Clone, Debug)]
+pub struct Global {
+    pub name: Symbol,
+    pub ty: IrType,
 }
 
 /// A single IR instruction.
@@ -103,6 +129,7 @@ pub struct BasicBlock {
     pub id: BlockId,
     pub insts: Vec<Inst>,
     pub terminator: Option<Terminator>,
+    pub terminator_span: Span,
 }
 
 /// An IR function. Top-level code is wrapped in a synthetic `@main`.
@@ -123,6 +150,8 @@ pub struct Program {
     /// Bodies of user-defined functions. `FuncKind::UserDefined::body_index`
     /// indexes this.
     pub functions: Vec<Function>,
+    /// Program-wide global variables. `GlobalId` indexes this.
+    pub globals: Vec<Global>,
     pub type_defs: Vec<TypeDefInfo>,
     pub struct_defs: Vec<StructDefInfo>,
 }

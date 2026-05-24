@@ -80,7 +80,11 @@ dependencies = [
 name = "cb-backend-interp"
 version = "0.1.0"
 dependencies = [
+ "cb-diagnostics",
+ "cb-frontend",
  "cb-ir",
+ "cb-runtime-sys",
+ "cb-sema",
 ]
 
 [[package]]
