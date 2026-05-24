@@ -200,6 +200,16 @@ fn main() -> ExitCode {
             let output = cb_ir::print::print_program(&ir_program, &sema_result.interner);
             print!("{output}");
         }
+
+        if !dump_ast && !dump_ir {
+            #[cfg(feature = "interp")]
+            if matches!(_backend, Backend::Interp)
+                && let Err(e) = cb_backend_interp::interpret(&ir_program, &sema_result.interner)
+            {
+                eprintln!("cb: {e}");
+                return ExitCode::from(1);
+            }
+        }
     }
 
     if had_error {
