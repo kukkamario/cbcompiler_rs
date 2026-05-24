@@ -385,7 +385,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     fields,
                     prev: None,
                     next: None,
-                    freed: false,
                     is_sentinel: false,
                 });
                 self.type_lists[type_def.0 as usize].append(&mut self.heap, id);
@@ -396,10 +395,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let obj_val = frame.registers[object.0 as usize].clone();
                 match obj_val {
                     Value::TypeInstance(id) => {
-                        let entry = self.heap.get(id);
-                        if entry.freed {
-                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
-                        }
+                        let entry = match self.heap.get(id) {
+                            Some(e) => e,
+                            None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
+                        };
                         if entry.is_sentinel {
                             return Err(self.trap_error(TrapKind::NullDeref, span));
                         }
@@ -442,10 +441,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let new_val = frame.registers[value.0 as usize].clone();
                 match obj_val {
                     Value::TypeInstance(id) => {
-                        let entry = self.heap.get(id);
-                        if entry.freed {
-                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
-                        }
+                        let entry = match self.heap.get(id) {
+                            Some(e) => e,
+                            None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
+                        };
                         if entry.is_sentinel {
                             return Err(self.trap_error(TrapKind::NullDeref, span));
                         }
@@ -453,7 +452,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         let idx = def.fields.iter().position(|(f, _)| *f == *field);
                         match idx {
                             Some(i) => {
-                                self.heap.get_mut(id).fields[i] = new_val;
+                                self.heap.get_mut(id).expect("set_field: entry must exist").fields[i] = new_val;
                                 Ok(Value::Void)
                             }
                             None => Err(self.error_at(
@@ -509,10 +508,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let obj_val = frame.registers[object.0 as usize].clone();
                 match obj_val {
                     Value::TypeInstance(id) => {
-                        let entry = self.heap.get(id);
-                        if entry.freed {
-                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
-                        }
+                        let entry = match self.heap.get(id) {
+                            Some(e) => e,
+                            None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
+                        };
                         match entry.next {
                             Some(next_id) => Ok(Value::TypeInstance(next_id)),
                             None => Ok(Value::Null),
@@ -530,12 +529,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let obj_val = frame.registers[object.0 as usize].clone();
                 match obj_val {
                     Value::TypeInstance(id) => {
-                        let entry = self.heap.get(id);
-                        if entry.freed {
-                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
-                        }
+                        let entry = match self.heap.get(id) {
+                            Some(e) => e,
+                            None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
+                        };
                         match entry.prev {
-                            Some(prev_id) if !self.heap.get(prev_id).is_sentinel => {
+                            Some(prev_id) if self.heap.get(prev_id).is_some_and(|e| !e.is_sentinel) => {
                                 Ok(Value::TypeInstance(prev_id))
                             }
                             _ => Ok(Value::Null),
@@ -559,14 +558,13 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let val = frame.registers[value.0 as usize].clone();
                 match val {
                     Value::TypeInstance(id) => {
-                        let entry = self.heap.get(id);
-                        if entry.freed {
-                            return Err(self.trap_error(TrapKind::DoubleDelete, span));
-                        }
+                        let entry = match self.heap.get(id) {
+                            Some(e) => e,
+                            None => return Err(self.trap_error(TrapKind::DoubleDelete, span)),
+                        };
                         let type_def = entry.type_def;
                         self.type_lists[type_def.0 as usize].unlink(&mut self.heap, id);
-                        self.heap.get_mut(id).freed = true;
-                        self.heap.get_mut(id).fields.clear();
+                        self.heap.free(id);
                         Ok(Value::Void)
                     }
                     Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
@@ -1071,10 +1069,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         match val {
             Value::TypeInstance(id) => {
                 let id = *id;
-                let entry = self.heap.get(id);
-                if entry.freed {
-                    return Err(self.trap_error(TrapKind::DoubleDelete, span));
-                }
+                let entry = match self.heap.get(id) {
+                    Some(e) => e,
+                    None => return Err(self.trap_error(TrapKind::DoubleDelete, span)),
+                };
 
                 let prev = entry.prev.unwrap_or(
                     self.type_lists[entry.type_def.0 as usize].sentinel,
@@ -1082,8 +1080,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let type_def = entry.type_def;
 
                 self.type_lists[type_def.0 as usize].unlink(&mut self.heap, id);
-                self.heap.get_mut(id).freed = true;
-                self.heap.get_mut(id).fields.clear();
+                self.heap.free(id);
 
                 let new_slot = (Value::TypeInstance(prev), true);
                 if is_local {

@@ -8,19 +8,22 @@ use cb_ir::TypeDefId;
 use crate::value::{Value, default_value};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TypeInstanceId(pub u32);
+pub struct TypeInstanceId {
+    pub index: u32,
+    pub generation: u32,
+}
 
 pub struct TypeInstanceObj {
     pub type_def: TypeDefId,
     pub fields: Vec<Value>,
     pub prev: Option<TypeInstanceId>,
     pub next: Option<TypeInstanceId>,
-    pub freed: bool,
     pub is_sentinel: bool,
 }
 
 pub struct Slab {
     entries: Vec<Option<TypeInstanceObj>>,
+    generations: Vec<u32>,
     free_list: Vec<u32>,
 }
 
@@ -34,32 +37,46 @@ impl Slab {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            generations: Vec::new(),
             free_list: Vec::new(),
         }
     }
 
     pub fn alloc(&mut self, obj: TypeInstanceObj) -> TypeInstanceId {
         if let Some(idx) = self.free_list.pop() {
+            let generation = self.generations[idx as usize];
             self.entries[idx as usize] = Some(obj);
-            TypeInstanceId(idx)
+            TypeInstanceId { index: idx, generation }
         } else {
             let idx = self.entries.len() as u32;
             self.entries.push(Some(obj));
-            TypeInstanceId(idx)
+            self.generations.push(0);
+            TypeInstanceId { index: idx, generation: 0 }
         }
     }
 
-    pub fn get(&self, id: TypeInstanceId) -> &TypeInstanceObj {
-        self.entries[id.0 as usize].as_ref().expect("slab entry missing")
+    pub fn get(&self, id: TypeInstanceId) -> Option<&TypeInstanceObj> {
+        if self.generations.get(id.index as usize).copied() != Some(id.generation) {
+            return None;
+        }
+        self.entries[id.index as usize].as_ref()
     }
 
-    pub fn get_mut(&mut self, id: TypeInstanceId) -> &mut TypeInstanceObj {
-        self.entries[id.0 as usize].as_mut().expect("slab entry missing")
+    pub fn get_mut(&mut self, id: TypeInstanceId) -> Option<&mut TypeInstanceObj> {
+        if self.generations.get(id.index as usize).copied() != Some(id.generation) {
+            return None;
+        }
+        self.entries[id.index as usize].as_mut()
     }
 
     pub fn free(&mut self, id: TypeInstanceId) {
-        self.entries[id.0 as usize] = None;
-        self.free_list.push(id.0);
+        debug_assert_eq!(
+            self.generations[id.index as usize], id.generation,
+            "stale TypeInstanceId in free()"
+        );
+        self.entries[id.index as usize] = None;
+        self.generations[id.index as usize] = id.generation.wrapping_add(1);
+        self.free_list.push(id.index);
     }
 }
 
@@ -75,7 +92,6 @@ impl TypeList {
             fields: Vec::new(),
             prev: None,
             next: None,
-            freed: false,
             is_sentinel: true,
         });
         TypeList {
@@ -86,21 +102,22 @@ impl TypeList {
 
     pub fn append(&mut self, slab: &mut Slab, id: TypeInstanceId) {
         let prev_id = self.tail.unwrap_or(self.sentinel);
-        slab.get_mut(id).prev = Some(prev_id);
-        slab.get_mut(id).next = None;
-        slab.get_mut(prev_id).next = Some(id);
+        slab.get_mut(id).expect("append: entry must exist").prev = Some(prev_id);
+        slab.get_mut(id).expect("append: entry must exist").next = None;
+        slab.get_mut(prev_id).expect("append: prev must exist").next = Some(id);
         self.tail = Some(id);
     }
 
     pub fn unlink(&mut self, slab: &mut Slab, id: TypeInstanceId) {
-        let prev = slab.get(id).prev;
-        let next = slab.get(id).next;
+        let entry = slab.get(id).expect("unlink: entry must exist");
+        let prev = entry.prev;
+        let next = entry.next;
 
         if let Some(prev_id) = prev {
-            slab.get_mut(prev_id).next = next;
+            slab.get_mut(prev_id).expect("unlink: prev must exist").next = next;
         }
         if let Some(next_id) = next {
-            slab.get_mut(next_id).prev = prev;
+            slab.get_mut(next_id).expect("unlink: next must exist").prev = prev;
         }
 
         if self.tail == Some(id) {
@@ -108,12 +125,13 @@ impl TypeList {
             self.tail = new_tail;
         }
 
-        slab.get_mut(id).prev = None;
-        slab.get_mut(id).next = None;
+        let entry = slab.get_mut(id).expect("unlink: entry must exist");
+        entry.prev = None;
+        entry.next = None;
     }
 
     pub fn first(&self, slab: &Slab) -> Option<TypeInstanceId> {
-        slab.get(self.sentinel).next
+        slab.get(self.sentinel).expect("first: sentinel must exist").next
     }
 }
 

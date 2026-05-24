@@ -112,7 +112,7 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", if *v { "True" } else { "False" }),
             Value::String(s) => write!(f, "{s}"),
             Value::Array(_) => write!(f, "<Array>"),
-            Value::TypeInstance(id) => write!(f, "<TypeInstance#{}>", id.0),
+            Value::TypeInstance(id) => write!(f, "<TypeInstance#{}>", id.index),
             Value::Struct(_) => write!(f, "<Struct>"),
             Value::FnPtr(Some(id)) => write!(f, "<FnPtr#{}>", id.0),
             Value::FnPtr(None) => write!(f, "<FnPtr:Null>"),
