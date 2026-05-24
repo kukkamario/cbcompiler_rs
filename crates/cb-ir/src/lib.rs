@@ -43,6 +43,25 @@ pub enum FuncKind {
     Runtime { symbol: String },
 }
 
+// ── Runtime catalog types ──────────────────────────────────────────────
+
+/// Description of a runtime-provided function, produced by the catalog loader
+/// and consumed by sema. Uses [`IrType`] so that both the FFI crate
+/// (`cb-runtime-sys`) and the semantic analysis crate (`cb-sema`) can share
+/// these types without depending on each other.
+pub struct FuncDesc {
+    pub name: String,
+    pub c_symbol: String,
+    pub params: Vec<FuncParamDesc>,
+    pub return_ty: IrType,
+}
+
+/// A parameter in a runtime function description.
+pub struct FuncParamDesc {
+    pub name: Option<String>,
+    pub ty: IrType,
+}
+
 // ── ID newtypes ─────────────────────────────────────────────────────────
 
 /// Virtual register — assigned by instructions, consumed by operands.

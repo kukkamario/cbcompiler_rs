@@ -137,6 +137,22 @@ impl<'a> Checker<'a> {
     fn register_runtime_catalog(&mut self, catalog: &[FuncDesc]) {
         use std::collections::HashMap;
 
+        fn ir_type_to_sema(ir: &cb_ir::types::IrType) -> Type {
+            match ir {
+                cb_ir::types::IrType::Byte => Type::Byte,
+                cb_ir::types::IrType::Short => Type::Short,
+                cb_ir::types::IrType::Int => Type::Int,
+                cb_ir::types::IrType::UInt => Type::UInt,
+                cb_ir::types::IrType::Long => Type::Long,
+                cb_ir::types::IrType::ULong => Type::ULong,
+                cb_ir::types::IrType::Float => Type::Float,
+                cb_ir::types::IrType::Bool => Type::Bool,
+                cb_ir::types::IrType::String => Type::String,
+                cb_ir::types::IrType::Void => Type::Void,
+                _ => Type::Error,
+            }
+        }
+
         // Group entries by (lowercased) name.
         let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
         for desc in catalog {
@@ -154,7 +170,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|p| ParamInfo {
                         name: self.interner.intern(p.name.as_deref().unwrap_or("_")),
-                        ty: p.ty.clone(),
+                        ty: ir_type_to_sema(&p.ty),
                         has_default: false,
                     })
                     .collect()
@@ -165,7 +181,7 @@ impl<'a> Checker<'a> {
                 Declaration {
                     kind: DeclKind::RuntimeFn {
                         params: make_params(desc),
-                        return_ty: desc.return_ty.clone(),
+                        return_ty: ir_type_to_sema(&desc.return_ty),
                         c_symbol: desc.c_symbol.clone(),
                     },
                     ty: Type::Void,
@@ -177,7 +193,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|desc| OverloadVariant {
                         params: make_params(desc),
-                        return_ty: desc.return_ty.clone(),
+                        return_ty: ir_type_to_sema(&desc.return_ty),
                         c_symbol: desc.c_symbol.clone(),
                     })
                     .collect();
@@ -1757,6 +1773,7 @@ fn sigil_char(s: Sigil) -> char {
 mod tests {
     use cb_diagnostics::FileId;
     use cb_frontend::{parse, tokenize, LexerOptions};
+    use cb_ir::types::IrType;
 
     use crate::analyze;
 
@@ -2291,7 +2308,7 @@ mod tests {
         analyze(&parsed.arena, &parsed.program, src, file, catalog)
     }
 
-    fn rt_func(name: &str, c_symbol: &str, params: &[(&str, crate::Type)], ret: crate::Type) -> crate::FuncDesc {
+    fn rt_func(name: &str, c_symbol: &str, params: &[(&str, cb_ir::types::IrType)], ret: cb_ir::types::IrType) -> crate::FuncDesc {
         crate::FuncDesc {
             name: name.to_string(),
             c_symbol: c_symbol.to_string(),
@@ -2306,7 +2323,7 @@ mod tests {
     #[test]
     fn runtime_fn_call_ok() {
         let catalog = vec![
-            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
         ];
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2315,7 +2332,7 @@ mod tests {
     #[test]
     fn runtime_fn_wrong_arg_count() {
         let catalog = vec![
-            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
         ];
         let result = analyze_with_catalog("print(\"a\", \"b\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0305"]);
@@ -2324,7 +2341,7 @@ mod tests {
     #[test]
     fn runtime_fn_return_type() {
         let catalog = vec![
-            rt_func("sin", "cb_rt_sin", &[("x", crate::Type::Float)], crate::Type::Float),
+            rt_func("sin", "cb_rt_sin", &[("x", IrType::Float)], IrType::Float),
         ];
         let result = analyze_with_catalog("Dim x As Float\nx = sin(1.0)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2333,8 +2350,8 @@ mod tests {
     #[test]
     fn overload_exact_match() {
         let catalog = vec![
-            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
-            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+            rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
+            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
         ];
         let result = analyze_with_catalog("Dim x As Int\nx = abs(42)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2343,7 +2360,7 @@ mod tests {
     #[test]
     fn overload_with_widening() {
         let catalog = vec![
-            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
         ];
         // Int -> Float is an implicit widening conversion
         let result = analyze_with_catalog("Dim x As Float\nx = abs(42)\n", &catalog);
@@ -2358,8 +2375,8 @@ mod tests {
     #[test]
     fn overload_ambiguous() {
         let catalog = vec![
-            rt_func("foo", "cb_rt_foo_a", &[("x", crate::Type::Int)], crate::Type::Void),
-            rt_func("foo", "cb_rt_foo_b", &[("x", crate::Type::Int)], crate::Type::Int),
+            rt_func("foo", "cb_rt_foo_a", &[("x", IrType::Int)], IrType::Void),
+            rt_func("foo", "cb_rt_foo_b", &[("x", IrType::Int)], IrType::Int),
         ];
         let result = analyze_with_catalog("foo(1)\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0323"]);
@@ -2369,8 +2386,8 @@ mod tests {
     fn overload_no_match() {
         // Two overloads, neither accepts String
         let catalog = vec![
-            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
-            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+            rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
+            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
         ];
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0324"]);
@@ -2380,7 +2397,7 @@ mod tests {
     fn runtime_fn_type_mismatch() {
         // Single runtime function, incompatible arg type
         let catalog = vec![
-            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
+            rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
         ];
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0317"]);
@@ -2389,7 +2406,7 @@ mod tests {
     #[test]
     fn user_function_shadows_runtime() {
         let catalog = vec![
-            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
         ];
         // User defines their own print function — should shadow the runtime one
         let result = analyze_with_catalog(
@@ -2402,7 +2419,7 @@ mod tests {
     #[test]
     fn runtime_fn_resolved_call_recorded() {
         let catalog = vec![
-            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
         ];
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(!result.resolved_calls.is_empty());

@@ -23,21 +23,7 @@ pub use scope::{
 };
 pub use types::Type;
 
-// ── Runtime catalog types ──────────────────────────────────────────────
-
-/// Description of a runtime-provided function, passed in by the driver.
-pub struct FuncDesc {
-    pub name: String,
-    pub c_symbol: String,
-    pub params: Vec<FuncParamDesc>,
-    pub return_ty: Type,
-}
-
-/// A parameter in a runtime function description.
-pub struct FuncParamDesc {
-    pub name: Option<String>,
-    pub ty: Type,
-}
+pub use cb_ir::{FuncDesc, FuncParamDesc};
 
 /// How a call expression was resolved during type checking.
 #[derive(Clone, Debug)]

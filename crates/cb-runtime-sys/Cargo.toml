@@ -9,7 +9,7 @@ publish.workspace = true
 cc.workspace = true
 
 [dependencies]
-cb-sema = { path = "../cb-sema" }
+cb-ir = { path = "../cb-ir" }
 
 [lints.rust]
 unsafe_code = "allow"

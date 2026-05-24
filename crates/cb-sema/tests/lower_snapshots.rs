@@ -138,9 +138,9 @@ fn runtime_function_call() {
         c_symbol: "cb_rt_print".to_string(),
         params: vec![cb_sema::FuncParamDesc {
             name: Some("text".to_string()),
-            ty: cb_sema::Type::String,
+            ty: cb_ir::types::IrType::String,
         }],
-        return_ty: cb_sema::Type::Void,
+        return_ty: cb_ir::types::IrType::Void,
     }];
     let ir = lower_with_catalog("print(\"hello world\")\n", &catalog);
     insta::assert_snapshot!(ir);

@@ -6,7 +6,8 @@
 
 use std::ffi::CStr;
 
-use cb_sema::{FuncDesc, FuncParamDesc, Type};
+use cb_ir::types::IrType;
+use cb_ir::{FuncDesc, FuncParamDesc};
 
 // ── C ABI mirror types ─────────────────────────────────────────────────
 
@@ -113,12 +114,12 @@ pub fn load_catalog() -> Result<Vec<FuncDesc>, String> {
                 };
                 Ok(FuncParamDesc {
                     name: param_name,
-                    ty: type_tag_to_type(p.ty)?,
+                    ty: type_tag_to_ir_type(p.ty)?,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        let return_ty = type_tag_to_type(func.return_type)?;
+        let return_ty = type_tag_to_ir_type(func.return_type)?;
 
         result.push(FuncDesc {
             name,
@@ -131,18 +132,18 @@ pub fn load_catalog() -> Result<Vec<FuncDesc>, String> {
     Ok(result)
 }
 
-fn type_tag_to_type(tag: u32) -> Result<Type, String> {
+fn type_tag_to_ir_type(tag: u32) -> Result<IrType, String> {
     match tag {
-        CB_TYPE_VOID => Ok(Type::Void),
-        CB_TYPE_BYTE => Ok(Type::Byte),
-        CB_TYPE_SHORT => Ok(Type::Short),
-        CB_TYPE_INT => Ok(Type::Int),
-        CB_TYPE_UINT => Ok(Type::UInt),
-        CB_TYPE_LONG => Ok(Type::Long),
-        CB_TYPE_ULONG => Ok(Type::ULong),
-        CB_TYPE_FLOAT => Ok(Type::Float),
-        CB_TYPE_BOOL => Ok(Type::Bool),
-        CB_TYPE_STRING => Ok(Type::String),
+        CB_TYPE_VOID => Ok(IrType::Void),
+        CB_TYPE_BYTE => Ok(IrType::Byte),
+        CB_TYPE_SHORT => Ok(IrType::Short),
+        CB_TYPE_INT => Ok(IrType::Int),
+        CB_TYPE_UINT => Ok(IrType::UInt),
+        CB_TYPE_LONG => Ok(IrType::Long),
+        CB_TYPE_ULONG => Ok(IrType::ULong),
+        CB_TYPE_FLOAT => Ok(IrType::Float),
+        CB_TYPE_BOOL => Ok(IrType::Bool),
+        CB_TYPE_STRING => Ok(IrType::String),
         other => Err(format!("unknown type tag: {other}")),
     }
 }
@@ -159,17 +160,17 @@ mod tests {
         assert_eq!(catalog[0].name, "print");
         assert_eq!(catalog[0].c_symbol, "cb_rt_print");
         assert_eq!(catalog[0].params.len(), 1);
-        assert_eq!(catalog[0].params[0].ty, Type::String);
-        assert_eq!(catalog[0].return_ty, Type::Void);
+        assert_eq!(catalog[0].params[0].ty, IrType::String);
+        assert_eq!(catalog[0].return_ty, IrType::Void);
 
         assert_eq!(catalog[1].name, "abs");
         assert_eq!(catalog[1].c_symbol, "cb_rt_abs_int");
-        assert_eq!(catalog[1].params[0].ty, Type::Int);
-        assert_eq!(catalog[1].return_ty, Type::Int);
+        assert_eq!(catalog[1].params[0].ty, IrType::Int);
+        assert_eq!(catalog[1].return_ty, IrType::Int);
 
         assert_eq!(catalog[2].name, "abs");
         assert_eq!(catalog[2].c_symbol, "cb_rt_abs_float");
-        assert_eq!(catalog[2].params[0].ty, Type::Float);
-        assert_eq!(catalog[2].return_ty, Type::Float);
+        assert_eq!(catalog[2].params[0].ty, IrType::Float);
+        assert_eq!(catalog[2].return_ty, IrType::Float);
     }
 }
