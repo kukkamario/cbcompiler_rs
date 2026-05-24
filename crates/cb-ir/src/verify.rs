@@ -215,6 +215,7 @@ mod tests {
                 id: BlockId(0),
                 insts,
                 terminator: Some(term),
+                terminator_span: DUMMY_SPAN,
             }],
         })
     }
@@ -237,6 +238,7 @@ mod tests {
                 id: BlockId(0),
                 insts: Vec::new(),
                 terminator: None,
+                terminator_span: DUMMY_SPAN,
             }],
         });
         verify(&prog);
@@ -332,11 +334,13 @@ mod tests {
                         then_block: BlockId(1),
                         else_block: BlockId(1),
                     }),
+                    terminator_span: DUMMY_SPAN,
                 },
                 BasicBlock {
                     id: BlockId(1),
                     insts: Vec::new(),
                     terminator: Some(Terminator::Return { value: None }),
+                    terminator_span: DUMMY_SPAN,
                 },
             ],
         });

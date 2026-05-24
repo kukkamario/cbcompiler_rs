@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Interner, Span, Symbol};
+use cb_diagnostics::{FileId, Interner, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Stmt};
 use cb_frontend::{Arena, BinOp, NewKind, NodeId, SpanExt, UnOp};
 
@@ -129,6 +129,7 @@ impl<'a> Lowerer<'a> {
             id,
             insts: Vec::new(),
             terminator: None,
+            terminator_span: Span::new(0, 0, FileId::SYNTHETIC),
         });
         id
     }
@@ -159,10 +160,11 @@ impl<'a> Lowerer<'a> {
         });
     }
 
-    fn terminate(&mut self, term: Terminator) {
+    fn terminate(&mut self, term: Terminator, span: Span) {
         let blk = self.current_block_mut();
         if blk.terminator.is_none() {
             blk.terminator = Some(term);
+            blk.terminator_span = span;
         }
     }
 
@@ -459,7 +461,10 @@ impl<'a> Lowerer<'a> {
 
         // Ensure the last block has a terminator.
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Return { value: None });
+            self.terminate(
+                Terminator::Return { value: None },
+                Span::new(0, 0, FileId::SYNTHETIC),
+            );
         }
 
         self.functions.push(Function {
@@ -528,7 +533,10 @@ impl<'a> Lowerer<'a> {
 
         // Ensure the last block has a terminator.
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Return { value: None });
+            self.terminate(
+                Terminator::Return { value: None },
+                Span::new(0, 0, FileId::SYNTHETIC),
+            );
         }
 
         self.functions.push(Function {
@@ -909,13 +917,13 @@ impl<'a> Lowerer<'a> {
                     cond: lhs_reg,
                     then_block: rhs_block,
                     else_block: short_block,
-                });
+                }, span);
 
                 // Short-circuit block: result = false
                 self.switch_to(short_block);
                 let false_reg = self.emit(InstKind::ConstBool(false), span);
                 self.emit_void(InstKind::StoreLocal { local: tmp, value: false_reg }, span);
-                self.terminate(Terminator::Goto(merge_block));
+                self.terminate(Terminator::Goto(merge_block), span);
             }
             BinOp::Or => {
                 // If lhs is true, short-circuit to true; otherwise evaluate rhs.
@@ -923,13 +931,13 @@ impl<'a> Lowerer<'a> {
                     cond: lhs_reg,
                     then_block: short_block,
                     else_block: rhs_block,
-                });
+                }, span);
 
                 // Short-circuit block: result = true
                 self.switch_to(short_block);
                 let true_reg = self.emit(InstKind::ConstBool(true), span);
                 self.emit_void(InstKind::StoreLocal { local: tmp, value: true_reg }, span);
-                self.terminate(Terminator::Goto(merge_block));
+                self.terminate(Terminator::Goto(merge_block), span);
             }
             _ => unreachable!(),
         }
@@ -938,7 +946,7 @@ impl<'a> Lowerer<'a> {
         self.switch_to(rhs_block);
         let rhs_reg = self.lower_expr(rhs);
         self.emit_void(InstKind::StoreLocal { local: tmp, value: rhs_reg }, span);
-        self.terminate(Terminator::Goto(merge_block));
+        self.terminate(Terminator::Goto(merge_block), span);
 
         // Merge block: load result.
         self.switch_to(merge_block);
@@ -1104,7 +1112,7 @@ impl<'a> Lowerer<'a> {
             }
             Node::Stmt(Stmt::Return { value }) => {
                 let val = value.map(|v| self.lower_expr(v));
-                self.terminate(Terminator::Return { value: val });
+                self.terminate(Terminator::Return { value: val }, self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Delete { operand }) => {
                 let span = self.arena.span_of(id);
@@ -1161,7 +1169,7 @@ impl<'a> Lowerer<'a> {
                         bb
                     });
                 if !self.current_block_is_terminated() {
-                    self.terminate(Terminator::Goto(label_bb));
+                    self.terminate(Terminator::Goto(label_bb), self.arena.span_of(id));
                 }
                 self.switch_to(label_bb);
             }
@@ -1176,7 +1184,7 @@ impl<'a> Lowerer<'a> {
                         self.label_blocks.insert(name, bb);
                         bb
                     });
-                self.terminate(Terminator::Goto(target));
+                self.terminate(Terminator::Goto(target), self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Break { count }) => {
                 let n = count.unwrap_or(1) as usize;
@@ -1192,7 +1200,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 if let Some(eb) = exit_block {
-                    self.terminate(Terminator::Goto(eb));
+                    self.terminate(Terminator::Goto(eb), self.arena.span_of(id));
                 }
             }
             Node::Stmt(Stmt::Continue) => {
@@ -1201,11 +1209,11 @@ impl<'a> Lowerer<'a> {
                         ControlContext::Loop {
                             continue_block, ..
                         } => {
-                            self.terminate(Terminator::Goto(*continue_block));
+                            self.terminate(Terminator::Goto(*continue_block), self.arena.span_of(id));
                         }
                         ControlContext::Select { next_arm_body } => {
                             if let Some(target) = next_arm_body {
-                                self.terminate(Terminator::Goto(*target));
+                                self.terminate(Terminator::Goto(*target), self.arena.span_of(id));
                             }
                         }
                     }
@@ -1309,8 +1317,9 @@ impl<'a> Lowerer<'a> {
         then_body: &[NodeId],
         elseifs: &[cb_frontend::ast::ElseIf],
         else_body: Option<&[NodeId]>,
-        _stmt_id: NodeId,
+        stmt_id: NodeId,
     ) {
+        let span = self.arena.span_of(stmt_id);
         let merge_block = self.fresh_block();
         let then_block = self.fresh_block();
 
@@ -1325,7 +1334,7 @@ impl<'a> Lowerer<'a> {
             cond: cond_reg,
             then_block,
             else_block: first_else,
-        });
+        }, span);
 
         // Then block.
         self.switch_to(then_block);
@@ -1333,7 +1342,7 @@ impl<'a> Lowerer<'a> {
             self.lower_stmt(s);
         }
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(merge_block));
+            self.terminate(Terminator::Goto(merge_block), span);
         }
 
         // ElseIf chain.
@@ -1352,14 +1361,14 @@ impl<'a> Lowerer<'a> {
                 cond: ei_cond,
                 then_block: ei_then,
                 else_block: ei_else,
-            });
+            }, span);
 
             self.switch_to(ei_then);
             for &s in &ei.body {
                 self.lower_stmt(s);
             }
             if !self.current_block_is_terminated() {
-                self.terminate(Terminator::Goto(merge_block));
+                self.terminate(Terminator::Goto(merge_block), span);
             }
 
             current_else = ei_else;
@@ -1372,19 +1381,20 @@ impl<'a> Lowerer<'a> {
                 self.lower_stmt(s);
             }
             if !self.current_block_is_terminated() {
-                self.terminate(Terminator::Goto(merge_block));
+                self.terminate(Terminator::Goto(merge_block), span);
             }
         }
 
         self.switch_to(merge_block);
     }
 
-    fn lower_while(&mut self, cond: NodeId, body: &[NodeId], _stmt_id: NodeId) {
+    fn lower_while(&mut self, cond: NodeId, body: &[NodeId], stmt_id: NodeId) {
+        let span = self.arena.span_of(stmt_id);
         let cond_block = self.fresh_block();
         let body_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
-        self.terminate(Terminator::Goto(cond_block));
+        self.terminate(Terminator::Goto(cond_block), span);
 
         // Condition block.
         self.switch_to(cond_block);
@@ -1393,7 +1403,7 @@ impl<'a> Lowerer<'a> {
             cond: cond_reg,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         // Body block.
         self.switch_to(body_block);
@@ -1406,17 +1416,18 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(cond_block));
+            self.terminate(Terminator::Goto(cond_block), span);
         }
 
         self.switch_to(exit_block);
     }
 
-    fn lower_repeat_forever(&mut self, body: &[NodeId], _stmt_id: NodeId) {
+    fn lower_repeat_forever(&mut self, body: &[NodeId], stmt_id: NodeId) {
+        let span = self.arena.span_of(stmt_id);
         let body_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
-        self.terminate(Terminator::Goto(body_block));
+        self.terminate(Terminator::Goto(body_block), span);
 
         self.switch_to(body_block);
         self.context_stack.push(ControlContext::Loop {
@@ -1428,18 +1439,19 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(body_block));
+            self.terminate(Terminator::Goto(body_block), span);
         }
 
         self.switch_to(exit_block);
     }
 
-    fn lower_repeat_while(&mut self, body: &[NodeId], cond: NodeId, _stmt_id: NodeId) {
+    fn lower_repeat_while(&mut self, body: &[NodeId], cond: NodeId, stmt_id: NodeId) {
+        let span = self.arena.span_of(stmt_id);
         let body_block = self.fresh_block();
         let cond_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
-        self.terminate(Terminator::Goto(body_block));
+        self.terminate(Terminator::Goto(body_block), span);
 
         // Body block.
         self.switch_to(body_block);
@@ -1452,7 +1464,7 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(cond_block));
+            self.terminate(Terminator::Goto(cond_block), span);
         }
 
         // Condition block.
@@ -1462,7 +1474,7 @@ impl<'a> Lowerer<'a> {
             cond: cond_reg,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         self.switch_to(exit_block);
     }
@@ -1524,7 +1536,7 @@ impl<'a> Lowerer<'a> {
         let step_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
-        self.terminate(Terminator::Goto(cond_check_block));
+        self.terminate(Terminator::Goto(cond_check_block), span);
 
         // Direction check block: if step > 0, use <=; else use >=.
         self.switch_to(cond_check_block);
@@ -1542,7 +1554,7 @@ impl<'a> Lowerer<'a> {
             cond: step_positive,
             then_block: cond_up_block,
             else_block: cond_down_block,
-        });
+        }, span);
 
         // Ascending check: var <= to
         self.switch_to(cond_up_block);
@@ -1560,7 +1572,7 @@ impl<'a> Lowerer<'a> {
             cond: cmp_up,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         // Descending check: var >= to
         self.switch_to(cond_down_block);
@@ -1578,7 +1590,7 @@ impl<'a> Lowerer<'a> {
             cond: cmp_down,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         // Body block.
         self.switch_to(body_block);
@@ -1591,7 +1603,7 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block));
+            self.terminate(Terminator::Goto(step_block), span);
         }
 
         // Step block: var = var + step
@@ -1613,7 +1625,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::Goto(cond_check_block));
+        self.terminate(Terminator::Goto(cond_check_block), span);
 
         self.switch_to(exit_block);
     }
@@ -1672,7 +1684,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::Goto(cond_block));
+        self.terminate(Terminator::Goto(cond_block), span);
 
         // Cond: var != null
         self.switch_to(cond_block);
@@ -1690,7 +1702,7 @@ impl<'a> Lowerer<'a> {
             cond: not_null,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         // Body
         self.switch_to(body_block);
@@ -1703,7 +1715,7 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block));
+            self.terminate(Terminator::Goto(step_block), span);
         }
 
         // Step: var = Next(var)
@@ -1717,7 +1729,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::Goto(cond_block));
+        self.terminate(Terminator::Goto(cond_block), span);
 
         self.switch_to(exit_block);
     }
@@ -1745,7 +1757,7 @@ impl<'a> Lowerer<'a> {
 
         let zero = self.emit(InstKind::ConstInt(0), span);
         self.emit_void(InstKind::StoreLocal { local: idx_local, value: zero }, span);
-        self.terminate(Terminator::Goto(cond_block));
+        self.terminate(Terminator::Goto(cond_block), span);
 
         // Cond: idx < len
         self.switch_to(cond_block);
@@ -1763,7 +1775,7 @@ impl<'a> Lowerer<'a> {
             cond: in_bounds,
             then_block: body_block,
             else_block: exit_block,
-        });
+        }, span);
 
         // Body: var = arr[idx]
         self.switch_to(body_block);
@@ -1793,7 +1805,7 @@ impl<'a> Lowerer<'a> {
         }
         self.context_stack.pop();
         if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block));
+            self.terminate(Terminator::Goto(step_block), span);
         }
 
         // Step: idx += 1
@@ -1815,7 +1827,7 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::Goto(cond_block));
+        self.terminate(Terminator::Goto(cond_block), span);
 
         self.switch_to(exit_block);
     }
@@ -1824,9 +1836,9 @@ impl<'a> Lowerer<'a> {
         &mut self,
         scrutinee: NodeId,
         arms: &[NodeId],
-        _stmt_id: NodeId,
+        stmt_id: NodeId,
     ) {
-        let span = self.arena.span_of(scrutinee);
+        let span = self.arena.span_of(stmt_id);
         let scrut_reg = self.lower_expr(scrutinee);
 
         let merge_block = self.fresh_block();
@@ -1839,7 +1851,7 @@ impl<'a> Lowerer<'a> {
 
         // Build the comparison chain.
         let mut current_check = self.fresh_block();
-        self.terminate(Terminator::Goto(current_check));
+        self.terminate(Terminator::Goto(current_check), span);
 
         for (arm_idx, &arm_id) in arms.iter().enumerate() {
             let arm_body_bb = arm_bodies[arm_idx];
@@ -1870,7 +1882,7 @@ impl<'a> Lowerer<'a> {
                             cond: eq,
                             then_block: arm_body_bb,
                             else_block: next_check,
-                        });
+                        }, span);
                     } else {
                         // Multiple values: chain with Or-style logic.
                         let mut prev_check = current_check;
@@ -1893,7 +1905,7 @@ impl<'a> Lowerer<'a> {
                                     cond: eq,
                                     then_block: arm_body_bb,
                                     else_block: nb,
-                                });
+                                }, span);
                                 prev_check = nb;
                                 nb
                             } else {
@@ -1901,7 +1913,7 @@ impl<'a> Lowerer<'a> {
                                     cond: eq,
                                     then_block: arm_body_bb,
                                     else_block: next_check,
-                                });
+                                }, span);
                                 next_check
                             };
                             let _ = else_target;
@@ -1918,7 +1930,7 @@ impl<'a> Lowerer<'a> {
                     }
                     self.context_stack.pop();
                     if !self.current_block_is_terminated() {
-                        self.terminate(Terminator::Goto(merge_block));
+                        self.terminate(Terminator::Goto(merge_block), span);
                     }
 
                     current_check = next_check;
@@ -1926,7 +1938,7 @@ impl<'a> Lowerer<'a> {
                 Node::CaseArm(CaseArm::Default { body }) => {
                     // Default arm: the check block falls through here.
                     self.switch_to(current_check);
-                    self.terminate(Terminator::Goto(arm_body_bb));
+                    self.terminate(Terminator::Goto(arm_body_bb), span);
 
                     self.switch_to(arm_body_bb);
                     self.context_stack.push(ControlContext::Select {
@@ -1937,7 +1949,7 @@ impl<'a> Lowerer<'a> {
                     }
                     self.context_stack.pop();
                     if !self.current_block_is_terminated() {
-                        self.terminate(Terminator::Goto(merge_block));
+                        self.terminate(Terminator::Goto(merge_block), span);
                     }
 
                     current_check = merge_block;

@@ -103,6 +103,7 @@ pub struct BasicBlock {
     pub id: BlockId,
     pub insts: Vec<Inst>,
     pub terminator: Option<Terminator>,
+    pub terminator_span: Span,
 }
 
 /// An IR function. Top-level code is wrapped in a synthetic `@main`.

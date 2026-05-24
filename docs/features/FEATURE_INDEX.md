@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | - |
+| [FD-010](FD-010_INTERPRETER_BACKEND.md) | Interpreter Backend Implementation | Open | High | High |
 
 ## Completed
 
