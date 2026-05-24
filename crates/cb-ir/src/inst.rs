@@ -3,7 +3,7 @@
 use cb_diagnostics::Symbol;
 
 use crate::types::IrType;
-use crate::{BlockId, FuncId, LocalId, Reg};
+use crate::{BlockId, FuncId, LocalId, Reg, TypeDefId};
 
 /// The operation performed by an instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -16,7 +16,7 @@ pub enum InstKind {
     LoadLocal { local: LocalId },
     StoreLocal { local: LocalId, value: Reg },
 
-    NewType { type_name: Symbol },
+    NewType { type_def: TypeDefId },
     NewArray { elem_type: IrType, dims: Vec<Reg> },
 
     GetField { object: Reg, field: Symbol, field_type: IrType },
@@ -26,8 +26,8 @@ pub enum InstKind {
     SetElement { array: Reg, indices: Vec<Reg>, value: Reg },
 
     // ── Type-Linked-List Operations ─────────────────────────────────
-    First { type_name: Symbol },
-    Last { type_name: Symbol },
+    First { type_def: TypeDefId },
+    Last { type_def: TypeDefId },
     Next { object: Reg },
     Previous { object: Reg },
 

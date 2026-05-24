@@ -11,6 +11,7 @@ use crate::{BlockId, Program, Reg};
 /// Verify structural invariants of the IR program. Panics on violations.
 pub fn verify(program: &Program) {
     let func_table_len = program.func_table.len() as u32;
+    let num_type_defs = program.type_defs.len() as u32;
 
     for func in &program.functions {
         let num_locals = func.locals.len() as u32;
@@ -31,6 +32,7 @@ pub fn verify(program: &Program) {
                 verify_inst_locals(&inst.kind, num_locals);
                 verify_inst_regs(&inst.kind, &defined_regs);
                 verify_inst_func_ids(&inst.kind, func_table_len);
+                verify_inst_type_defs(&inst.kind, num_type_defs);
             }
 
             if let Some(ref term) = block.terminator {
@@ -65,6 +67,23 @@ fn verify_inst_func_ids(kind: &InstKind, func_table_len: u32) {
             "FuncId({}) out of range (func_table has {func_table_len} entries)",
             callee.0,
         );
+    }
+}
+
+fn verify_inst_type_defs(kind: &InstKind, num_type_defs: u32) {
+    let check = |id: crate::TypeDefId| {
+        assert!(
+            id.0 < num_type_defs,
+            "TypeDefId({}) out of range (program has {num_type_defs} type defs)",
+            id.0,
+        );
+    };
+
+    match kind {
+        InstKind::NewType { type_def } | InstKind::First { type_def } | InstKind::Last { type_def } => {
+            check(*type_def);
+        }
+        _ => {}
     }
 }
 

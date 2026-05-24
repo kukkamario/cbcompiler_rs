@@ -58,6 +58,10 @@ pub struct LocalId(pub u32);
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct BlockId(pub u32);
 
+/// Index into `Program::type_defs`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct TypeDefId(pub u32);
+
 impl fmt::Display for Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "r{}", self.0)
@@ -73,6 +77,12 @@ impl fmt::Display for LocalId {
 impl fmt::Display for BlockId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "bb{}", self.0)
+    }
+}
+
+impl fmt::Display for TypeDefId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "typedef{}", self.0)
     }
 }
 

@@ -13,7 +13,7 @@ use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator};
 use cb_ir::types::{FnSig, IrType};
 use cb_ir::{
     BasicBlock, BlockId, FuncDecl, FuncId, FuncKind, Function, Inst, Local, LocalId, Program, Reg,
-    StructDefInfo, TypeDefInfo,
+    StructDefInfo, TypeDefId, TypeDefInfo,
 };
 
 use crate::convert::ConversionTable;
@@ -62,6 +62,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         runtime_func_map: HashMap::new(),
         functions: Vec::new(),
         type_defs: Vec::new(),
+        type_def_map: HashMap::new(),
         struct_defs: Vec::new(),
     };
 
@@ -110,6 +111,7 @@ struct Lowerer<'a> {
     runtime_func_map: HashMap<String, FuncId>,
     functions: Vec<Function>,
     type_defs: Vec<TypeDefInfo>,
+    type_def_map: HashMap<Symbol, TypeDefId>,
     struct_defs: Vec<StructDefInfo>,
 }
 
@@ -301,6 +303,11 @@ impl<'a> Lowerer<'a> {
                 }
                 _ => {}
             }
+        }
+
+        // Build type_def_map for TypeDefId resolution.
+        for (i, td) in self.type_defs.iter().enumerate() {
+            self.type_def_map.insert(td.name, TypeDefId(i as u32));
         }
 
         // Build func_table: runtime functions first, then user-defined.
@@ -753,7 +760,8 @@ impl<'a> Lowerer<'a> {
                         Type::TypeRef { name } => name,
                         _ => self.interner.intern("<unknown>"),
                     };
-                    self.emit(InstKind::NewType { type_name }, span)
+                    let type_def = self.type_def_map[&type_name];
+                    self.emit(InstKind::NewType { type_def }, span)
                 }
                 NewKind::Array { elem: _, dims } => {
                     let elem_ty = self
@@ -1676,7 +1684,8 @@ impl<'a> Lowerer<'a> {
         let exit_block = self.fresh_block();
 
         // Init: var = First(T)
-        let first = self.emit(InstKind::First { type_name }, span);
+        let type_def = self.type_def_map[&type_name];
+        let first = self.emit(InstKind::First { type_def }, span);
         self.emit_void(
             InstKind::StoreLocal {
                 local: var_local,

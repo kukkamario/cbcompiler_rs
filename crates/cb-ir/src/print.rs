@@ -4,7 +4,7 @@ use cb_diagnostics::Interner;
 
 use crate::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
 use crate::types::IrType;
-use crate::{FuncDecl, Function, Program};
+use crate::{FuncDecl, Function, Program, TypeDefInfo};
 
 /// Render the entire program as human-readable IR text.
 pub fn print_program(program: &Program, interner: &Interner) -> String {
@@ -13,12 +13,12 @@ pub fn print_program(program: &Program, interner: &Interner) -> String {
         if i > 0 {
             out.push('\n');
         }
-        print_function(&mut out, func, &program.func_table, interner);
+        print_function(&mut out, func, &program.func_table, &program.type_defs, interner);
     }
     out
 }
 
-fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], interner: &Interner) {
+fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], type_defs: &[TypeDefInfo], interner: &Interner) {
     use std::fmt::Write;
 
     let name = interner.resolve(func.name);
@@ -59,7 +59,7 @@ fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], in
             if let Some(r) = inst.result {
                 write!(out, "{r} = ").unwrap();
             }
-            print_inst_kind(out, &inst.kind, func_table, interner);
+            print_inst_kind(out, &inst.kind, func_table, type_defs, interner);
             out.push('\n');
         }
         out.push_str("    ");
@@ -73,7 +73,7 @@ fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], in
     out.push_str("}\n");
 }
 
-fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], interner: &Interner) {
+fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], type_defs: &[TypeDefInfo], interner: &Interner) {
     use std::fmt::Write;
 
     match kind {
@@ -89,8 +89,11 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], i
         InstKind::StoreLocal { local, value } => {
             write!(out, "store_local {local}, {value}").unwrap();
         }
-        InstKind::NewType { type_name } => {
-            write!(out, "new_type {}", interner.resolve(*type_name)).unwrap();
+        InstKind::NewType { type_def } => {
+            let name = type_defs.get(type_def.0 as usize)
+                .map(|t| interner.resolve(t.name))
+                .unwrap_or("<unknown_type>");
+            write!(out, "new_type {name}").unwrap();
         }
         InstKind::NewArray { elem_type, dims } => {
             write!(out, "new_array {}", format_type(elem_type, interner)).unwrap();
@@ -140,11 +143,17 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], i
             }
             write!(out, ", {value}").unwrap();
         }
-        InstKind::First { type_name } => {
-            write!(out, "first {}", interner.resolve(*type_name)).unwrap();
+        InstKind::First { type_def } => {
+            let name = type_defs.get(type_def.0 as usize)
+                .map(|t| interner.resolve(t.name))
+                .unwrap_or("<unknown_type>");
+            write!(out, "first {name}").unwrap();
         }
-        InstKind::Last { type_name } => {
-            write!(out, "last {}", interner.resolve(*type_name)).unwrap();
+        InstKind::Last { type_def } => {
+            let name = type_defs.get(type_def.0 as usize)
+                .map(|t| interner.resolve(t.name))
+                .unwrap_or("<unknown_type>");
+            write!(out, "last {name}").unwrap();
         }
         InstKind::Next { object } => {
             write!(out, "next {object}").unwrap();
