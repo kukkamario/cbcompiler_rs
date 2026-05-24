@@ -6,3 +6,4 @@ Cargo.lock.bak
 *.pdb
 .claude/
 /runtime/build/
+/runtime/vcpkg_installed/

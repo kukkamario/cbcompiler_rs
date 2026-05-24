@@ -1,0 +1,3 @@
+[submodule "runtime/vcpkg"]
+	path = runtime/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
