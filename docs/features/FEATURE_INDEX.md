@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-009](FD-009_RUNTIME_LIBRARY.md) | Runtime Library Architecture | Open | High | High |
 
 ## Completed
 
