@@ -288,6 +288,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         match kind {
             // ── Constants ──────────────────────────────────────────
             InstKind::ConstInt(v) => Ok(Value::Int(*v as i32)),
+            InstKind::ConstLong(v) => Ok(Value::Long(*v)),
             InstKind::ConstFloat(v) => Ok(Value::Float(*v)),
             InstKind::ConstBool(v) => Ok(Value::Bool(*v)),
             InstKind::ConstString(v) => Ok(Value::String(Rc::from(v.as_str()))),

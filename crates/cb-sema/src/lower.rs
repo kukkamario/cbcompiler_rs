@@ -726,7 +726,14 @@ impl<'a> Lowerer<'a> {
     fn lower_expr(&mut self, id: NodeId) -> Reg {
         let span = self.arena.span_of(id);
         let reg = match self.arena[id].clone() {
-            Node::Expr(Expr::IntLit(v)) => self.emit(InstKind::ConstInt(v as i64), span),
+            Node::Expr(Expr::IntLit(v)) => {
+                let v = v as i64;
+                if i32::try_from(v).is_ok() {
+                    self.emit(InstKind::ConstInt(v), span)
+                } else {
+                    self.emit(InstKind::ConstLong(v), span)
+                }
+            }
             Node::Expr(Expr::FloatLit(v)) => self.emit(InstKind::ConstFloat(v.to_f64()), span),
             Node::Expr(Expr::BoolLit(v)) => self.emit(InstKind::ConstBool(v), span),
             Node::Expr(Expr::StrLit { value, .. }) => {
@@ -860,7 +867,13 @@ impl<'a> Lowerer<'a> {
             && let DeclKind::Constant { value } = &decl.kind
         {
             return match *value {
-                ConstValue::Int(v) => self.emit(InstKind::ConstInt(v), span),
+                ConstValue::Int(v) => {
+                    if i32::try_from(v).is_ok() {
+                        self.emit(InstKind::ConstInt(v), span)
+                    } else {
+                        self.emit(InstKind::ConstLong(v), span)
+                    }
+                }
                 ConstValue::Float(v) => self.emit(InstKind::ConstFloat(v), span),
                 ConstValue::Bool(v) => self.emit(InstKind::ConstBool(v), span),
                 ConstValue::String(ref v) => {

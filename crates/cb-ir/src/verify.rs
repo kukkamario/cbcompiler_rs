@@ -181,6 +181,7 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
         | InstKind::DeleteLvalue { .. }
         | InstKind::DeleteLvalueGlobal { .. }
         | InstKind::ConstInt(_)
+        | InstKind::ConstLong(_)
         | InstKind::ConstFloat(_)
         | InstKind::ConstBool(_)
         | InstKind::ConstString(_)

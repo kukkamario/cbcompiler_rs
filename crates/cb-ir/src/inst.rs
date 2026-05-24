@@ -48,6 +48,7 @@ pub enum InstKind {
 
     // ── Constants ───────────────────────────────────────────────────
     ConstInt(i64),
+    ConstLong(i64),
     ConstFloat(f64),
     ConstBool(bool),
     ConstString(String),

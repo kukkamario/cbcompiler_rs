@@ -230,6 +230,9 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
         InstKind::ConstInt(v) => {
             write!(out, "const_int {v}").unwrap();
         }
+        InstKind::ConstLong(v) => {
+            write!(out, "const_long {v}").unwrap();
+        }
         InstKind::ConstFloat(v) => {
             write!(out, "const_float {v}").unwrap();
         }
