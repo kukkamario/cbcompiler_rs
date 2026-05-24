@@ -5,3 +5,4 @@ Cargo.lock.bak
 .vscode/
 *.pdb
 .claude/
+/runtime/build/

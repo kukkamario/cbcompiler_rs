@@ -31,9 +31,6 @@ proptest = "1"
 tempfile = "3"
 unicode-ident = "1"
 
-# External crates (build)
-cc = "1"
-
 # Internal crates (path entries so other crates can switch to `workspace = true`)
 cb-backend-interp = { path = "crates/cb-backend-interp" }
 cb-backend-llvm = { path = "crates/cb-backend-llvm" }
