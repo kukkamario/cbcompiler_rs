@@ -18,6 +18,7 @@ llvm = ["dep:cb-backend-llvm"]
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-frontend = { path = "../cb-frontend" }
 cb-ir = { path = "../cb-ir" }
+cb-runtime-sys = { path = "../cb-runtime-sys" }
 cb-sema = { path = "../cb-sema" }
 cb-backend-interp = { path = "../cb-backend-interp", optional = true }
 cb-backend-llvm = { path = "../cb-backend-llvm", optional = true }

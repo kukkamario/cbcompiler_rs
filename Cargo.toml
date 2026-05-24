@@ -7,6 +7,7 @@ members = [
     "crates/cb-driver",
     "crates/cb-frontend",
     "crates/cb-ir",
+    "crates/cb-runtime-sys",
     "crates/cb-sema",
 ]
 
@@ -30,10 +31,14 @@ proptest = "1"
 tempfile = "3"
 unicode-ident = "1"
 
+# External crates (build)
+cc = "1"
+
 # Internal crates (path entries so other crates can switch to `workspace = true`)
 cb-backend-interp = { path = "crates/cb-backend-interp" }
 cb-backend-llvm = { path = "crates/cb-backend-llvm" }
 cb-diagnostics = { path = "crates/cb-diagnostics" }
 cb-frontend = { path = "crates/cb-frontend" }
 cb-ir = { path = "crates/cb-ir" }
+cb-runtime-sys = { path = "crates/cb-runtime-sys" }
 cb-sema = { path = "crates/cb-sema" }
