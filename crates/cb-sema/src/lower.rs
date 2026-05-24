@@ -1150,6 +1150,25 @@ impl<'a> Lowerer<'a> {
                 self.lower_assign(target, value, id);
             }
             Node::Stmt(Stmt::ExprStmt { expr }) => {
+                // A bare identifier in statement position that resolves to a
+                // function is a 0-arg call (CoolBasic subroutine call syntax).
+                if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
+                    let name = self.intern_ident(*name_span, *sigil);
+                    if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
+                        let func_id = match &decl.kind {
+                            DeclKind::Function { .. } => self.func_id_map.get(&name).copied(),
+                            DeclKind::RuntimeFn { c_symbol, .. } => {
+                                self.runtime_func_map.get(c_symbol).copied()
+                            }
+                            _ => None,
+                        };
+                        if let Some(func_id) = func_id {
+                            let span = self.arena.span_of(expr);
+                            self.emit(InstKind::Call { callee: func_id, args: vec![] }, span);
+                            return;
+                        }
+                    }
+                }
                 self.lower_expr(expr);
             }
             Node::Stmt(Stmt::Dim {
