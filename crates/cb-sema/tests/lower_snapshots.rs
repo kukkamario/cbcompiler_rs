@@ -11,7 +11,7 @@ fn lower_src(src: &str) -> String {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
-    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file);
+    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &[]);
     assert!(
         !sema.has_errors(),
         "sema errors: {:?}",
@@ -113,5 +113,35 @@ fn function_local_const() {
 #[test]
 fn comparison_with_promotion() {
     let ir = lower_src("Dim x As Int\nDim y As Float\nIf x < y Then\n  x = 1\nEndIf\n");
+    insta::assert_snapshot!(ir);
+}
+
+fn lower_with_catalog(src: &str, catalog: &[cb_sema::FuncDesc]) -> String {
+    let file = FileId(0);
+    let (tokens, _) = tokenize(src, file, LexerOptions::default());
+    let parsed = parse(&tokens, src, file);
+    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, catalog);
+    assert!(
+        !sema.has_errors(),
+        "sema errors: {:?}",
+        sema.diagnostics
+    );
+    let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, src, &mut sema);
+    cb_ir::verify::verify(&ir);
+    cb_ir::print::print_program(&ir, &sema.interner)
+}
+
+#[test]
+fn runtime_function_call() {
+    let catalog = vec![cb_sema::FuncDesc {
+        name: "print".to_string(),
+        c_symbol: "cb_rt_print".to_string(),
+        params: vec![cb_sema::FuncParamDesc {
+            name: Some("text".to_string()),
+            ty: cb_sema::Type::String,
+        }],
+        return_ty: cb_sema::Type::Void,
+    }];
+    let ir = lower_with_catalog("print(\"hello world\")\n", &catalog);
     insta::assert_snapshot!(ir);
 }

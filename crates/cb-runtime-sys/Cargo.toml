@@ -1,0 +1,15 @@
+[package]
+name = "cb-runtime-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+
+[dependencies]
+cb-sema = { path = "../cb-sema" }
+
+[lints.rust]
+unsafe_code = "allow"

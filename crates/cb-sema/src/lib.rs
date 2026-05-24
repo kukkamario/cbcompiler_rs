@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Diagnostic, FileId, Interner};
+use cb_diagnostics::{Diagnostic, FileId, Interner, Symbol};
 use cb_frontend::{Arena, NodeId};
 
 mod check;
@@ -18,9 +18,33 @@ mod types;
 
 pub use convert::{Conversion, ConversionTable};
 pub use scope::{
-    ConstValue, DeclKind, Declaration, FieldInfo, ParamInfo, ScopeId, ScopeKind, SymbolTable,
+    ConstValue, DeclKind, Declaration, FieldInfo, OverloadVariant, ParamInfo, ScopeId, ScopeKind,
+    SymbolTable,
 };
 pub use types::Type;
+
+// ── Runtime catalog types ──────────────────────────────────────────────
+
+/// Description of a runtime-provided function, passed in by the driver.
+pub struct FuncDesc {
+    pub name: String,
+    pub c_symbol: String,
+    pub params: Vec<FuncParamDesc>,
+    pub return_ty: Type,
+}
+
+/// A parameter in a runtime function description.
+pub struct FuncParamDesc {
+    pub name: Option<String>,
+    pub ty: Type,
+}
+
+/// How a call expression was resolved during type checking.
+#[derive(Clone, Debug)]
+pub enum ResolvedCall {
+    UserDefined { name: Symbol },
+    RuntimeFn { c_symbol: String },
+}
 
 /// Whether a Delete operand is an lvalue (variable/field/index) or rvalue.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -39,8 +63,9 @@ pub fn analyze(
     program: &[NodeId],
     source: &str,
     file_id: FileId,
+    runtime_catalog: &[FuncDesc],
 ) -> SemaResult {
-    check::Checker::run(arena, program, source, file_id)
+    check::Checker::run(arena, program, source, file_id, runtime_catalog)
 }
 
 /// Result of semantic analysis.
@@ -53,6 +78,8 @@ pub struct SemaResult {
     pub conversions: ConversionTable,
     /// Delete lvalue/rvalue classification for each `Stmt::Delete` node.
     pub delete_classes: HashMap<NodeId, DeleteClass>,
+    /// Resolved call target for each `Expr::Call` node.
+    pub resolved_calls: HashMap<NodeId, ResolvedCall>,
     /// Diagnostics produced during analysis.
     pub diagnostics: Vec<Diagnostic>,
     /// The string interner used during analysis (needed by the lowering pass).

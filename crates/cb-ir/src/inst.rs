@@ -3,7 +3,7 @@
 use cb_diagnostics::Symbol;
 
 use crate::types::IrType;
-use crate::{BlockId, LocalId, Reg};
+use crate::{BlockId, FuncId, LocalId, Reg};
 
 /// The operation performed by an instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,7 +40,7 @@ pub enum InstKind {
     Convert { value: Reg, from: IrType, to: IrType },
 
     // ── Function Calls ──────────────────────────────────────────────
-    Call { callee: Symbol, args: Vec<Reg> },
+    Call { callee: FuncId, args: Vec<Reg> },
     CallIndirect { callee: Reg, args: Vec<Reg> },
 
     // ── Constants ───────────────────────────────────────────────────

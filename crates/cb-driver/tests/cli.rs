@@ -173,3 +173,30 @@ fn backend_flag_missing_value_exits_two() {
         .code(2)
         .stderr(contains("--backend requires a value"));
 }
+
+#[test]
+fn runtime_print_typechecks_and_lowers() {
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "hello.cb", "Print(\"hello world\")\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--dump-ir")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("call print"))
+        .stdout(contains("const_string \"hello world\""));
+}
+
+#[test]
+fn runtime_abs_overload_resolves() {
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "abs.cb", "Dim x As Int\nx = Abs(-5)\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--dump-ir")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("call abs"));
+}

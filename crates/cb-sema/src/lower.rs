@@ -12,13 +12,14 @@ use cb_frontend::{Arena, BinOp, NewKind, NodeId, SpanExt, UnOp};
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator};
 use cb_ir::types::{FnSig, IrType};
 use cb_ir::{
-    BasicBlock, BlockId, Function, Inst, Local, LocalId, Program, Reg, StructDefInfo, TypeDefInfo,
+    BasicBlock, BlockId, FuncDecl, FuncId, FuncKind, Function, Inst, Local, LocalId, Program, Reg,
+    StructDefInfo, TypeDefInfo,
 };
 
 use crate::convert::ConversionTable;
 use crate::scope::{ConstValue, DeclKind, ScopeId, SymbolTable};
 use crate::types::Type;
-use crate::{DeleteClass, SemaResult, TypeTable};
+use crate::{DeleteClass, ResolvedCall, SemaResult, TypeTable};
 
 /// Lower a type-checked program to IR.
 ///
@@ -30,6 +31,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         symbols,
         conversions,
         delete_classes,
+        resolved_calls,
         diagnostics: _,
         interner,
     } = sema;
@@ -42,6 +44,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         symbols,
         conversions,
         delete_classes,
+        resolved_calls,
 
         current_scope: ScopeId(0),
         locals: Vec::new(),
@@ -54,6 +57,9 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
         label_blocks: HashMap::new(),
         next_temp: 0,
 
+        func_table: Vec::new(),
+        func_id_map: HashMap::new(),
+        runtime_func_map: HashMap::new(),
         functions: Vec::new(),
         type_defs: Vec::new(),
         struct_defs: Vec::new(),
@@ -84,6 +90,7 @@ struct Lowerer<'a> {
     symbols: &'a SymbolTable,
     conversions: &'a ConversionTable,
     delete_classes: &'a HashMap<NodeId, DeleteClass>,
+    resolved_calls: &'a HashMap<NodeId, ResolvedCall>,
 
     // Per-function state (reset between functions)
     current_scope: ScopeId,
@@ -98,6 +105,9 @@ struct Lowerer<'a> {
     next_temp: u32,
 
     // Collected output
+    func_table: Vec<FuncDecl>,
+    func_id_map: HashMap<Symbol, FuncId>,
+    runtime_func_map: HashMap<String, FuncId>,
     functions: Vec<Function>,
     type_defs: Vec<TypeDefInfo>,
     struct_defs: Vec<StructDefInfo>,
@@ -291,7 +301,10 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Lower user-defined functions first.
+        // Build func_table: runtime functions first, then user-defined.
+        self.build_func_table(program, top_scope);
+
+        // Lower user-defined functions (in source order matching pre-allocated body_index).
         let func_stmts: Vec<_> = program
             .iter()
             .filter(|&&id| matches!(self.arena[id], Node::Stmt(Stmt::Function { .. })))
@@ -305,10 +318,113 @@ impl<'a> Lowerer<'a> {
         self.lower_main(program, top_scope);
 
         Program {
+            func_table: std::mem::take(&mut self.func_table),
             functions: std::mem::take(&mut self.functions),
             type_defs: std::mem::take(&mut self.type_defs),
             struct_defs: std::mem::take(&mut self.struct_defs),
         }
+    }
+
+    fn build_func_table(&mut self, program: &[NodeId], top_scope: ScopeId) {
+        // 1. Register runtime functions.
+        for (sym, decl) in self.symbols.iter_scope(top_scope) {
+            match &decl.kind {
+                DeclKind::RuntimeFn {
+                    params,
+                    return_ty,
+                    c_symbol,
+                } => {
+                    let func_id = FuncId(self.func_table.len() as u32);
+                    self.func_table.push(FuncDecl {
+                        name: sym,
+                        sig: FnSig {
+                            params: params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect(),
+                            ret: Box::new(self.sema_type_to_ir(return_ty)),
+                        },
+                        kind: FuncKind::Runtime {
+                            symbol: c_symbol.clone(),
+                        },
+                    });
+                    self.runtime_func_map.insert(c_symbol.clone(), func_id);
+                }
+                DeclKind::OverloadSet { variants } => {
+                    for variant in variants {
+                        let func_id = FuncId(self.func_table.len() as u32);
+                        self.func_table.push(FuncDecl {
+                            name: sym,
+                            sig: FnSig {
+                                params: variant
+                                    .params
+                                    .iter()
+                                    .map(|p| self.sema_type_to_ir(&p.ty))
+                                    .collect(),
+                                ret: Box::new(self.sema_type_to_ir(&variant.return_ty)),
+                            },
+                            kind: FuncKind::Runtime {
+                                symbol: variant.c_symbol.clone(),
+                            },
+                        });
+                        self.runtime_func_map
+                            .insert(variant.c_symbol.clone(), func_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 2. Register user-defined functions in source order.
+        // Get param/return types from the symbol table (already resolved by sema).
+        let func_stmts: Vec<_> = program
+            .iter()
+            .filter(|&&id| matches!(self.arena[id], Node::Stmt(Stmt::Function { .. })))
+            .copied()
+            .collect();
+
+        for (body_index, &id) in func_stmts.iter().enumerate() {
+            if let Node::Stmt(Stmt::Function { name_span, .. }) = &self.arena[id] {
+                let name = self.intern_ident(*name_span, None);
+                let (param_types, ret) =
+                    if let Some(decl) = self.symbols.lookup(top_scope, name)
+                        && let DeclKind::Function {
+                            params, return_ty, ..
+                        } = &decl.kind
+                    {
+                        let pt: Vec<_> =
+                            params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
+                        let rt = Box::new(self.sema_type_to_ir(return_ty));
+                        (pt, rt)
+                    } else {
+                        (Vec::new(), Box::new(IrType::Void))
+                    };
+
+                let func_id = FuncId(self.func_table.len() as u32);
+                self.func_table.push(FuncDecl {
+                    name,
+                    sig: FnSig {
+                        params: param_types,
+                        ret,
+                    },
+                    kind: FuncKind::UserDefined { body_index },
+                });
+                self.func_id_map.insert(name, func_id);
+            }
+        }
+
+        // 3. Register @main.
+        let main_name = self.interner.intern("@main");
+        let main_body_index = func_stmts.len();
+        let func_id = FuncId(self.func_table.len() as u32);
+        self.func_table.push(FuncDecl {
+            name: main_name,
+            sig: FnSig {
+                params: Vec::new(),
+                ret: Box::new(IrType::Void),
+            },
+            kind: FuncKind::UserDefined {
+                body_index: main_body_index,
+            },
+        });
+        self.func_id_map.insert(main_name, func_id);
     }
 
     fn lower_main(&mut self, program: &[NodeId], top_scope: ScopeId) {
@@ -594,7 +710,7 @@ impl<'a> Lowerer<'a> {
                 self.emit(InstKind::UnOp { op: ir_op, operand: val }, span)
             }
 
-            Node::Expr(Expr::Call { callee, args }) => self.lower_call(callee, &args, span),
+            Node::Expr(Expr::Call { callee, args }) => self.lower_call(id, callee, &args, span),
 
             Node::Expr(Expr::Index { array, indices }) => {
                 let arr = self.lower_expr(array);
@@ -829,7 +945,13 @@ impl<'a> Lowerer<'a> {
         self.emit(InstKind::LoadLocal { local: tmp }, span)
     }
 
-    fn lower_call(&mut self, callee: NodeId, args: &[NodeId], span: Span) -> Reg {
+    fn lower_call(
+        &mut self,
+        call_id: NodeId,
+        callee: NodeId,
+        args: &[NodeId],
+        span: Span,
+    ) -> Reg {
         // Check for intrinsic calls.
         if let Node::Expr(Expr::Ident {
             name_span,
@@ -893,14 +1015,31 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Check if callee is an identifier referring to a known function.
+        // Use resolved_calls to determine the call target.
+        if let Some(resolved) = self.resolved_calls.get(&call_id) {
+            let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();
+            let func_id = match resolved {
+                ResolvedCall::UserDefined { name } => self.func_id_map[name],
+                ResolvedCall::RuntimeFn { c_symbol } => self.runtime_func_map[c_symbol],
+            };
+            return self.emit(InstKind::Call { callee: func_id, args: arg_regs }, span);
+        }
+
+        // Check if callee is an identifier referring to a known function
+        // (fallback for calls not in resolved_calls, e.g. function pointers).
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
             if let Some(decl) = self.symbols.lookup(self.current_scope, name)
-                && matches!(decl.kind, DeclKind::Function { .. })
+                && matches!(
+                    decl.kind,
+                    DeclKind::Function { .. }
+                        | DeclKind::RuntimeFn { .. }
+                        | DeclKind::OverloadSet { .. }
+                )
             {
                 let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();
-                return self.emit(InstKind::Call { callee: name, args: arg_regs }, span);
+                let func_id = self.func_id_map[&name];
+                return self.emit(InstKind::Call { callee: func_id, args: arg_regs }, span);
             }
         }
 

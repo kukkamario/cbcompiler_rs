@@ -151,8 +151,17 @@ fn main() -> ExitCode {
         diagnostics: parse_diags,
     } = parse(&tokens, &text, file);
 
+    // Load runtime function catalog from the C runtime library.
+    let runtime_catalog = match cb_runtime_sys::load_catalog() {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("cb: failed to load runtime catalog: {msg}");
+            return ExitCode::from(2);
+        }
+    };
+
     // Run semantic analysis.
-    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file);
+    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &runtime_catalog);
 
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;

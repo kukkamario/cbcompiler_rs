@@ -10,6 +10,8 @@ use crate::{BlockId, Program, Reg};
 
 /// Verify structural invariants of the IR program. Panics on violations.
 pub fn verify(program: &Program) {
+    let func_table_len = program.func_table.len() as u32;
+
     for func in &program.functions {
         let num_locals = func.locals.len() as u32;
         let block_ids: HashSet<BlockId> = func.blocks.iter().map(|b| b.id).collect();
@@ -28,6 +30,7 @@ pub fn verify(program: &Program) {
                 }
                 verify_inst_locals(&inst.kind, num_locals);
                 verify_inst_regs(&inst.kind, &defined_regs);
+                verify_inst_func_ids(&inst.kind, func_table_len);
             }
 
             if let Some(ref term) = block.terminator {
@@ -52,6 +55,16 @@ fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
         InstKind::DeleteLvalue { local } => check(*local),
         InstKind::Redim { local, .. } => check(*local),
         _ => {}
+    }
+}
+
+fn verify_inst_func_ids(kind: &InstKind, func_table_len: u32) {
+    if let InstKind::Call { callee, .. } = kind {
+        assert!(
+            callee.0 < func_table_len,
+            "FuncId({}) out of range (func_table has {func_table_len} entries)",
+            callee.0,
+        );
     }
 }
 
@@ -185,6 +198,7 @@ mod tests {
 
     fn minimal_program(func: Function) -> Program {
         Program {
+            func_table: Vec::new(),
             functions: vec![func],
             type_defs: Vec::new(),
             struct_defs: Vec::new(),
@@ -349,6 +363,24 @@ mod tests {
                     span: DUMMY_SPAN,
                 },
             ],
+            vec![],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    #[should_panic(expected = "FuncId(5) out of range")]
+    fn call_with_out_of_range_func_id() {
+        let prog = valid_one_block(
+            vec![Inst {
+                result: Some(Reg(0)),
+                kind: InstKind::Call {
+                    callee: crate::FuncId(5),
+                    args: Vec::new(),
+                },
+                span: DUMMY_SPAN,
+            }],
             vec![],
             Terminator::Return { value: None },
         );

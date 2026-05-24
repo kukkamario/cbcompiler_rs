@@ -15,6 +15,34 @@ pub mod verify;
 pub use inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
 pub use types::{FnSig, IrType};
 
+// ── Function identity ──────────────────────────────────────────────────
+
+/// Numeric handle for a function (user-defined or runtime-provided).
+/// Indexes into `Program::func_table`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct FuncId(pub u32);
+
+impl fmt::Display for FuncId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "func{}", self.0)
+    }
+}
+
+/// Declaration of a function known to the program.
+#[derive(Clone, Debug)]
+pub struct FuncDecl {
+    pub name: Symbol,
+    pub sig: FnSig,
+    pub kind: FuncKind,
+}
+
+/// Whether a function is user-defined (has an IR body) or runtime-provided.
+#[derive(Clone, Debug)]
+pub enum FuncKind {
+    UserDefined { body_index: usize },
+    Runtime { symbol: String },
+}
+
 // ── ID newtypes ─────────────────────────────────────────────────────────
 
 /// Virtual register — assigned by instructions, consumed by operands.
@@ -90,6 +118,10 @@ pub struct Function {
 /// Top-level IR program.
 #[derive(Clone, Debug)]
 pub struct Program {
+    /// All known functions (user-defined + runtime). `FuncId` indexes this.
+    pub func_table: Vec<FuncDecl>,
+    /// Bodies of user-defined functions. `FuncKind::UserDefined::body_index`
+    /// indexes this.
     pub functions: Vec<Function>,
     pub type_defs: Vec<TypeDefInfo>,
     pub struct_defs: Vec<StructDefInfo>,
