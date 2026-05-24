@@ -48,6 +48,7 @@ pub enum DeclKind {
     Label,
     RuntimeFn { params: Vec<ParamInfo>, return_ty: Type, c_symbol: String },
     OverloadSet { variants: Vec<OverloadVariant> },
+    RuntimeTypeDef,
 }
 
 /// One variant of an overloaded runtime function.

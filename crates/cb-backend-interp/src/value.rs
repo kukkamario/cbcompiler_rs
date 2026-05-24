@@ -22,6 +22,7 @@ pub enum Value {
     TypeInstance(TypeInstanceId),
     Struct(Box<StructObj>),
     FnPtr(Option<FuncId>),
+    OpaqueHandle(u64),
     Null,
     Void,
 }
@@ -40,6 +41,7 @@ impl Value {
             Value::String(s) => !s.is_empty(),
             Value::Array(_) | Value::TypeInstance(_) | Value::Struct(_) => true,
             Value::FnPtr(f) => f.is_some(),
+            Value::OpaqueHandle(h) => *h != 0,
             Value::Null => false,
             Value::Void => false,
         }
@@ -60,6 +62,7 @@ impl Value {
             Value::TypeInstance(_) => Rc::from("<TypeInstance>"),
             Value::Struct(_) => Rc::from("<Struct>"),
             Value::FnPtr(_) => Rc::from("<FnPtr>"),
+            Value::OpaqueHandle(h) => Rc::from(format!("<Handle#{h}>").as_str()),
             Value::Null => Rc::from("Null"),
             Value::Void => Rc::from(""),
         }
@@ -93,6 +96,7 @@ pub fn default_value(ty: &IrType, struct_defs: &[StructDefInfo]) -> Value {
             }
         }
         IrType::FnPtr(_) => Value::FnPtr(None),
+        IrType::RuntimeType(_) => Value::Null,
         IrType::Null | IrType::Void => Value::Null,
         IrType::TypeRef(_) => Value::Null,
         IrType::Array { .. } => Value::Null,
@@ -116,6 +120,7 @@ impl fmt::Display for Value {
             Value::Struct(_) => write!(f, "<Struct>"),
             Value::FnPtr(Some(id)) => write!(f, "<FnPtr#{}>", id.0),
             Value::FnPtr(None) => write!(f, "<FnPtr:Null>"),
+            Value::OpaqueHandle(h) => write!(f, "<Handle#{h}>"),
             Value::Null => write!(f, "Null"),
             Value::Void => Ok(()),
         }

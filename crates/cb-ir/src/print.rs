@@ -366,6 +366,7 @@ fn format_type(ty: &IrType, interner: &Interner) -> String {
                 format_type(&sig.ret, interner)
             )
         }
+        IrType::RuntimeType(name) => format!("RuntimeType({name})"),
         IrType::Null => "Null".to_string(),
         IrType::Void => "Void".to_string(),
     }

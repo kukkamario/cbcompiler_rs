@@ -7,11 +7,18 @@ use cb_diagnostics::FileId;
 use cb_frontend::lexer::{tokenize, LexerOptions};
 use cb_frontend::parser::parse;
 
+fn empty_catalog() -> cb_sema::RuntimeCatalog {
+    cb_sema::RuntimeCatalog {
+        types: Vec::new(),
+        functions: Vec::new(),
+    }
+}
+
 fn lower_src(src: &str) -> String {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
-    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &[]);
+    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog());
     assert!(
         !sema.has_errors(),
         "sema errors: {:?}",
@@ -116,7 +123,7 @@ fn comparison_with_promotion() {
     insta::assert_snapshot!(ir);
 }
 
-fn lower_with_catalog(src: &str, catalog: &[cb_sema::FuncDesc]) -> String {
+fn lower_with_catalog(src: &str, catalog: &cb_sema::RuntimeCatalog) -> String {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
@@ -133,15 +140,18 @@ fn lower_with_catalog(src: &str, catalog: &[cb_sema::FuncDesc]) -> String {
 
 #[test]
 fn runtime_function_call() {
-    let catalog = vec![cb_sema::FuncDesc {
-        name: "print".to_string(),
-        c_symbol: "cb_rt_print".to_string(),
-        params: vec![cb_sema::FuncParamDesc {
-            name: Some("text".to_string()),
-            ty: cb_ir::types::IrType::String,
+    let catalog = cb_sema::RuntimeCatalog {
+        types: Vec::new(),
+        functions: vec![cb_sema::FuncDesc {
+            name: "print".to_string(),
+            c_symbol: "cb_rt_print".to_string(),
+            params: vec![cb_sema::FuncParamDesc {
+                name: Some("text".to_string()),
+                ty: cb_ir::types::IrType::String,
+            }],
+            return_ty: cb_ir::types::IrType::Void,
         }],
-        return_ty: cb_ir::types::IrType::Void,
-    }];
+    };
     let ir = lower_with_catalog("print(\"hello world\")\n", &catalog);
     insta::assert_snapshot!(ir);
 }

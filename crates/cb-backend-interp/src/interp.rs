@@ -756,6 +756,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 )),
             },
 
+            // Opaque handle identity comparison
+            (Value::OpaqueHandle(a), Value::OpaqueHandle(b)) => match op {
+                IrBinOp::Eq => Ok(Value::Bool(a == b)),
+                IrBinOp::NotEq => Ok(Value::Bool(a != b)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on opaque handles")),
+                    span,
+                )),
+            },
+
             // Null comparisons
             (Value::Null, Value::Null) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(true)),
@@ -1042,6 +1052,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::TypeInstance(_) => IrType::Null,
             Value::Struct(_) => IrType::Null,
             Value::FnPtr(_) => IrType::Null,
+            Value::OpaqueHandle(_) => IrType::Null,
             Value::Null => IrType::Null,
             Value::Void => IrType::Void,
         }
@@ -1120,6 +1131,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             "cb_rt_abs_float" => {
                 let v = args.first().map(|v| self.value_to_f64(v)).unwrap_or(0.0);
                 Ok(Value::Float(v.abs()))
+            }
+            "cb_rt_create_test_handle" => Ok(Value::OpaqueHandle(42)),
+            "cb_rt_use_test_handle" => {
+                let h = match args.first() {
+                    Some(Value::OpaqueHandle(h)) => *h,
+                    Some(Value::Null) => 0,
+                    _ => 0,
+                };
+                Ok(Value::Int(h as i32))
             }
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("unknown runtime function: {symbol}")),

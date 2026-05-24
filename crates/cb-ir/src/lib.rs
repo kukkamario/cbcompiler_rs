@@ -62,6 +62,18 @@ pub struct FuncParamDesc {
     pub ty: IrType,
 }
 
+/// Description of an opaque type declared by the runtime catalog.
+pub struct RuntimeTypeDesc {
+    pub name: String,
+    pub tag: u32,
+}
+
+/// The full runtime catalog: type declarations and function descriptors.
+pub struct RuntimeCatalog {
+    pub types: Vec<RuntimeTypeDesc>,
+    pub functions: Vec<FuncDesc>,
+}
+
 // ── ID newtypes ─────────────────────────────────────────────────────────
 
 /// Virtual register — assigned by instructions, consumed by operands.

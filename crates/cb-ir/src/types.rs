@@ -19,6 +19,7 @@ pub enum IrType {
     TypeRef(Symbol),
     StructVal(Symbol),
     FnPtr(Box<FnSig>),
+    RuntimeType(String),
     Null,
     Void,
 }

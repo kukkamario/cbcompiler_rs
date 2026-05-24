@@ -89,6 +89,9 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
         // Null → any reference type
         (Type::Null, t) if t.is_reference() => Some(Conversion::NullToRef),
 
+        // Null → runtime opaque type
+        (Type::Null, Type::RuntimeType { .. }) => Some(Conversion::NullToRef),
+
         _ => None,
     }
 }

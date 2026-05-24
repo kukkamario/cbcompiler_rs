@@ -266,6 +266,9 @@ impl<'a> Lowerer<'a> {
             },
             Type::TypeRef { name } => IrType::TypeRef(*name),
             Type::StructVal { name } => IrType::StructVal(*name),
+            Type::RuntimeType { name } => {
+                IrType::RuntimeType(self.interner.resolve(*name).to_string())
+            }
             Type::FnPtr { params, ret } => {
                 let ir_params: Vec<_> = params.iter().map(|p| self.sema_type_to_ir(p)).collect();
                 let ir_ret = ret

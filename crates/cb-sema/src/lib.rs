@@ -23,7 +23,7 @@ pub use scope::{
 };
 pub use types::Type;
 
-pub use cb_ir::{FuncDesc, FuncParamDesc};
+pub use cb_ir::{FuncDesc, FuncParamDesc, RuntimeCatalog, RuntimeTypeDesc};
 
 /// How a call expression was resolved during type checking.
 #[derive(Clone, Debug)]
@@ -49,7 +49,7 @@ pub fn analyze(
     program: &[NodeId],
     source: &str,
     file_id: FileId,
-    runtime_catalog: &[FuncDesc],
+    runtime_catalog: &RuntimeCatalog,
 ) -> SemaResult {
     check::Checker::run(arena, program, source, file_id, runtime_catalog)
 }

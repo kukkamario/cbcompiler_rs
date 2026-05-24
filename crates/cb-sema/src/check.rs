@@ -11,7 +11,7 @@ use crate::scope::{
     SymbolTable,
 };
 use crate::types::{self, Type};
-use crate::{FuncDesc, ResolvedCall, SemaResult, TypeTable};
+use crate::{FuncDesc, ResolvedCall, RuntimeCatalog, SemaResult, TypeTable};
 
 // Names of compiler intrinsics (lowercase, matching interner output).
 const INTRINSIC_LEN: &str = "len";
@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
         program: &[NodeId],
         source: &'a str,
         file_id: FileId,
-        runtime_catalog: &[FuncDesc],
+        runtime_catalog: &RuntimeCatalog,
     ) -> SemaResult {
         let mut symbols = SymbolTable::new();
         let top = symbols.push_scope(ScopeKind::TopLevel, None);
@@ -108,7 +108,14 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
-        types::resolve_type_expr(self.arena, id, &mut self.interner, self.source)
+        let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
+        if let Type::TypeRef { name } = &ty
+            && let Some(decl) = self.symbols.lookup(self.current_scope, *name)
+            && matches!(decl.kind, DeclKind::RuntimeTypeDef)
+        {
+            return Type::RuntimeType { name: *name };
+        }
+        ty
     }
 
     fn try_declare(
@@ -134,43 +141,59 @@ impl<'a> Checker<'a> {
 
     // ── runtime catalog registration ─────────────────────────────────────
 
-    fn register_runtime_catalog(&mut self, catalog: &[FuncDesc]) {
-        use std::collections::HashMap;
-
-        fn ir_type_to_sema(ir: &cb_ir::types::IrType) -> Type {
-            match ir {
-                cb_ir::types::IrType::Byte => Type::Byte,
-                cb_ir::types::IrType::Short => Type::Short,
-                cb_ir::types::IrType::Int => Type::Int,
-                cb_ir::types::IrType::UInt => Type::UInt,
-                cb_ir::types::IrType::Long => Type::Long,
-                cb_ir::types::IrType::ULong => Type::ULong,
-                cb_ir::types::IrType::Float => Type::Float,
-                cb_ir::types::IrType::Bool => Type::Bool,
-                cb_ir::types::IrType::String => Type::String,
-                cb_ir::types::IrType::Void => Type::Void,
-                _ => Type::Error,
+    fn ir_type_to_sema(&mut self, ir: &cb_ir::types::IrType) -> Type {
+        match ir {
+            cb_ir::types::IrType::Byte => Type::Byte,
+            cb_ir::types::IrType::Short => Type::Short,
+            cb_ir::types::IrType::Int => Type::Int,
+            cb_ir::types::IrType::UInt => Type::UInt,
+            cb_ir::types::IrType::Long => Type::Long,
+            cb_ir::types::IrType::ULong => Type::ULong,
+            cb_ir::types::IrType::Float => Type::Float,
+            cb_ir::types::IrType::Bool => Type::Bool,
+            cb_ir::types::IrType::String => Type::String,
+            cb_ir::types::IrType::Void => Type::Void,
+            cb_ir::types::IrType::RuntimeType(name) => {
+                let sym = self.interner.intern(&name.to_lowercase());
+                Type::RuntimeType { name: sym }
             }
+            _ => Type::Error,
         }
+    }
 
-        // Group entries by (lowercased) name.
-        let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
-        for desc in catalog {
-            groups.entry(desc.name.to_lowercase()).or_default().push(desc);
-        }
+    fn register_runtime_catalog(&mut self, catalog: &RuntimeCatalog) {
+        use std::collections::HashMap;
 
         let top = self.current_scope;
         let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
 
+        // Register runtime opaque types.
+        for td in &catalog.types {
+            let sym = self.interner.intern(&td.name.to_lowercase());
+            let decl = Declaration {
+                kind: DeclKind::RuntimeTypeDef,
+                ty: Type::RuntimeType { name: sym },
+                span,
+                is_global: false,
+            };
+            let _ = self.symbols.declare(top, sym, decl);
+        }
+
+        // Group function entries by (lowercased) name.
+        let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
+        for desc in &catalog.functions {
+            groups.entry(desc.name.to_lowercase()).or_default().push(desc);
+        }
+
         for (name, descs) in &groups {
             let sym = self.interner.intern(name);
 
-            let mut make_params = |desc: &FuncDesc| -> Vec<ParamInfo> {
+            let make_params = |checker: &mut Checker, desc: &FuncDesc| -> Vec<ParamInfo> {
                 desc.params
                     .iter()
                     .map(|p| ParamInfo {
-                        name: self.interner.intern(p.name.as_deref().unwrap_or("_")),
-                        ty: ir_type_to_sema(&p.ty),
+                        name: checker.interner.intern(p.name.as_deref().unwrap_or("_")),
+                        ty: checker.ir_type_to_sema(&p.ty),
                         has_default: false,
                     })
                     .collect()
@@ -178,10 +201,12 @@ impl<'a> Checker<'a> {
 
             let decl = if descs.len() == 1 {
                 let desc = descs[0];
+                let params = make_params(self, desc);
+                let return_ty = self.ir_type_to_sema(&desc.return_ty);
                 Declaration {
                     kind: DeclKind::RuntimeFn {
-                        params: make_params(desc),
-                        return_ty: ir_type_to_sema(&desc.return_ty),
+                        params,
+                        return_ty,
                         c_symbol: desc.c_symbol.clone(),
                     },
                     ty: Type::Void,
@@ -191,10 +216,14 @@ impl<'a> Checker<'a> {
             } else {
                 let variants = descs
                     .iter()
-                    .map(|desc| OverloadVariant {
-                        params: make_params(desc),
-                        return_ty: ir_type_to_sema(&desc.return_ty),
-                        c_symbol: desc.c_symbol.clone(),
+                    .map(|desc| {
+                        let params = make_params(self, desc);
+                        let return_ty = self.ir_type_to_sema(&desc.return_ty);
+                        OverloadVariant {
+                            params,
+                            return_ty,
+                            c_symbol: desc.c_symbol.clone(),
+                        }
                     })
                     .collect();
                 Declaration {
@@ -1777,11 +1806,18 @@ mod tests {
 
     use crate::analyze;
 
+    fn empty_catalog() -> crate::RuntimeCatalog {
+        crate::RuntimeCatalog {
+            types: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
+
     fn analyze_src(src: &str) -> crate::SemaResult {
         let file = FileId(0);
         let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
         let parsed = parse(&tokens, src, file);
-        analyze(&parsed.arena, &parsed.program, src, file, &[])
+        analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog())
     }
 
     fn error_codes(result: &crate::SemaResult) -> Vec<&str> {
@@ -2301,11 +2337,18 @@ mod tests {
 
     // ── runtime catalog tests ───────────────────────────────────────────
 
-    fn analyze_with_catalog(src: &str, catalog: &[crate::FuncDesc]) -> crate::SemaResult {
+    fn analyze_with_catalog(src: &str, catalog: &crate::RuntimeCatalog) -> crate::SemaResult {
         let file = FileId(0);
         let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
         let parsed = parse(&tokens, src, file);
         analyze(&parsed.arena, &parsed.program, src, file, catalog)
+    }
+
+    fn catalog_of(functions: Vec<crate::FuncDesc>) -> crate::RuntimeCatalog {
+        crate::RuntimeCatalog {
+            types: Vec::new(),
+            functions,
+        }
     }
 
     fn rt_func(name: &str, c_symbol: &str, params: &[(&str, cb_ir::types::IrType)], ret: cb_ir::types::IrType) -> crate::FuncDesc {
@@ -2322,46 +2365,46 @@ mod tests {
 
     #[test]
     fn runtime_fn_call_ok() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ];
+        ]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn runtime_fn_wrong_arg_count() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ];
+        ]);
         let result = analyze_with_catalog("print(\"a\", \"b\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0305"]);
     }
 
     #[test]
     fn runtime_fn_return_type() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("sin", "cb_rt_sin", &[("x", IrType::Float)], IrType::Float),
-        ];
+        ]);
         let result = analyze_with_catalog("Dim x As Float\nx = sin(1.0)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn overload_exact_match() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
             rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
-        ];
+        ]);
         let result = analyze_with_catalog("Dim x As Int\nx = abs(42)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn overload_with_widening() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
-        ];
+        ]);
         // Int -> Float is an implicit widening conversion
         let result = analyze_with_catalog("Dim x As Float\nx = abs(42)\n", &catalog);
         // Should succeed with a narrowing warning (Float return assigned to Float is fine,
@@ -2374,10 +2417,10 @@ mod tests {
 
     #[test]
     fn overload_ambiguous() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("foo", "cb_rt_foo_a", &[("x", IrType::Int)], IrType::Void),
             rt_func("foo", "cb_rt_foo_b", &[("x", IrType::Int)], IrType::Int),
-        ];
+        ]);
         let result = analyze_with_catalog("foo(1)\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0323"]);
     }
@@ -2385,10 +2428,10 @@ mod tests {
     #[test]
     fn overload_no_match() {
         // Two overloads, neither accepts String
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
             rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
-        ];
+        ]);
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0324"]);
     }
@@ -2396,18 +2439,18 @@ mod tests {
     #[test]
     fn runtime_fn_type_mismatch() {
         // Single runtime function, incompatible arg type
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
-        ];
+        ]);
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0317"]);
     }
 
     #[test]
     fn user_function_shadows_runtime() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ];
+        ]);
         // User defines their own print function — should shadow the runtime one
         let result = analyze_with_catalog(
             "Function print(x As Int)\nEndFunction\nprint(42)\n",
@@ -2418,9 +2461,9 @@ mod tests {
 
     #[test]
     fn runtime_fn_resolved_call_recorded() {
-        let catalog = vec![
+        let catalog = catalog_of(vec![
             rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ];
+        ]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(!result.resolved_calls.is_empty());
         let rc = result.resolved_calls.values().next().unwrap();

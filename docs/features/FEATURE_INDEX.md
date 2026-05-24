@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | - |
+| [FD-011](FD-011_RUNTIME_CUSTOM_TYPES.md) | Runtime Custom Types | Pending Verification | Medium | High |
 
 ## Completed
 

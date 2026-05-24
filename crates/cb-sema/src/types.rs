@@ -23,6 +23,7 @@ pub enum Type {
     TypeRef { name: Symbol },
     StructVal { name: Symbol },
     FnPtr { params: Vec<Type>, ret: Option<Box<Type>> },
+    RuntimeType { name: Symbol },
 
     // Special
     Null,
@@ -253,8 +254,26 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
             }
         }
 
-        // Comparison — result is always Bool
-        BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+        // Equality — result is always Bool
+        BinOp::Eq | BinOp::NotEq => {
+            if (lhs.is_numeric() && rhs.is_numeric())
+                || (*lhs == Type::String && *rhs == Type::String)
+                || (*lhs == Type::Bool && *rhs == Type::Bool)
+                || (lhs.is_reference() && rhs.is_reference())
+                || (*lhs == Type::Null && rhs.is_reference())
+                || (lhs.is_reference() && *rhs == Type::Null)
+                || (*lhs == Type::Null && *rhs == Type::Null)
+                || matches!((lhs, rhs), (Type::RuntimeType { name: a }, Type::RuntimeType { name: b }) if a == b)
+                || (matches!(lhs, Type::RuntimeType { .. }) && *rhs == Type::Null)
+                || (*lhs == Type::Null && matches!(rhs, Type::RuntimeType { .. }))
+            {
+                Some(Type::Bool)
+            } else {
+                None
+            }
+        }
+        // Ordering — no RuntimeType support
+        BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
             if (lhs.is_numeric() && rhs.is_numeric())
                 || (*lhs == Type::String && *rhs == Type::String)
                 || (*lhs == Type::Bool && *rhs == Type::Bool)

@@ -487,6 +487,46 @@ Bool(val)        // to Bool
 
 `Int("123")` returns 123. `Float("1.5e2")` returns 150.0. A `Str`-to-numeric conversion that fails to parse returns 0 (or 0.0) — it does not throw. To distinguish "0" from "parse failed", parse and check explicitly via runtime-library helpers.
 
+### 3.5 Runtime-defined opaque types
+
+Runtime libraries can define **opaque handle types** — named types whose internal representation is hidden from user code. These are used for external resources such as files, images, sounds, or network connections.
+
+```cb
+Dim img As Image           // declared like any named type
+img = LoadImage("hero.png") // created by a runtime function
+DrawImage(img, 100, 200)   // passed to runtime functions
+```
+
+Opaque type variables default to `Null` and behave like references in that respect:
+
+```cb
+Dim snd As Sound           // defaults to Null
+If snd = Null Then
+    Print "no sound loaded"
+EndIf
+```
+
+**Allowed operations:**
+
+| Operation | Example | Notes |
+|-----------|---------|-------|
+| Assignment | `img = LoadImage("x.png")` | From runtime function return or another variable |
+| Null comparison | `img = Null`, `img <> Null` | Equality/inequality only |
+| Identity comparison | `img1 = img2` | Same opaque type only; checks if both refer to the same handle |
+| Pass to runtime function | `DrawImage(img, 0, 0)` | Type-checked against the function signature |
+
+**Disallowed operations** (compile error):
+
+- Arithmetic (`img + 1`, `img - img2`)
+- Ordering (`img < img2`, `img > img2`)
+- Bitwise, logical, unary operators
+- Field access (`img.width` — unless the runtime provides a function like `GetImageWidth(img)`)
+- `New`, `Delete`
+- `First`, `Last`, `Next`, `Previous` (these are for `Type` linked lists only)
+- Implicit conversion to or from any other type
+
+Opaque types are distinct from user-defined `Type … EndType` records: they have no fields, no linked-list threading, and cannot be constructed with `New`. The runtime library is solely responsible for creating and destroying handles.
+
 ## 4. Variables and scope
 
 ### 4.1 Declaration
