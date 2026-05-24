@@ -46,6 +46,16 @@ pub enum DeclKind {
     TypeDef { fields: Vec<FieldInfo> },
     StructDef { fields: Vec<FieldInfo> },
     Label,
+    RuntimeFn { params: Vec<ParamInfo>, return_ty: Type, c_symbol: String },
+    OverloadSet { variants: Vec<OverloadVariant> },
+}
+
+/// One variant of an overloaded runtime function.
+#[derive(Clone, Debug)]
+pub struct OverloadVariant {
+    pub params: Vec<ParamInfo>,
+    pub return_ty: Type,
+    pub c_symbol: String,
 }
 
 /// Compile-time constant value.
@@ -138,6 +148,8 @@ impl SymbolTable {
                                 | DeclKind::StructDef { .. }
                                 | DeclKind::Constant { .. }
                                 | DeclKind::Label
+                                | DeclKind::RuntimeFn { .. }
+                                | DeclKind::OverloadSet { .. }
                         );
                     if visible {
                         return Some(decl);

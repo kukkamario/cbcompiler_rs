@@ -26,3 +26,5 @@ pub const E_DUPLICATE_DEFINITION: DiagnosticCode = DiagnosticCode::new("E0319");
 pub const E_SIGIL_AS_DISAGREE: DiagnosticCode = DiagnosticCode::new("E0320");
 pub const E_GOTO_INTO_FOR: DiagnosticCode = DiagnosticCode::new("E0321");
 pub const E_CONST_EVAL_ERROR: DiagnosticCode = DiagnosticCode::new("E0322");
+pub const E_AMBIGUOUS_OVERLOAD: DiagnosticCode = DiagnosticCode::new("E0323");
+pub const E_NO_MATCHING_OVERLOAD: DiagnosticCode = DiagnosticCode::new("E0324");

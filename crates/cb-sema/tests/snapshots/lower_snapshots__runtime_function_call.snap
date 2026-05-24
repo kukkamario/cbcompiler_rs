@@ -1,0 +1,10 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  bb0:
+    r0 = const_string "hello world"
+    r1 = call print, r0
+    return
+}

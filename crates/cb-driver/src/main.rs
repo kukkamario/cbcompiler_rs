@@ -152,7 +152,7 @@ fn main() -> ExitCode {
     } = parse(&tokens, &text, file);
 
     // Run semantic analysis.
-    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file);
+    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &[]);
 
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;

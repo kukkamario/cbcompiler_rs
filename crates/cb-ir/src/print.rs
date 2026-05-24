@@ -4,7 +4,7 @@ use cb_diagnostics::Interner;
 
 use crate::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
 use crate::types::IrType;
-use crate::{Function, Program};
+use crate::{FuncDecl, Function, Program};
 
 /// Render the entire program as human-readable IR text.
 pub fn print_program(program: &Program, interner: &Interner) -> String {
@@ -13,12 +13,12 @@ pub fn print_program(program: &Program, interner: &Interner) -> String {
         if i > 0 {
             out.push('\n');
         }
-        print_function(&mut out, func, interner);
+        print_function(&mut out, func, &program.func_table, interner);
     }
     out
 }
 
-fn print_function(out: &mut String, func: &Function, interner: &Interner) {
+fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], interner: &Interner) {
     use std::fmt::Write;
 
     let name = interner.resolve(func.name);
@@ -59,7 +59,7 @@ fn print_function(out: &mut String, func: &Function, interner: &Interner) {
             if let Some(r) = inst.result {
                 write!(out, "{r} = ").unwrap();
             }
-            print_inst_kind(out, &inst.kind, interner);
+            print_inst_kind(out, &inst.kind, func_table, interner);
             out.push('\n');
         }
         out.push_str("    ");
@@ -73,7 +73,7 @@ fn print_function(out: &mut String, func: &Function, interner: &Interner) {
     out.push_str("}\n");
 }
 
-fn print_inst_kind(out: &mut String, kind: &InstKind, interner: &Interner) {
+fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], interner: &Interner) {
     use std::fmt::Write;
 
     match kind {
@@ -182,7 +182,11 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, interner: &Interner) {
             .unwrap();
         }
         InstKind::Call { callee, args } => {
-            write!(out, "call {}", interner.resolve(*callee)).unwrap();
+            let name = func_table
+                .get(callee.0 as usize)
+                .map(|d| interner.resolve(d.name))
+                .unwrap_or("<unknown_func>");
+            write!(out, "call {name}").unwrap();
             for arg in args {
                 write!(out, ", {arg}").unwrap();
             }

@@ -7,10 +7,11 @@ use cb_frontend::{Arena, BinOp, NodeId, Sigil, SpanExt, UnOp};
 use crate::convert::{self, ConversionTable};
 use crate::diagnostics::*;
 use crate::scope::{
-    ConstValue, DeclKind, Declaration, FieldInfo, ParamInfo, ScopeId, ScopeKind, SymbolTable,
+    ConstValue, DeclKind, Declaration, FieldInfo, OverloadVariant, ParamInfo, ScopeId, ScopeKind,
+    SymbolTable,
 };
 use crate::types::{self, Type};
-use crate::{SemaResult, TypeTable};
+use crate::{FuncDesc, ResolvedCall, SemaResult, TypeTable};
 
 // Names of compiler intrinsics (lowercase, matching interner output).
 const INTRINSIC_LEN: &str = "len";
@@ -35,6 +36,7 @@ pub(crate) struct Checker<'a> {
     types: TypeTable,
     conversions: ConversionTable,
     delete_classes: std::collections::HashMap<NodeId, crate::DeleteClass>,
+    resolved_calls: std::collections::HashMap<NodeId, ResolvedCall>,
     diagnostics: Vec<Diagnostic>,
     current_scope: ScopeId,
     /// The return type of the function we're currently inside, if any.
@@ -51,6 +53,7 @@ impl<'a> Checker<'a> {
         program: &[NodeId],
         source: &'a str,
         file_id: FileId,
+        runtime_catalog: &[FuncDesc],
     ) -> SemaResult {
         let mut symbols = SymbolTable::new();
         let top = symbols.push_scope(ScopeKind::TopLevel, None);
@@ -64,6 +67,7 @@ impl<'a> Checker<'a> {
             types: TypeTable::new(),
             conversions: ConversionTable::new(),
             delete_classes: std::collections::HashMap::new(),
+            resolved_calls: std::collections::HashMap::new(),
             diagnostics: Vec::new(),
             current_scope: top,
             current_fn_return_ty: None,
@@ -72,6 +76,7 @@ impl<'a> Checker<'a> {
         };
 
         checker.pass1(program);
+        checker.register_runtime_catalog(runtime_catalog);
         checker.pass2(program);
 
         SemaResult {
@@ -79,6 +84,7 @@ impl<'a> Checker<'a> {
             symbols: checker.symbols,
             conversions: checker.conversions,
             delete_classes: checker.delete_classes,
+            resolved_calls: checker.resolved_calls,
             diagnostics: checker.diagnostics,
             interner: checker.interner,
         }
@@ -123,6 +129,69 @@ impl<'a> Checker<'a> {
                 )
                 .with_secondary(Label::with_message(prev_span, "previously declared here")),
             );
+        }
+    }
+
+    // ── runtime catalog registration ─────────────────────────────────────
+
+    fn register_runtime_catalog(&mut self, catalog: &[FuncDesc]) {
+        use std::collections::HashMap;
+
+        // Group entries by (lowercased) name.
+        let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
+        for desc in catalog {
+            groups.entry(desc.name.to_lowercase()).or_default().push(desc);
+        }
+
+        let top = self.current_scope;
+        let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
+
+        for (name, descs) in &groups {
+            let sym = self.interner.intern(name);
+
+            let mut make_params = |desc: &FuncDesc| -> Vec<ParamInfo> {
+                desc.params
+                    .iter()
+                    .map(|p| ParamInfo {
+                        name: self.interner.intern(p.name.as_deref().unwrap_or("_")),
+                        ty: p.ty.clone(),
+                        has_default: false,
+                    })
+                    .collect()
+            };
+
+            let decl = if descs.len() == 1 {
+                let desc = descs[0];
+                Declaration {
+                    kind: DeclKind::RuntimeFn {
+                        params: make_params(desc),
+                        return_ty: desc.return_ty.clone(),
+                        c_symbol: desc.c_symbol.clone(),
+                    },
+                    ty: Type::Void,
+                    span,
+                    is_global: false,
+                }
+            } else {
+                let variants = descs
+                    .iter()
+                    .map(|desc| OverloadVariant {
+                        params: make_params(desc),
+                        return_ty: desc.return_ty.clone(),
+                        c_symbol: desc.c_symbol.clone(),
+                    })
+                    .collect();
+                Declaration {
+                    kind: DeclKind::OverloadSet { variants },
+                    ty: Type::Void,
+                    span,
+                    is_global: false,
+                }
+            };
+
+            // If declare fails, a user-defined function (from pass 1) already
+            // took this name — that's fine, user functions shadow runtime functions.
+            let _ = self.symbols.declare(top, sym, decl);
         }
     }
 
@@ -510,7 +579,7 @@ impl<'a> Checker<'a> {
             }
 
             Node::Expr(Expr::Call { callee, args }) => {
-                self.check_call(callee, &args, span)
+                self.check_call(id, callee, &args, span)
             }
 
             Node::Expr(Expr::Index { array, indices }) => {
@@ -627,7 +696,13 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn check_call(&mut self, callee: NodeId, args: &[NodeId], span: Span) -> Type {
+    fn check_call(
+        &mut self,
+        call_id: NodeId,
+        callee: NodeId,
+        args: &[NodeId],
+        span: Span,
+    ) -> Type {
         // Check if callee is an identifier that names an intrinsic.
         if let Node::Expr(Expr::Ident { name_span, sigil: None }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, None);
@@ -653,27 +728,69 @@ impl<'a> Checker<'a> {
         // Look up the callee in the scope if it's an ident.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
-            if let Some(decl) = self.symbols.lookup(self.current_scope, name)
-                && let DeclKind::Function { params, return_ty, .. } = &decl.kind
-            {
-                let min_args = params.iter().filter(|p| !p.has_default).count();
-                let max_args = params.len();
-                if arg_types.len() < min_args || arg_types.len() > max_args {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_WRONG_ARG_COUNT,
-                        format!(
-                            "function expects {} argument(s), got {}",
-                            if min_args == max_args {
-                                format!("{max_args}")
-                            } else {
-                                format!("{min_args}..{max_args}")
+            if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
+                let decl_kind = decl.kind.clone();
+                match &decl_kind {
+                    DeclKind::Function { params, return_ty, .. } => {
+                        let min_args = params.iter().filter(|p| !p.has_default).count();
+                        let max_args = params.len();
+                        if arg_types.len() < min_args || arg_types.len() > max_args {
+                            self.diagnostics.push(Diagnostic::error(
+                                E_WRONG_ARG_COUNT,
+                                format!(
+                                    "function expects {} argument(s), got {}",
+                                    if min_args == max_args {
+                                        format!("{max_args}")
+                                    } else {
+                                        format!("{min_args}..{max_args}")
+                                    },
+                                    arg_types.len()
+                                ),
+                                Label::new(span),
+                            ));
+                        }
+                        self.resolved_calls
+                            .insert(call_id, ResolvedCall::UserDefined { name });
+                        return return_ty.clone();
+                    }
+                    DeclKind::RuntimeFn {
+                        params,
+                        return_ty,
+                        c_symbol,
+                    } => {
+                        if arg_types.len() != params.len() {
+                            self.diagnostics.push(Diagnostic::error(
+                                E_WRONG_ARG_COUNT,
+                                format!(
+                                    "function expects {} argument(s), got {}",
+                                    params.len(),
+                                    arg_types.len()
+                                ),
+                                Label::new(span),
+                            ));
+                        } else {
+                            for (i, param) in params.iter().enumerate() {
+                                if arg_types[i] != param.ty {
+                                    self.coerce(args[i], &arg_types[i], &param.ty);
+                                }
+                            }
+                        }
+                        self.resolved_calls.insert(
+                            call_id,
+                            ResolvedCall::RuntimeFn {
+                                c_symbol: c_symbol.clone(),
                             },
-                            arg_types.len()
-                        ),
-                        Label::new(span),
-                    ));
+                        );
+                        return return_ty.clone();
+                    }
+                    DeclKind::OverloadSet { variants } => {
+                        let variants = variants.clone();
+                        return self.resolve_overload(
+                            call_id, &variants, &arg_types, args, span,
+                        );
+                    }
+                    _ => {}
                 }
-                return return_ty.clone();
             }
         }
 
@@ -700,6 +817,88 @@ impl<'a> Checker<'a> {
             Label::new(span),
         ));
         Type::Error
+    }
+
+    fn resolve_overload(
+        &mut self,
+        call_id: NodeId,
+        variants: &[OverloadVariant],
+        arg_types: &[Type],
+        arg_nodes: &[NodeId],
+        span: Span,
+    ) -> Type {
+        // Filter variants by arity.
+        let candidates: Vec<_> = variants
+            .iter()
+            .filter(|v| v.params.len() == arg_types.len())
+            .collect();
+
+        if candidates.is_empty() {
+            self.diagnostics.push(Diagnostic::error(
+                E_NO_MATCHING_OVERLOAD,
+                format!(
+                    "no overload accepts {} argument(s)",
+                    arg_types.len()
+                ),
+                Label::new(span),
+            ));
+            return Type::Error;
+        }
+
+        // Score each candidate: count exact type matches, check convertibility.
+        let mut scored: Vec<(&OverloadVariant, usize)> = Vec::new();
+        for variant in &candidates {
+            let mut exact = 0usize;
+            let mut all_convertible = true;
+            for (i, param) in variant.params.iter().enumerate() {
+                if arg_types[i] == param.ty {
+                    exact += 1;
+                } else if convert::find_implicit_conversion(&arg_types[i], &param.ty).is_none() {
+                    all_convertible = false;
+                    break;
+                }
+            }
+            if all_convertible {
+                scored.push((variant, exact));
+            }
+        }
+
+        if scored.is_empty() {
+            self.diagnostics.push(Diagnostic::error(
+                E_NO_MATCHING_OVERLOAD,
+                "no overload matches the argument types",
+                Label::new(span),
+            ));
+            return Type::Error;
+        }
+
+        // Pick best: most exact matches wins.
+        scored.sort_by_key(|s| std::cmp::Reverse(s.1));
+        if scored.len() > 1 && scored[0].1 == scored[1].1 {
+            self.diagnostics.push(Diagnostic::error(
+                E_AMBIGUOUS_OVERLOAD,
+                "ambiguous overload: multiple candidates match equally well",
+                Label::new(span),
+            ));
+            return Type::Error;
+        }
+
+        let winner = scored[0].0;
+
+        // Record coercions for args that need conversion.
+        for (i, param) in winner.params.iter().enumerate() {
+            if arg_types[i] != param.ty {
+                self.coerce(arg_nodes[i], &arg_types[i], &param.ty);
+            }
+        }
+
+        self.resolved_calls.insert(
+            call_id,
+            ResolvedCall::RuntimeFn {
+                c_symbol: winner.c_symbol.clone(),
+            },
+        );
+        winner.return_ty.clone()
     }
 
     fn check_intrinsic_call(
@@ -1516,7 +1715,7 @@ mod tests {
         let file = FileId(0);
         let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
         let parsed = parse(&tokens, src, file);
-        analyze(&parsed.arena, &parsed.program, src, file)
+        analyze(&parsed.arena, &parsed.program, src, file, &[])
     }
 
     fn error_codes(result: &crate::SemaResult) -> Vec<&str> {
@@ -2032,5 +2231,150 @@ mod tests {
             "Function f()\nGoto target\nIf True Then\ntarget:\nEndIf\nEndFunction\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── runtime catalog tests ───────────────────────────────────────────
+
+    fn analyze_with_catalog(src: &str, catalog: &[crate::FuncDesc]) -> crate::SemaResult {
+        let file = FileId(0);
+        let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
+        let parsed = parse(&tokens, src, file);
+        analyze(&parsed.arena, &parsed.program, src, file, catalog)
+    }
+
+    fn rt_func(name: &str, c_symbol: &str, params: &[(&str, crate::Type)], ret: crate::Type) -> crate::FuncDesc {
+        crate::FuncDesc {
+            name: name.to_string(),
+            c_symbol: c_symbol.to_string(),
+            params: params.iter().map(|(n, ty)| crate::FuncParamDesc {
+                name: Some(n.to_string()),
+                ty: ty.clone(),
+            }).collect(),
+            return_ty: ret,
+        }
+    }
+
+    #[test]
+    fn runtime_fn_call_ok() {
+        let catalog = vec![
+            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+        ];
+        let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn runtime_fn_wrong_arg_count() {
+        let catalog = vec![
+            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+        ];
+        let result = analyze_with_catalog("print(\"a\", \"b\")\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0305"]);
+    }
+
+    #[test]
+    fn runtime_fn_return_type() {
+        let catalog = vec![
+            rt_func("sin", "cb_rt_sin", &[("x", crate::Type::Float)], crate::Type::Float),
+        ];
+        let result = analyze_with_catalog("Dim x As Float\nx = sin(1.0)\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn overload_exact_match() {
+        let catalog = vec![
+            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
+            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+        ];
+        let result = analyze_with_catalog("Dim x As Int\nx = abs(42)\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn overload_with_widening() {
+        let catalog = vec![
+            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+        ];
+        // Int -> Float is an implicit widening conversion
+        let result = analyze_with_catalog("Dim x As Float\nx = abs(42)\n", &catalog);
+        // Should succeed with a narrowing warning (Float return assigned to Float is fine,
+        // but Int arg to Float param is a widening - no warning)
+        let errors: Vec<_> = result.diagnostics.iter()
+            .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "{:?}", errors);
+    }
+
+    #[test]
+    fn overload_ambiguous() {
+        let catalog = vec![
+            rt_func("foo", "cb_rt_foo_a", &[("x", crate::Type::Int)], crate::Type::Void),
+            rt_func("foo", "cb_rt_foo_b", &[("x", crate::Type::Int)], crate::Type::Int),
+        ];
+        let result = analyze_with_catalog("foo(1)\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0323"]);
+    }
+
+    #[test]
+    fn overload_no_match() {
+        // Two overloads, neither accepts String
+        let catalog = vec![
+            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
+            rt_func("abs", "cb_rt_abs_float", &[("x", crate::Type::Float)], crate::Type::Float),
+        ];
+        let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0324"]);
+    }
+
+    #[test]
+    fn runtime_fn_type_mismatch() {
+        // Single runtime function, incompatible arg type
+        let catalog = vec![
+            rt_func("abs", "cb_rt_abs_int", &[("x", crate::Type::Int)], crate::Type::Int),
+        ];
+        let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn user_function_shadows_runtime() {
+        let catalog = vec![
+            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+        ];
+        // User defines their own print function — should shadow the runtime one
+        let result = analyze_with_catalog(
+            "Function print(x As Int)\nEndFunction\nprint(42)\n",
+            &catalog,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn runtime_fn_resolved_call_recorded() {
+        let catalog = vec![
+            rt_func("print", "cb_rt_print", &[("text", crate::Type::String)], crate::Type::Void),
+        ];
+        let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
+        assert!(!result.resolved_calls.is_empty());
+        let rc = result.resolved_calls.values().next().unwrap();
+        match rc {
+            crate::ResolvedCall::RuntimeFn { c_symbol } => {
+                assert_eq!(c_symbol, "cb_rt_print");
+            }
+            _ => panic!("expected RuntimeFn, got {rc:?}"),
+        }
+    }
+
+    #[test]
+    fn user_function_resolved_call_recorded() {
+        let result = analyze_src(
+            "Function add(a As Int, b As Int) As Int\nReturn a + b\nEndFunction\nDim x As Int\nx = add(1, 2)\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let user_calls: Vec<_> = result.resolved_calls.values()
+            .filter(|rc| matches!(rc, crate::ResolvedCall::UserDefined { .. }))
+            .collect();
+        assert_eq!(user_calls.len(), 1);
     }
 }
