@@ -1,11 +1,12 @@
 use std::io::Write;
 
+use cb_backend_interp::error::{InterpError, InterpErrorKind};
 use cb_backend_interp::observer::Observer;
 use cb_backend_interp::interp::Frame;
 use cb_diagnostics::{SourceMap, Span};
 use cb_frontend::{LexerOptions, parse, tokenize};
 use cb_ir::FuncId;
-use cb_ir::inst::InstKind;
+use cb_ir::inst::{InstKind, TrapKind};
 
 fn run(src: &str) -> String {
     let mut sources = SourceMap::new();
@@ -392,4 +393,80 @@ fn observer_sees_function_calls() {
     }
     let output_str = String::from_utf8(output).unwrap();
     assert_eq!(output_str, "42\n");
+}
+
+// ── Trap / error tests ────────────────────────────────────────────
+
+fn run_err(src: &str) -> InterpError {
+    let (ir, interner) = compile_program(src);
+    let mut output = Vec::new();
+    let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+        .with_stdout(Box::new(&mut output as &mut dyn Write));
+    interp.run().expect_err("expected interpreter error")
+}
+
+#[test]
+fn trap_division_by_zero() {
+    let err = run_err("Print Str(1 / 0)");
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DivisionByZero)));
+}
+
+#[test]
+fn trap_null_deref_field_access() {
+    let err = run_err(
+        "Type Obj\n\
+           Field x As Int\n\
+         EndType\n\
+         Dim o As Obj\n\
+         Print Str(o.x)"
+    );
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::NullDeref)));
+}
+
+#[test]
+fn trap_deleted_access_field() {
+    let err = run_err(
+        "Type Obj\n\
+           Field x As Int\n\
+         EndType\n\
+         Dim o As Obj = New Obj\n\
+         o.x = 42\n\
+         Dim p As Obj = o\n\
+         Delete p\n\
+         Print Str(o.x)"
+    );
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DeletedAccess)));
+}
+
+#[test]
+fn trap_index_out_of_bounds() {
+    let err = run_err(
+        "Dim arr As Int[] = New Int[3]\n\
+         arr[5] = 10"
+    );
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::IndexOutOfBounds)));
+}
+
+#[test]
+fn trap_stack_overflow() {
+    let err = run_err(
+        "Function recurse() As Integer\n\
+           Return recurse()\n\
+         EndFunction\n\
+         Print Str(recurse())"
+    );
+    assert!(matches!(err.kind, InterpErrorKind::RuntimeError(ref msg) if msg.contains("stack overflow")));
+}
+
+#[test]
+fn trap_double_delete() {
+    let err = run_err(
+        "Type Obj\n\
+           Field x As Int\n\
+         EndType\n\
+         Dim o As Obj = New Obj\n\
+         Delete o\n\
+         Delete o"
+    );
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DoubleDelete)));
 }

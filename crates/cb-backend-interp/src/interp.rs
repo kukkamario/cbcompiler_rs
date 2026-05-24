@@ -15,6 +15,8 @@ use crate::value::{Value, default_value};
 pub type Slot = (Value, bool);
 type FrameBuf = (Vec<Value>, Vec<Slot>);
 
+const MAX_CALL_DEPTH: usize = 10_000;
+
 pub struct Frame {
     pub func_id: FuncId,
     pub body_index: usize,
@@ -99,7 +101,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             }
         };
 
-        self.push_frame(main_id, body_index, &[], None);
+        self.push_frame(main_id, body_index, &[], None)?;
         self.exec_loop()
     }
 
@@ -120,7 +122,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         body_index: usize,
         args: &[Value],
         return_reg: Option<Reg>,
-    ) {
+    ) -> Result<(), InterpError> {
+        if self.call_stack.len() >= MAX_CALL_DEPTH {
+            return Err(self.error(InterpErrorKind::RuntimeError(
+                format!("stack overflow: call depth exceeded {MAX_CALL_DEPTH}"),
+            )));
+        }
         let func = &self.program.functions[body_index];
         let (mut registers, mut locals) = self.frame_pool.pop().unwrap_or_default();
         registers.clear();
@@ -151,6 +158,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             pc: 0,
             return_reg,
         });
+        Ok(())
     }
 
     fn exec_loop(&mut self) -> Result<(), InterpError> {
@@ -353,7 +361,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 match &decl.kind {
                     FuncKind::UserDefined { body_index } => {
                         let body_index = *body_index;
-                        self.push_frame(*callee, body_index, &arg_vals, result_reg);
+                        self.push_frame(*callee, body_index, &arg_vals, result_reg)?;
                         Ok(Value::Void)
                     }
                     FuncKind::Runtime { symbol } => {
@@ -437,11 +445,32 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         if entry.freed {
                             return Err(self.trap_error(TrapKind::DeletedAccess, span));
                         }
+                        if entry.is_sentinel {
+                            return Err(self.trap_error(TrapKind::NullDeref, span));
+                        }
                         let def = &self.program.type_defs[entry.type_def.0 as usize];
                         let idx = def.fields.iter().position(|(f, _)| *f == *field);
                         match idx {
                             Some(i) => {
                                 self.heap.get_mut(id).fields[i] = new_val;
+                                Ok(Value::Void)
+                            }
+                            None => Err(self.error_at(
+                                InterpErrorKind::RuntimeError(format!(
+                                    "field not found: {}",
+                                    self.interner.resolve(*field)
+                                )),
+                                span,
+                            )),
+                        }
+                    }
+                    Value::Struct(mut s) => {
+                        let idx = s.fields.iter().position(|(f, _)| *f == *field);
+                        match idx {
+                            Some(i) => {
+                                s.fields[i].1 = new_val;
+                                let frame = self.call_stack.last_mut().unwrap();
+                                frame.registers[object.0 as usize] = Value::Struct(s);
                                 Ok(Value::Void)
                             }
                             None => Err(self.error_at(
@@ -480,6 +509,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 match obj_val {
                     Value::TypeInstance(id) => {
                         let entry = self.heap.get(id);
+                        if entry.freed {
+                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
+                        }
                         match entry.next {
                             Some(next_id) => Ok(Value::TypeInstance(next_id)),
                             None => Ok(Value::Null),
@@ -498,6 +530,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 match obj_val {
                     Value::TypeInstance(id) => {
                         let entry = self.heap.get(id);
+                        if entry.freed {
+                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
+                        }
                         match entry.prev {
                             Some(prev_id) if !self.heap.get(prev_id).is_sentinel => {
                                 Ok(Value::TypeInstance(prev_id))
@@ -664,7 +699,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         match &decl.kind {
                             FuncKind::UserDefined { body_index } => {
                                 let body_index = *body_index;
-                                self.push_frame(func_id, body_index, &arg_vals, result_reg);
+                                self.push_frame(func_id, body_index, &arg_vals, result_reg)?;
                                 Ok(Value::Void)
                             }
                             FuncKind::Runtime { symbol } => {
@@ -699,33 +734,45 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (Value::UInt(a), Value::UInt(b)) => self.uint_binop(op, *a as u64, *b as u64, span, false),
             (Value::ULong(a), Value::ULong(b)) => self.uint_binop(op, *a, *b, span, true),
 
-            (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b),
+            (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b, span),
 
-            (Value::String(a), Value::String(b)) => self.string_binop(op, a, b),
+            (Value::String(a), Value::String(b)) => self.string_binop(op, a, b, span),
 
             (Value::Bool(a), Value::Bool(b)) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(a == b)),
                 IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-                _ => Ok(Value::Bool(false)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on booleans")),
+                    span,
+                )),
             },
 
             // Type instance identity comparison
             (Value::TypeInstance(a), Value::TypeInstance(b)) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(a == b)),
                 IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-                _ => Ok(Value::Bool(false)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on type instances")),
+                    span,
+                )),
             },
 
             // Null comparisons
             (Value::Null, Value::Null) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(true)),
                 IrBinOp::NotEq => Ok(Value::Bool(false)),
-                _ => Ok(Value::Bool(false)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null values")),
+                    span,
+                )),
             },
             (Value::Null, _) | (_, Value::Null) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(false)),
                 IrBinOp::NotEq => Ok(Value::Bool(true)),
-                _ => Ok(Value::Bool(false)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null and non-null values")),
+                    span,
+                )),
             },
 
             _ => Err(self.error_at(
@@ -765,7 +812,18 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 }
                 Ok(wrap(a.wrapping_rem(b)))
             }
-            IrBinOp::Pow => Ok(wrap(a.wrapping_pow(b.unsigned_abs() as u32))),
+            IrBinOp::Pow => {
+                if b < 0 {
+                    match a {
+                        0 => Err(self.trap_error(TrapKind::DivisionByZero, span)),
+                        1 => Ok(wrap(1)),
+                        -1 => Ok(wrap(if b % 2 == 0 { 1 } else { -1 })),
+                        _ => Ok(wrap(0)),
+                    }
+                } else {
+                    Ok(wrap(a.wrapping_pow(b as u32)))
+                }
+            }
 
             IrBinOp::BinAnd => Ok(wrap(a & b)),
             IrBinOp::BinOr => Ok(wrap(a | b)),
@@ -781,7 +839,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
             IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
 
-            _ => Ok(Value::Int(0)),
+            _ => Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on integers")),
+                span,
+            )),
         }
     }
 
@@ -828,11 +889,14 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
             IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
 
-            _ => Ok(Value::UInt(0)),
+            _ => Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on unsigned integers")),
+                span,
+            )),
         }
     }
 
-    fn float_binop(&self, op: IrBinOp, a: f64, b: f64) -> Result<Value, InterpError> {
+    fn float_binop(&self, op: IrBinOp, a: f64, b: f64, span: Span) -> Result<Value, InterpError> {
         match op {
             IrBinOp::Add => Ok(Value::Float(a + b)),
             IrBinOp::Sub => Ok(Value::Float(a - b)),
@@ -849,11 +913,14 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
             IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
 
-            _ => Ok(Value::Float(0.0)),
+            _ => Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on floats")),
+                span,
+            )),
         }
     }
 
-    fn string_binop(&self, op: IrBinOp, a: &Rc<str>, b: &Rc<str>) -> Result<Value, InterpError> {
+    fn string_binop(&self, op: IrBinOp, a: &Rc<str>, b: &Rc<str>, span: Span) -> Result<Value, InterpError> {
         match op {
             IrBinOp::StrConcat => {
                 let mut s = String::with_capacity(a.len() + b.len());
@@ -867,7 +934,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::StrGt => Ok(Value::Bool(**a > **b)),
             IrBinOp::StrLtEq => Ok(Value::Bool(**a <= **b)),
             IrBinOp::StrGtEq => Ok(Value::Bool(**a >= **b)),
-            _ => Ok(Value::String(Rc::from(""))),
+            _ => Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on strings")),
+                span,
+            )),
         }
     }
 

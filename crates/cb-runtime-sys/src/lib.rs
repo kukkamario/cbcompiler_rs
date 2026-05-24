@@ -76,16 +76,25 @@ pub fn load_catalog() -> Result<Vec<FuncDesc>, String> {
 
     let mut result = Vec::with_capacity(funcs_slice.len());
     for func in funcs_slice {
+        if func.name.is_null() {
+            return Err(format!("null function name at index {}", result.len()));
+        }
         let name = unsafe { CStr::from_ptr(func.name) }
             .to_str()
             .map_err(|e| format!("invalid UTF-8 in function name: {e}"))?
             .to_string();
 
+        if func.symbol.is_null() {
+            return Err(format!("null symbol for function '{name}'"));
+        }
         let symbol = unsafe { CStr::from_ptr(func.symbol) }
             .to_str()
             .map_err(|e| format!("invalid UTF-8 in symbol for {name}: {e}"))?
             .to_string();
 
+        if func.param_count > 0 && func.params.is_null() {
+            return Err(format!("null params pointer for function '{name}'"));
+        }
         let params_slice =
             unsafe { std::slice::from_raw_parts(func.params, func.param_count as usize) };
 
