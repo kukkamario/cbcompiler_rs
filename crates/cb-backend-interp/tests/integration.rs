@@ -153,3 +153,124 @@ fn multiple_prints() {
     let out = run("Print \"a\"\nPrint \"b\"\nPrint \"c\"");
     assert_eq!(out, "a\nb\nc\n");
 }
+
+// ── Heap type tests ────────────────────────────────────────────────
+
+#[test]
+#[ignore = "lowerer panics: type_def_map key not found — Type lowering not yet complete"]
+fn type_new_and_field_access() {
+    let out = run(
+        "Type Enemy\n\
+           Field hp As Int\n\
+         EndType\n\
+         Dim e As Enemy = New Enemy\n\
+         e.hp = 100\n\
+         Print Str(e.hp)"
+    );
+    assert_eq!(out, "100\n");
+}
+
+#[test]
+#[ignore = "parser treats Next() as loop keyword — needs parser fix for Next-as-builtin"]
+fn type_linked_list_first_next() {
+    let out = run(
+        "Type Node\n\
+           Field val As Int\n\
+         EndType\n\
+         Dim a As Node = New Node\n\
+         a.val = 1\n\
+         Dim b As Node = New Node\n\
+         b.val = 2\n\
+         Dim c As Node = New Node\n\
+         c.val = 3\n\
+         Dim n As Node = First(Node)\n\
+         While n <> Null\n\
+           Print Str(n.val)\n\
+           n = Next(n)\n\
+         Wend"
+    );
+    assert_eq!(out, "1\n2\n3\n");
+}
+
+#[test]
+#[ignore = "sema types ForEach variable as Int instead of TypeRef — needs sema fix"]
+fn type_for_each() {
+    let out = run(
+        "Type Item\n\
+           Field x As Int\n\
+         EndType\n\
+         Dim a As Item = New Item\n\
+         a.x = 10\n\
+         Dim b As Item = New Item\n\
+         b.x = 20\n\
+         For n = Each Item\n\
+           Print Str(n.x)\n\
+         Next n"
+    );
+    assert_eq!(out, "10\n20\n");
+}
+
+#[test]
+#[ignore = "depends on ForEach typing fix — same as type_for_each"]
+fn type_delete_and_continue_iteration() {
+    let out = run(
+        "Type Obj\n\
+           Field v As Int\n\
+         EndType\n\
+         Dim a As Obj = New Obj\n\
+         a.v = 1\n\
+         Dim b As Obj = New Obj\n\
+         b.v = 2\n\
+         Dim c As Obj = New Obj\n\
+         c.v = 3\n\
+         For n = Each Obj\n\
+           If n.v = 2 Then\n\
+             Delete n\n\
+           EndIf\n\
+         Next n\n\
+         Dim total As Int = 0\n\
+         For m = Each Obj\n\
+           total = total + m.v\n\
+         Next m\n\
+         Print Str(total)"
+    );
+    assert_eq!(out, "4\n");
+}
+
+#[test]
+fn array_new_and_index() {
+    let out = run(
+        "Dim arr As Int[] = New Int[3]\n\
+         arr[0] = 10\n\
+         arr[1] = 20\n\
+         arr[2] = 30\n\
+         Print Str(arr[1])"
+    );
+    assert_eq!(out, "20\n");
+}
+
+#[test]
+fn array_len() {
+    let out = run(
+        "Dim arr As Int[] = New Int[5]\n\
+         Print Str(Len(arr))"
+    );
+    assert_eq!(out, "5\n");
+}
+
+#[test]
+#[ignore = "sema doesn't handle uninitialized Type variable as TypeRef — needs sema fix"]
+fn null_comparison() {
+    let out = run(
+        "Type T\n\
+           Field x As Int\n\
+         EndType\n\
+         Dim t As T\n\
+         If t = Null Then\n\
+           Print \"null\"\n\
+         Else\n\
+           Print \"not null\"\n\
+         EndIf"
+    );
+    assert_eq!(out, "null\n");
+}

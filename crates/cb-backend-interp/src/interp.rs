@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -7,6 +8,7 @@ use cb_ir::types::IrType;
 use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg};
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
+use crate::heap::{ArrayObj, Slab, TypeInstanceObj, TypeList};
 use crate::value::{Value, default_value};
 
 type Slot = (Value, bool);
@@ -29,15 +31,26 @@ pub struct Interpreter<'a> {
     globals: Vec<Slot>,
     call_stack: Vec<Frame>,
     frame_pool: Vec<FrameBuf>,
+    heap: Slab,
+    type_lists: Vec<TypeList>,
     stdout: Box<dyn Write + 'a>,
 }
 
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
+        let struct_defs = &program.struct_defs;
         let globals = program
             .globals
             .iter()
-            .map(|g| (default_value(&g.ty), false))
+            .map(|g| (default_value(&g.ty, struct_defs), false))
+            .collect();
+
+        let mut heap = Slab::new();
+        let type_lists = program
+            .type_defs
+            .iter()
+            .enumerate()
+            .map(|(i, _)| TypeList::new(&mut heap, cb_ir::TypeDefId(i as u32)))
             .collect();
 
         Self {
@@ -46,6 +59,8 @@ impl<'a> Interpreter<'a> {
             globals,
             call_stack: Vec::new(),
             frame_pool: Vec::new(),
+            heap,
+            type_lists,
             stdout: Box::new(std::io::stdout()),
         }
     }
@@ -93,11 +108,12 @@ impl<'a> Interpreter<'a> {
         registers.clear();
         locals.clear();
 
+        let struct_defs = &self.program.struct_defs;
         for local in &func.locals {
             let val = if local.is_param {
                 Value::Void
             } else {
-                default_value(&local.ty)
+                default_value(&local.ty, struct_defs)
             };
             locals.push((val, false));
         }
@@ -301,30 +317,317 @@ impl<'a> Interpreter<'a> {
                 }
             }
 
-            // ── Stubs for Phase 2 ──────────────────────────────────
-            InstKind::NewType { .. }
-            | InstKind::NewArray { .. }
-            | InstKind::GetField { .. }
-            | InstKind::SetField { .. }
-            | InstKind::GetElement { .. }
-            | InstKind::SetElement { .. }
-            | InstKind::First { .. }
-            | InstKind::Last { .. }
-            | InstKind::Next { .. }
-            | InstKind::Previous { .. }
-            | InstKind::DeleteLvalue { .. }
-            | InstKind::DeleteLvalueGlobal { .. }
-            | InstKind::DeleteRvalue { .. }
-            | InstKind::Redim { .. }
-            | InstKind::RedimGlobal { .. }
-            | InstKind::CallIndirect { .. }
-            | InstKind::Len { .. } => {
-                Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!(
-                        "instruction not yet implemented: {kind:?}"
+            // ── Type instance operations ────────────────────────────
+            InstKind::NewType { type_def } => {
+                let def = &self.program.type_defs[type_def.0 as usize];
+                let struct_defs = &self.program.struct_defs;
+                let fields = def
+                    .fields
+                    .iter()
+                    .map(|(_, fty)| default_value(fty, struct_defs))
+                    .collect();
+                let id = self.heap.alloc(TypeInstanceObj {
+                    type_def: *type_def,
+                    fields,
+                    prev: None,
+                    next: None,
+                    freed: false,
+                    is_sentinel: false,
+                });
+                self.type_lists[type_def.0 as usize].append(&mut self.heap, id);
+                Ok(Value::TypeInstance(id))
+            }
+            InstKind::GetField { object, field, .. } => {
+                let frame = self.call_stack.last().unwrap();
+                let obj_val = frame.registers[object.0 as usize].clone();
+                match obj_val {
+                    Value::TypeInstance(id) => {
+                        let entry = self.heap.get(id);
+                        if entry.freed {
+                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
+                        }
+                        if entry.is_sentinel {
+                            return Err(self.trap_error(TrapKind::NullDeref, span));
+                        }
+                        let def = &self.program.type_defs[entry.type_def.0 as usize];
+                        let idx = def.fields.iter().position(|(f, _)| *f == *field);
+                        match idx {
+                            Some(i) => Ok(entry.fields[i].clone()),
+                            None => Err(self.error_at(
+                                InterpErrorKind::RuntimeError(format!(
+                                    "field not found: {}",
+                                    self.interner.resolve(*field)
+                                )),
+                                span,
+                            )),
+                        }
+                    }
+                    Value::Struct(s) => {
+                        let idx = s.fields.iter().position(|(f, _)| *f == *field);
+                        match idx {
+                            Some(i) => Ok(s.fields[i].1.clone()),
+                            None => Err(self.error_at(
+                                InterpErrorKind::RuntimeError(format!(
+                                    "field not found: {}",
+                                    self.interner.resolve(*field)
+                                )),
+                                span,
+                            )),
+                        }
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("get_field on non-object".into()),
+                        span,
                     )),
-                    span,
-                ))
+                }
+            }
+            InstKind::SetField { object, field, value } => {
+                let frame = self.call_stack.last().unwrap();
+                let obj_val = frame.registers[object.0 as usize].clone();
+                let new_val = frame.registers[value.0 as usize].clone();
+                match obj_val {
+                    Value::TypeInstance(id) => {
+                        let entry = self.heap.get(id);
+                        if entry.freed {
+                            return Err(self.trap_error(TrapKind::DeletedAccess, span));
+                        }
+                        let def = &self.program.type_defs[entry.type_def.0 as usize];
+                        let idx = def.fields.iter().position(|(f, _)| *f == *field);
+                        match idx {
+                            Some(i) => {
+                                self.heap.get_mut(id).fields[i] = new_val;
+                                Ok(Value::Void)
+                            }
+                            None => Err(self.error_at(
+                                InterpErrorKind::RuntimeError(format!(
+                                    "field not found: {}",
+                                    self.interner.resolve(*field)
+                                )),
+                                span,
+                            )),
+                        }
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("set_field on non-object".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::First { type_def } => {
+                let list = &self.type_lists[type_def.0 as usize];
+                match list.first(&self.heap) {
+                    Some(id) => Ok(Value::TypeInstance(id)),
+                    None => Ok(Value::Null),
+                }
+            }
+            InstKind::Last { type_def } => {
+                let list = &self.type_lists[type_def.0 as usize];
+                match list.tail {
+                    Some(id) => Ok(Value::TypeInstance(id)),
+                    None => Ok(Value::Null),
+                }
+            }
+            InstKind::Next { object } => {
+                let frame = self.call_stack.last().unwrap();
+                let obj_val = frame.registers[object.0 as usize].clone();
+                match obj_val {
+                    Value::TypeInstance(id) => {
+                        let entry = self.heap.get(id);
+                        match entry.next {
+                            Some(next_id) => Ok(Value::TypeInstance(next_id)),
+                            None => Ok(Value::Null),
+                        }
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("next on non-type-instance".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::Previous { object } => {
+                let frame = self.call_stack.last().unwrap();
+                let obj_val = frame.registers[object.0 as usize].clone();
+                match obj_val {
+                    Value::TypeInstance(id) => {
+                        let entry = self.heap.get(id);
+                        match entry.prev {
+                            Some(prev_id) if !self.heap.get(prev_id).is_sentinel => {
+                                Ok(Value::TypeInstance(prev_id))
+                            }
+                            _ => Ok(Value::Null),
+                        }
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("previous on non-type-instance".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::DeleteLvalue { local } => {
+                self.exec_delete_lvalue_slot(local.0 as usize, true, span)
+            }
+            InstKind::DeleteLvalueGlobal { global } => {
+                self.exec_delete_lvalue_slot(global.0 as usize, false, span)
+            }
+            InstKind::DeleteRvalue { value } => {
+                let frame = self.call_stack.last().unwrap();
+                let val = frame.registers[value.0 as usize].clone();
+                match val {
+                    Value::TypeInstance(id) => {
+                        let entry = self.heap.get(id);
+                        if entry.freed {
+                            return Err(self.trap_error(TrapKind::DoubleDelete, span));
+                        }
+                        let type_def = entry.type_def;
+                        self.type_lists[type_def.0 as usize].unlink(&mut self.heap, id);
+                        self.heap.get_mut(id).freed = true;
+                        self.heap.get_mut(id).fields.clear();
+                        Ok(Value::Void)
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("delete on non-type-instance".into()),
+                        span,
+                    )),
+                }
+            }
+
+            // ── Array operations ───────────────────────────────────
+            InstKind::NewArray { elem_type, dims } => {
+                let frame = self.call_stack.last().unwrap();
+                let dim_sizes: Vec<usize> = dims
+                    .iter()
+                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .collect();
+                let arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            }
+            InstKind::GetElement { array, indices } => {
+                let frame = self.call_stack.last().unwrap();
+                let arr_val = frame.registers[array.0 as usize].clone();
+                let idx_vals: Vec<usize> = indices
+                    .iter()
+                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .collect();
+                match arr_val {
+                    Value::Array(rc) => {
+                        let arr = rc.borrow();
+                        match arr.flat_index(&idx_vals) {
+                            Some(fi) => Ok(arr.data[fi].clone()),
+                            None => Err(self.trap_error(TrapKind::IndexOutOfBounds, span)),
+                        }
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("index on non-array".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::SetElement { array, indices, value } => {
+                let frame = self.call_stack.last().unwrap();
+                let arr_val = frame.registers[array.0 as usize].clone();
+                let new_val = frame.registers[value.0 as usize].clone();
+                let idx_vals: Vec<usize> = indices
+                    .iter()
+                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .collect();
+                match arr_val {
+                    Value::Array(rc) => {
+                        let mut arr = rc.borrow_mut();
+                        match arr.flat_index(&idx_vals) {
+                            Some(fi) => {
+                                arr.data[fi] = new_val;
+                                Ok(Value::Void)
+                            }
+                            None => Err(self.trap_error(TrapKind::IndexOutOfBounds, span)),
+                        }
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("set_element on non-array".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::Redim { local, elem_type, dims } => {
+                let frame = self.call_stack.last().unwrap();
+                let dim_sizes: Vec<usize> = dims
+                    .iter()
+                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .collect();
+                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
+                let frame = self.call_stack.last_mut().unwrap();
+                frame.locals[local.0 as usize] = (new_val, false);
+                Ok(Value::Void)
+            }
+            InstKind::RedimGlobal { global, elem_type, dims } => {
+                let frame = self.call_stack.last().unwrap();
+                let dim_sizes: Vec<usize> = dims
+                    .iter()
+                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .collect();
+                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
+                self.globals[global.0 as usize] = (new_val, false);
+                Ok(Value::Void)
+            }
+            InstKind::Len { array, dim } => {
+                let frame = self.call_stack.last().unwrap();
+                let arr_val = frame.registers[array.0 as usize].clone();
+                let dim_idx = dim.map(|d| self.value_to_i64(&frame.registers[d.0 as usize]) as usize);
+                match arr_val {
+                    Value::Array(rc) => {
+                        let arr = rc.borrow();
+                        let len = match dim_idx {
+                            None => arr.dim_len(0).unwrap_or(0),
+                            Some(d) => arr.dim_len(d).unwrap_or(0),
+                        };
+                        Ok(Value::Int(len as i32))
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("len on non-array".into()),
+                        span,
+                    )),
+                }
+            }
+
+            // ── Indirect calls ─────────────────────────────────────
+            InstKind::CallIndirect { callee, args } => {
+                let frame = self.call_stack.last().unwrap();
+                let callee_val = frame.registers[callee.0 as usize].clone();
+                match callee_val {
+                    Value::FnPtr(Some(func_id)) => {
+                        let arg_vals: Vec<Value> = args
+                            .iter()
+                            .map(|r| frame.registers[r.0 as usize].clone())
+                            .collect();
+                        let decl = &self.program.func_table[func_id.0 as usize];
+                        match &decl.kind {
+                            FuncKind::UserDefined { body_index } => {
+                                let body_index = *body_index;
+                                self.push_frame(func_id, body_index, &arg_vals, result_reg);
+                                Ok(Value::Void)
+                            }
+                            FuncKind::Runtime { symbol } => {
+                                self.call_runtime(symbol, &arg_vals, span)
+                            }
+                        }
+                    }
+                    Value::FnPtr(None) | Value::Null => {
+                        Err(self.trap_error(TrapKind::NullFnPtr, span))
+                    }
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("call_indirect on non-function-pointer".into()),
+                        span,
+                    )),
+                }
             }
         }
     }
@@ -349,6 +652,13 @@ impl<'a> Interpreter<'a> {
             (Value::String(a), Value::String(b)) => self.string_binop(op, a, b),
 
             (Value::Bool(a), Value::Bool(b)) => match op {
+                IrBinOp::Eq => Ok(Value::Bool(a == b)),
+                IrBinOp::NotEq => Ok(Value::Bool(a != b)),
+                _ => Ok(Value::Bool(false)),
+            },
+
+            // Type instance identity comparison
+            (Value::TypeInstance(a), Value::TypeInstance(b)) => match op {
                 IrBinOp::Eq => Ok(Value::Bool(a == b)),
                 IrBinOp::NotEq => Ok(Value::Bool(a != b)),
                 _ => Ok(Value::Bool(false)),
@@ -607,8 +917,64 @@ impl<'a> Interpreter<'a> {
             Value::Float(_) => IrType::Float,
             Value::Bool(_) => IrType::Bool,
             Value::String(_) => IrType::String,
+            Value::Array(_) => IrType::Null,
+            Value::TypeInstance(_) => IrType::Null,
+            Value::Struct(_) => IrType::Null,
+            Value::FnPtr(_) => IrType::Null,
             Value::Null => IrType::Null,
             Value::Void => IrType::Void,
+        }
+    }
+
+    // ── Delete lvalue helper ────────────────────────────────────────────
+
+    fn exec_delete_lvalue_slot(
+        &mut self,
+        slot_idx: usize,
+        is_local: bool,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let slot = if is_local {
+            &self.call_stack.last().unwrap().locals[slot_idx]
+        } else {
+            &self.globals[slot_idx]
+        };
+
+        let (val, deleted) = slot;
+        if *deleted {
+            return Err(self.trap_error(TrapKind::DoubleDelete, span));
+        }
+
+        match val {
+            Value::TypeInstance(id) => {
+                let id = *id;
+                let entry = self.heap.get(id);
+                if entry.freed {
+                    return Err(self.trap_error(TrapKind::DoubleDelete, span));
+                }
+
+                let prev = entry.prev.unwrap_or(
+                    self.type_lists[entry.type_def.0 as usize].sentinel,
+                );
+                let type_def = entry.type_def;
+
+                self.type_lists[type_def.0 as usize].unlink(&mut self.heap, id);
+                self.heap.get_mut(id).freed = true;
+                self.heap.get_mut(id).fields.clear();
+
+                let new_slot = (Value::TypeInstance(prev), true);
+                if is_local {
+                    self.call_stack.last_mut().unwrap().locals[slot_idx] = new_slot;
+                } else {
+                    self.globals[slot_idx] = new_slot;
+                }
+                Ok(Value::Void)
+            }
+            Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+            _ => Err(self.error_at(
+                InterpErrorKind::RuntimeError("delete on non-type-instance".into()),
+                span,
+            )),
         }
     }
 

@@ -1,7 +1,11 @@
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
 use cb_ir::types::IrType;
+use cb_ir::{FuncId, StructDefInfo};
+
+use crate::heap::{ArrayObj, StructObj, TypeInstanceId};
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -14,6 +18,10 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     String(Rc<str>),
+    Array(Rc<RefCell<ArrayObj>>),
+    TypeInstance(TypeInstanceId),
+    Struct(Box<StructObj>),
+    FnPtr(Option<FuncId>),
     Null,
     Void,
 }
@@ -30,6 +38,8 @@ impl Value {
             Value::UInt(v) => *v != 0,
             Value::ULong(v) => *v != 0,
             Value::String(s) => !s.is_empty(),
+            Value::Array(_) | Value::TypeInstance(_) | Value::Struct(_) => true,
+            Value::FnPtr(f) => f.is_some(),
             Value::Null => false,
             Value::Void => false,
         }
@@ -46,13 +56,17 @@ impl Value {
             Value::Short(v) => Rc::from(v.to_string().as_str()),
             Value::UInt(v) => Rc::from(v.to_string().as_str()),
             Value::ULong(v) => Rc::from(v.to_string().as_str()),
+            Value::Array(_) => Rc::from("<Array>"),
+            Value::TypeInstance(_) => Rc::from("<TypeInstance>"),
+            Value::Struct(_) => Rc::from("<Struct>"),
+            Value::FnPtr(_) => Rc::from("<FnPtr>"),
             Value::Null => Rc::from("Null"),
             Value::Void => Rc::from(""),
         }
     }
 }
 
-pub fn default_value(ty: &IrType) -> Value {
+pub fn default_value(ty: &IrType, struct_defs: &[StructDefInfo]) -> Value {
     match ty {
         IrType::Byte => Value::Byte(0),
         IrType::Short => Value::Short(0),
@@ -63,11 +77,25 @@ pub fn default_value(ty: &IrType) -> Value {
         IrType::Float => Value::Float(0.0),
         IrType::Bool => Value::Bool(false),
         IrType::String => Value::String(Rc::from("")),
+        IrType::StructVal(name) => {
+            if let Some(def) = struct_defs.iter().find(|d| d.name == *name) {
+                let fields = def
+                    .fields
+                    .iter()
+                    .map(|(fname, fty)| (*fname, default_value(fty, struct_defs)))
+                    .collect();
+                Value::Struct(Box::new(StructObj {
+                    struct_name: *name,
+                    fields,
+                }))
+            } else {
+                Value::Null
+            }
+        }
+        IrType::FnPtr(_) => Value::FnPtr(None),
         IrType::Null | IrType::Void => Value::Null,
         IrType::TypeRef(_) => Value::Null,
-        IrType::StructVal(_) => Value::Null,
         IrType::Array { .. } => Value::Null,
-        IrType::FnPtr(_) => Value::Null,
     }
 }
 
@@ -83,6 +111,11 @@ impl fmt::Display for Value {
             Value::Float(v) => write!(f, "{v}"),
             Value::Bool(v) => write!(f, "{}", if *v { "True" } else { "False" }),
             Value::String(s) => write!(f, "{s}"),
+            Value::Array(_) => write!(f, "<Array>"),
+            Value::TypeInstance(id) => write!(f, "<TypeInstance#{}>", id.0),
+            Value::Struct(_) => write!(f, "<Struct>"),
+            Value::FnPtr(Some(id)) => write!(f, "<FnPtr#{}>", id.0),
+            Value::FnPtr(None) => write!(f, "<FnPtr:Null>"),
             Value::Null => write!(f, "Null"),
             Value::Void => Ok(()),
         }
