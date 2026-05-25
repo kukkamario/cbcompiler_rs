@@ -120,3 +120,10 @@ fn select_case() {
 fn if_elseif_else() {
     run("if_elseif_else");
 }
+
+// Runtime functions ------------------------------------------------------
+
+#[test]
+fn runtime_sqrt() {
+    run("runtime_sqrt");
+}
