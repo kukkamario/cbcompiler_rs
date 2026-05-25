@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | - |
+| [FD-012](FD-012_CATALOG_CPP_TEMPLATE_DSL.md) | Catalog DSL via C++ Templates and Function Pointers | Open | Medium | Medium |
 
 ## Completed
 
