@@ -18,12 +18,20 @@ typedef uint32_t CbTypeTag;
 #define CB_TYPE_STRING  9
 /* Tags >= 10 are runtime-defined opaque types (see CbTypeDesc). */
 
-/* Opaque handle types. Each runtime-defined type is declared as a
-   forward struct + pointer typedef so the C++ catalog can specialize
-   type_tag<> on the pointer type and FuncTraits deduces the right
-   CbTypeTag from the function signature automatically. The struct is
-   never defined — handles are values cast through uintptr_t. */
-typedef struct CbTestHandle_* CbTestHandle;
+/* Opaque handle types. Each runtime-defined type is a forward-declared
+   struct that is never defined — only pointers to it ever appear in
+   function signatures. The C++ catalog's type_tag<T> is specialized for
+   the pointer forms only (`T*` and `const T*`); passing a custom type by
+   value is a compile error because the primary template is undefined.
+
+   CONVENTION: Runtime functions MUST take and return custom types via
+   pointer:
+       MyType* cb_rt_make_thing(void);          // owning return
+       double  cb_rt_thing_x(const MyType* t);  // borrowing read-only
+       void    cb_rt_set_x(MyType* t, double x);// borrowing mutate
+   The runtime is free to encode the handle as a slab index, an actual
+   pointer, etc.; only the bit pattern matters. */
+typedef struct CbTestHandle CbTestHandle;
 
 typedef struct {
     const char* name;
@@ -84,8 +92,8 @@ int32_t cb_rt_mouse_x(void);
 int32_t cb_rt_mouse_y(void);
 
 /* Test handle functions for opaque type testing */
-CbTestHandle cb_rt_create_test_handle(void);
-int32_t cb_rt_use_test_handle(CbTestHandle handle);
+CbTestHandle* cb_rt_create_test_handle(void);
+int32_t cb_rt_use_test_handle(const CbTestHandle* handle);
 
 #ifdef __cplusplus
 }

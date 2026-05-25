@@ -88,31 +88,33 @@ This makes partial naming a compile error rather than silent corruption (e.g., `
 
 **4. Auto-size the catalog.** Replace the hand-maintained `func_count: 13` with `sizeof(catalog_funcs) / sizeof(catalog_funcs[0])` (same for `type_count`).
 
-**5. Type tags via `enum class`, opaque handles as forward-declared pointers.** Replace `#define CB_TYPE_TEST_HANDLE 10` (and any future opaque types) with a `constexpr` enum starting at 10, removing the manual collision-avoidance.
+**5. Type tags via `enum class`, opaque handles as forward-declared structs reached by pointer.** Replace `#define CB_TYPE_TEST_HANDLE 10` (and any future opaque types) with `constexpr` tags starting at 10, removing the manual collision-avoidance.
 
-Pair this with **opaque pointer types in the public C header** so `FuncTraits` can resolve runtime-defined types automatically from a function signature — no per-function override needed:
+**Convention: runtime functions must take and return custom types via pointer (`T*` or `const T*`), never by value.** The `type_tag<T>` primary template is left undefined; only the pointer forms are specialized. Any function that names a custom type by value fails to compile at the `CB_FN` site — the convention is enforced at compile time:
 
 ```c
-/* cb_runtime.h — forward-declared, never defined */
-typedef struct CbTestHandle_* CbTestHandle;
+/* cb_runtime.h — forward-declared struct, never defined */
+typedef struct CbTestHandle CbTestHandle;
 
-CbTestHandle cb_rt_create_test_handle(void);
-int32_t      cb_rt_use_test_handle(CbTestHandle handle);
+CbTestHandle* cb_rt_create_test_handle(void);                /* owning return */
+int32_t       cb_rt_use_test_handle(const CbTestHandle* h); /* borrowing read-only */
 ```
 
 ```cpp
-// catalog.cpp — one specialization per runtime-defined type
-template<> struct type_tag<CbTestHandle> {
-    static constexpr CbTypeTag value = static_cast<CbTypeTag>(TypeTag::TestHandle);
-};
+// catalog.cpp — two specializations per runtime-defined type
+constexpr CbTypeTag CB_TYPE_TEST_HANDLE = 10;
+template<> struct type_tag<      CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
+template<> struct type_tag<const CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 ```
 
-Now `CB_FN("usetesthandle", cb_rt_use_test_handle, "handle")` produces the right param tag automatically; the C++ function signature is the single source of truth. Function bodies cast back to whatever the handle actually is (`reinterpret_cast<uintptr_t>(h)` for a slab index, etc.).
+`const` is a C-side documentation/correctness convention only — the catalog ABI and IR don't distinguish const from mutable. If/when read-only-only operations need policing, a follow-up FD can introduce `IrType::RuntimeTypeRef { name, mutable: bool }` and thread mutability through sema.
+
+Function bodies cast back to whatever the handle actually is (`reinterpret_cast<uintptr_t>(h)` for a slab index, etc.). `CB_FN("usetesthandle", cb_rt_use_test_handle)` produces the right param tag automatically; the C++ function signature is the single source of truth.
 
 Two consequences to flag:
 
-- This locks the runtime to a target where `sizeof(void*) >= sizeof(handle_payload)`. Fine on x64 (the current build target). If 32-bit ever becomes a goal, payload-wider-than-pointer handles would need a wrapper struct or a different convention.
-- The catalog ABI continues to report opaque handles to Rust as 64-bit values regardless of the in-process pointer width — the `Value::OpaqueHandle(u64)` representation on the Rust side does not change.
+- The handle payload must fit in `sizeof(void*)`. Fine on x64 (the current build target). 32-bit support would need a wrapper struct or a different convention.
+- The catalog ABI continues to report opaque handles to Rust as 64-bit values regardless of in-process pointer width — the `Value::OpaqueHandle(u64)` representation on the Rust side does not change.
 
 **6. Optional startup sanity check.** Add a debug assert in `load_catalog()` that, for each function, `dladdr(fn_ptr)` (or `SymFromAddr` on Windows) resolves to a symbol equal to `symbol` — catches any case where `extern "C"` was forgotten on a runtime function.
 

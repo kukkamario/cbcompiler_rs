@@ -24,8 +24,8 @@ extern "C" {
     void    cb_rt_print(const char* text);
     int32_t cb_rt_abs_int(int32_t x);
     double  cb_rt_abs_float(double x);
-    CbTestHandle cb_rt_create_test_handle(void);
-    int32_t cb_rt_use_test_handle(CbTestHandle handle);
+    CbTestHandle* cb_rt_create_test_handle(void);
+    int32_t cb_rt_use_test_handle(const CbTestHandle* handle);
 }
 
 // ─── Test-handle implementations ──────────────────────────────────────
@@ -34,11 +34,11 @@ extern "C" {
 // runtime functions that use a runtime-defined opaque type, so they
 // double as compile-time tests of the `type_tag<CbTestHandle>` path.
 
-extern "C" CbTestHandle cb_rt_create_test_handle(void) {
-    return reinterpret_cast<CbTestHandle>(static_cast<uintptr_t>(42));
+extern "C" CbTestHandle* cb_rt_create_test_handle(void) {
+    return reinterpret_cast<CbTestHandle*>(static_cast<uintptr_t>(42));
 }
 
-extern "C" int32_t cb_rt_use_test_handle(CbTestHandle handle) {
+extern "C" int32_t cb_rt_use_test_handle(const CbTestHandle* handle) {
     return static_cast<int32_t>(reinterpret_cast<uintptr_t>(handle));
 }
 
@@ -67,6 +67,14 @@ extern "C" double cb_rt_sqrt(double x) {
 namespace cb_catalog {
 
 // type_tag<T> — undefined primary template; specialize per supported C type.
+//
+// Built-in C types are specialized on the value type below.
+//
+// Custom (runtime-defined) types are specialized ONLY on pointer forms
+// (`T*` and `const T*`). The primary template's missing definition turns
+// any attempt to register a function taking a custom type by value into
+// a compile error from FuncTraits — enforces the
+// "custom types always via pointer" convention at compile time.
 template<typename T> struct type_tag;
 
 template<> struct type_tag<void>          { static constexpr CbTypeTag value = CB_TYPE_VOID; };
@@ -81,11 +89,13 @@ template<> struct type_tag<double>        { static constexpr CbTypeTag value = C
 template<> struct type_tag<bool>          { static constexpr CbTypeTag value = CB_TYPE_BOOL; };
 template<> struct type_tag<const char*>   { static constexpr CbTypeTag value = CB_TYPE_STRING; };
 
-// Opaque handle type tags — one specialization per runtime-defined type.
-// The pointer typedef in cb_runtime.h is what FuncTraits sees in a
-// function signature.
+// Opaque handle type tags — two specializations per runtime-defined type,
+// one for `T*` (mutable / owning return) and one for `const T*` (borrowing
+// read-only). Both map to the same tag; const distinction is a C-side
+// documentation convention and is not tracked in the catalog.
 constexpr CbTypeTag CB_TYPE_TEST_HANDLE = 10;
-template<> struct type_tag<CbTestHandle>  { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
+template<> struct type_tag<      CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
+template<> struct type_tag<const CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
