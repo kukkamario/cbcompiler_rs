@@ -9,6 +9,7 @@ publish.workspace = true
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-ir = { path = "../cb-ir" }
 cb-runtime-sys = { path = "../cb-runtime-sys" }
+libffi = "5.1.0"
 
 [dev-dependencies]
 cb-frontend = { path = "../cb-frontend" }

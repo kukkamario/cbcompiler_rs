@@ -40,7 +40,12 @@ pub struct FuncDecl {
 #[derive(Clone, Debug)]
 pub enum FuncKind {
     UserDefined { body_index: usize },
-    Runtime { symbol: String },
+    Runtime {
+        symbol: String,
+        /// Statically-linked address of the runtime function. The interpreter
+        /// dispatches through this; the LLVM backend uses `symbol` for `declare`/`call`.
+        fn_ptr: unsafe extern "C" fn(),
+    },
 }
 
 // ── Runtime catalog types ──────────────────────────────────────────────
@@ -52,6 +57,9 @@ pub enum FuncKind {
 pub struct FuncDesc {
     pub name: String,
     pub c_symbol: String,
+    /// Statically-linked address of the runtime function. Populated by the
+    /// catalog loader; used by the interpreter for libffi dispatch.
+    pub fn_ptr: unsafe extern "C" fn(),
     pub params: Vec<FuncParamDesc>,
     pub return_ty: IrType,
 }

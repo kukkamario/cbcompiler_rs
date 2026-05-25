@@ -365,8 +365,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         self.push_frame(*callee, body_index, &arg_vals, result_reg)?;
                         Ok(Value::Void)
                     }
-                    FuncKind::Runtime { symbol } => {
-                        self.call_runtime(symbol, &arg_vals, span)
+                    FuncKind::Runtime { symbol, fn_ptr } => {
+                        let symbol = symbol.clone();
+                        let fn_ptr = *fn_ptr;
+                        let sig = decl.sig.clone();
+                        self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
                     }
                 }
             }
@@ -701,8 +704,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                                 self.push_frame(func_id, body_index, &arg_vals, result_reg)?;
                                 Ok(Value::Void)
                             }
-                            FuncKind::Runtime { symbol } => {
-                                self.call_runtime(symbol, &arg_vals, span)
+                            FuncKind::Runtime { symbol, fn_ptr } => {
+                                let symbol = symbol.clone();
+                                let fn_ptr = *fn_ptr;
+                                let sig = decl.sig.clone();
+                                self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
                             }
                         }
                     }
@@ -1111,94 +1117,36 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
     // ── Runtime function dispatch ──────────────────────────────────────
 
+    /// Dispatch a runtime call. Most functions go through libffi using the
+    /// catalog-supplied `fn_ptr` and the IR signature — no per-function
+    /// interpreter code required. A small intrinsic-override table handles
+    /// the few cases where the interpreter wants privileged behavior
+    /// (currently just `cb_rt_print`, which writes through `self.stdout`
+    /// so integration tests can capture output).
+    #[allow(unsafe_code)]
     fn call_runtime(
         &mut self,
         symbol: &str,
+        fn_ptr: unsafe extern "C" fn(),
+        sig: &cb_ir::FnSig,
         args: &[Value],
-        span: Span,
+        _span: Span,
     ) -> Result<Value, InterpError> {
-        match symbol {
-            "cb_rt_print" => {
-                let text = args.first().map(|v| v.as_string()).unwrap_or_else(|| Rc::from(""));
-                write!(self.stdout, "{text}").ok();
-                writeln!(self.stdout).ok();
-                Ok(Value::Void)
-            }
-            "cb_rt_abs_int" => {
-                let v = args.first().map(|v| self.value_to_i64(v)).unwrap_or(0) as i32;
-                Ok(Value::Int(v.wrapping_abs()))
-            }
-            "cb_rt_abs_float" => {
-                let v = args.first().map(|v| self.value_to_f64(v)).unwrap_or(0.0);
-                Ok(Value::Float(v.abs()))
-            }
-            "cb_rt_screen" | "cb_rt_drawscreen" | "cb_rt_color" | "cb_rt_line"
-            | "cb_rt_screen_width" | "cb_rt_screen_height" | "cb_rt_mouse_x"
-            | "cb_rt_mouse_y" => {
-                return self.call_runtime_ffi(symbol, args);
-            }
-            "cb_rt_create_test_handle" => Ok(Value::OpaqueHandle(42)),
-            "cb_rt_use_test_handle" => {
-                let h = match args.first() {
-                    Some(Value::OpaqueHandle(h)) => *h,
-                    Some(Value::Null) => 0,
-                    _ => 0,
-                };
-                Ok(Value::Int(h as i32))
-            }
-            _ => Err(self.error_at(
-                InterpErrorKind::RuntimeError(format!("unknown runtime function: {symbol}")),
-                span,
-            )),
+        // Intrinsic overrides — keep this set small. Each entry is a
+        // deliberate decision that the interpreter needs to handle this
+        // function differently from a plain FFI dispatch.
+        if symbol == "cb_rt_print" {
+            let text = args
+                .first()
+                .map(|v| v.as_string())
+                .unwrap_or_else(|| Rc::from(""));
+            write!(self.stdout, "{text}").ok();
+            writeln!(self.stdout).ok();
+            return Ok(Value::Void);
         }
-    }
 
-    #[allow(unsafe_code)]
-    fn call_runtime_ffi(&mut self, symbol: &str, args: &[Value]) -> Result<Value, InterpError> {
-        match symbol {
-            "cb_rt_screen" => {
-                let w = args.first().map(|v| self.value_to_i64(v)).unwrap_or(640) as i32;
-                let h = args.get(1).map(|v| self.value_to_i64(v)).unwrap_or(480) as i32;
-                unsafe { cb_runtime_sys::cb_rt_screen(w, h) };
-                Ok(Value::Void)
-            }
-            "cb_rt_drawscreen" => {
-                unsafe { cb_runtime_sys::cb_rt_drawscreen() };
-                Ok(Value::Void)
-            }
-            "cb_rt_color" => {
-                let r = args.first().map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
-                let g = args.get(1).map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
-                let b = args.get(2).map(|v| self.value_to_i64(v)).unwrap_or(255) as i32;
-                unsafe { cb_runtime_sys::cb_rt_color(r, g, b) };
-                Ok(Value::Void)
-            }
-            "cb_rt_line" => {
-                let x1 = args.first().map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
-                let y1 = args.get(1).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
-                let x2 = args.get(2).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
-                let y2 = args.get(3).map(|v| self.value_to_f64(v)).unwrap_or(0.0) as f32;
-                unsafe { cb_runtime_sys::cb_rt_line(x1, y1, x2, y2) };
-                Ok(Value::Void)
-            }
-            "cb_rt_screen_width" => {
-                let w = unsafe { cb_runtime_sys::cb_rt_screen_width() };
-                Ok(Value::Int(w))
-            }
-            "cb_rt_screen_height" => {
-                let h = unsafe { cb_runtime_sys::cb_rt_screen_height() };
-                Ok(Value::Int(h))
-            }
-            "cb_rt_mouse_x" => {
-                let x = unsafe { cb_runtime_sys::cb_rt_mouse_x() };
-                Ok(Value::Int(x))
-            }
-            "cb_rt_mouse_y" => {
-                let y = unsafe { cb_runtime_sys::cb_rt_mouse_y() };
-                Ok(Value::Int(y))
-            }
-            _ => unreachable!(),
-        }
+        // General path: libffi dispatch using the catalog fn_ptr + IR sig.
+        Ok(unsafe { crate::ffi::call(fn_ptr, sig, args) })
     }
 
     // ── Error helpers ──────────────────────────────────────────────────

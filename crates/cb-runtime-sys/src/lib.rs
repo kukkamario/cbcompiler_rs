@@ -28,6 +28,11 @@ pub struct CbParamDesc {
 pub struct CbFuncDesc {
     pub name: *const std::ffi::c_char,
     pub symbol: *const std::ffi::c_char,
+    /// Statically-linked address of the runtime function. Stored as `Option`
+    /// so the FFI struct mirrors C's nullable `void (*)(void)` exactly
+    /// (Rust's `unsafe extern "C" fn` is non-null). `load_catalog` checks
+    /// for null and returns a clear error.
+    pub fn_ptr: Option<unsafe extern "C" fn()>,
     pub params: *const CbParamDesc,
     pub param_count: u32,
     pub return_type: u32,
@@ -45,7 +50,7 @@ pub struct CbCatalog {
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-pub const CB_CATALOG_VERSION: u32 = 2;
+pub const CB_CATALOG_VERSION: u32 = 3;
 const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
@@ -59,20 +64,11 @@ const CB_TYPE_STRING: u32 = 9;
 
 // ── Extern declarations ────────────────────────────────────────────────
 
+// The catalog is the only entry point Rust needs from the runtime
+// library — every other function is reached through the `fn_ptr` field
+// on each catalog entry, dispatched via libffi by the interpreter.
 unsafe extern "C" {
     pub fn cb_runtime_get_catalog() -> *const CbCatalog;
-
-    // Graphics
-    pub fn cb_rt_screen(w: i32, h: i32);
-    pub fn cb_rt_drawscreen();
-    pub fn cb_rt_color(r: i32, g: i32, b: i32);
-    pub fn cb_rt_line(x1: f32, y1: f32, x2: f32, y2: f32);
-    pub fn cb_rt_screen_width() -> i32;
-    pub fn cb_rt_screen_height() -> i32;
-
-    // Input
-    pub fn cb_rt_mouse_x() -> i32;
-    pub fn cb_rt_mouse_y() -> i32;
 }
 
 // ── Safe conversion ────────────────────────────────────────────────────
@@ -154,6 +150,10 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
             .map_err(|e| format!("invalid UTF-8 in symbol for {name}: {e}"))?
             .to_string();
 
+        let fn_ptr = func
+            .fn_ptr
+            .ok_or_else(|| format!("null fn_ptr for function '{name}' (symbol: {symbol})"))?;
+
         let params = if func.param_count > 0 {
             if func.params.is_null() {
                 return Err(format!("null params pointer for function '{name}'"));
@@ -188,6 +188,7 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
         functions.push(FuncDesc {
             name,
             c_symbol: symbol,
+            fn_ptr,
             params,
             return_ty,
         });
@@ -229,62 +230,58 @@ mod tests {
     fn load_catalog_returns_expected_entries() {
         let catalog = load_catalog().expect("catalog should load");
 
-        // Type declarations
+        // Type declarations.
         assert_eq!(catalog.types.len(), 1);
         assert_eq!(catalog.types[0].name, "TestHandle");
         assert_eq!(catalog.types[0].tag, 10);
 
-        // Functions
-        assert_eq!(catalog.functions.len(), 13);
+        // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
+        // makes this a linker-checked invariant.
+        for func in &catalog.functions {
+            let _: unsafe extern "C" fn() = func.fn_ptr; // type-asserts non-null
+            assert!(!func.c_symbol.is_empty(), "entry '{}' has empty c_symbol", func.name);
+        }
 
-        assert_eq!(catalog.functions[0].name, "print");
-        assert_eq!(catalog.functions[0].c_symbol, "cb_rt_print");
-        assert_eq!(catalog.functions[0].params.len(), 1);
-        assert_eq!(catalog.functions[0].params[0].ty, IrType::String);
-        assert_eq!(catalog.functions[0].return_ty, IrType::Void);
+        // Look up by c_symbol so adding new runtime functions doesn't break
+        // existing assertions on position.
+        let by_symbol: std::collections::HashMap<&str, &FuncDesc> = catalog
+            .functions
+            .iter()
+            .map(|f| (f.c_symbol.as_str(), f))
+            .collect();
 
-        assert_eq!(catalog.functions[1].name, "abs");
-        assert_eq!(catalog.functions[1].c_symbol, "cb_rt_abs_int");
-        assert_eq!(catalog.functions[1].params[0].ty, IrType::Int);
-        assert_eq!(catalog.functions[1].return_ty, IrType::Int);
+        let print = by_symbol["cb_rt_print"];
+        assert_eq!(print.name, "print");
+        assert_eq!(print.params.len(), 1);
+        assert_eq!(print.params[0].ty, IrType::String);
+        assert_eq!(print.return_ty, IrType::Void);
 
-        assert_eq!(catalog.functions[2].name, "abs");
-        assert_eq!(catalog.functions[2].c_symbol, "cb_rt_abs_float");
-        assert_eq!(catalog.functions[2].params[0].ty, IrType::Float);
-        assert_eq!(catalog.functions[2].return_ty, IrType::Float);
+        let abs_int = by_symbol["cb_rt_abs_int"];
+        assert_eq!(abs_int.name, "abs");
+        assert_eq!(abs_int.params[0].ty, IrType::Int);
+        assert_eq!(abs_int.return_ty, IrType::Int);
 
-        // Graphics functions
-        assert_eq!(catalog.functions[3].name, "screen");
-        assert_eq!(catalog.functions[3].c_symbol, "cb_rt_screen");
-        assert_eq!(catalog.functions[3].params.len(), 2);
+        let abs_float = by_symbol["cb_rt_abs_float"];
+        assert_eq!(abs_float.name, "abs");
+        assert_eq!(abs_float.params[0].ty, IrType::Float);
+        assert_eq!(abs_float.return_ty, IrType::Float);
 
-        assert_eq!(catalog.functions[4].name, "drawscreen");
-        assert_eq!(catalog.functions[4].c_symbol, "cb_rt_drawscreen");
+        let screen = by_symbol["cb_rt_screen"];
+        assert_eq!(screen.name, "screen");
+        assert_eq!(screen.params.len(), 2);
 
-        assert_eq!(catalog.functions[5].name, "color");
-        assert_eq!(catalog.functions[5].params.len(), 3);
+        assert_eq!(by_symbol["cb_rt_drawscreen"].name, "drawscreen");
+        assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
+        assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
 
-        assert_eq!(catalog.functions[6].name, "line");
-        assert_eq!(catalog.functions[6].params.len(), 4);
+        let create = by_symbol["cb_rt_create_test_handle"];
+        assert_eq!(create.name, "createtesthandle");
+        assert_eq!(create.params.len(), 0);
+        assert_eq!(create.return_ty, IrType::RuntimeType("TestHandle".to_string()));
 
-        assert_eq!(catalog.functions[7].name, "screenwidth");
-        assert_eq!(catalog.functions[8].name, "screenheight");
-        assert_eq!(catalog.functions[9].name, "mousex");
-        assert_eq!(catalog.functions[10].name, "mousey");
-
-        // Test handle functions use runtime type
-        assert_eq!(catalog.functions[11].name, "createtesthandle");
-        assert_eq!(catalog.functions[11].params.len(), 0);
-        assert_eq!(
-            catalog.functions[11].return_ty,
-            IrType::RuntimeType("TestHandle".to_string())
-        );
-
-        assert_eq!(catalog.functions[12].name, "usetesthandle");
-        assert_eq!(
-            catalog.functions[12].params[0].ty,
-            IrType::RuntimeType("TestHandle".to_string())
-        );
-        assert_eq!(catalog.functions[12].return_ty, IrType::Int);
+        let use_h = by_symbol["cb_rt_use_test_handle"];
+        assert_eq!(use_h.name, "usetesthandle");
+        assert_eq!(use_h.params[0].ty, IrType::RuntimeType("TestHandle".to_string()));
+        assert_eq!(use_h.return_ty, IrType::Int);
     }
 }

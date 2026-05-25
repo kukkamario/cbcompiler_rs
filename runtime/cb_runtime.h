@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define CB_CATALOG_VERSION 2
+#define CB_CATALOG_VERSION 3
 
 typedef uint32_t CbTypeTag;
 #define CB_TYPE_VOID    0
@@ -18,6 +18,13 @@ typedef uint32_t CbTypeTag;
 #define CB_TYPE_STRING  9
 /* Tags >= 10 are runtime-defined opaque types (see CbTypeDesc). */
 
+/* Opaque handle types. Each runtime-defined type is declared as a
+   forward struct + pointer typedef so the C++ catalog can specialize
+   type_tag<> on the pointer type and FuncTraits deduces the right
+   CbTypeTag from the function signature automatically. The struct is
+   never defined — handles are values cast through uintptr_t. */
+typedef struct CbTestHandle_* CbTestHandle;
+
 typedef struct {
     const char* name;
     CbTypeTag   tag;
@@ -31,6 +38,11 @@ typedef struct {
 typedef struct {
     const char*        name;
     const char*        symbol;
+    /* Statically-linked address of the runtime function. The interpreter
+       dispatches through this; the LLVM backend uses `symbol` for
+       declare/call emission. The CB_FN macro guarantees `symbol` (via #)
+       and `fn_ptr` reference the same identifier. */
+    void             (*fn_ptr)(void);
     const CbParamDesc* params;
     uint32_t           param_count;
     CbTypeTag          return_type;
@@ -45,6 +57,10 @@ typedef struct {
     const CbFuncDesc*   funcs;
 } CbCatalog;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 const CbCatalog* cb_runtime_get_catalog(void);
 
 /* System */
@@ -52,11 +68,14 @@ void cb_rt_print(const char* text);
 int32_t cb_rt_abs_int(int32_t x);
 double cb_rt_abs_float(double x);
 
+/* Math */
+double cb_rt_sqrt(double x);
+
 /* Graphics */
 void cb_rt_screen(int32_t w, int32_t h);
 void cb_rt_drawscreen(void);
 void cb_rt_color(int32_t r, int32_t g, int32_t b);
-void cb_rt_line(float x1, float y1, float x2, float y2);
+void cb_rt_line(double x1, double y1, double x2, double y2);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 
@@ -65,7 +84,11 @@ int32_t cb_rt_mouse_x(void);
 int32_t cb_rt_mouse_y(void);
 
 /* Test handle functions for opaque type testing */
-uint64_t cb_rt_create_test_handle(void);
-int32_t cb_rt_use_test_handle(uint64_t handle);
+CbTestHandle cb_rt_create_test_handle(void);
+int32_t cb_rt_use_test_handle(CbTestHandle handle);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CB_RUNTIME_H */
