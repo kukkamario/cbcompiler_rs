@@ -1,0 +1,24 @@
+Type Item
+    Field label As String
+    Field price As Int
+EndType
+
+Dim a As Item = New Item
+a.label = "apple"
+a.price = 30
+
+Dim b As Item = New Item
+b.label = "bread"
+b.price = 250
+
+Dim c As Item = New Item
+c.label = "cheese"
+c.price = 480
+
+Dim total As Int = 0
+For it = Each Item
+    Print it.label + " " + Str(it.price)
+    total = total + it.price
+Next it
+
+Print "total: " + Str(total)

@@ -1,0 +1,14 @@
+Dim i As Int = 3
+Dim f As Float = 1.5
+Dim sum As Float = i + f
+Print Str(sum)
+
+Dim n As Int
+n = Int(7.8)
+Print Str(n)
+
+Dim quotient As Float = 7 / 2
+Print Str(quotient)
+
+Dim product As Float = 4 * 2.5
+Print Str(product)

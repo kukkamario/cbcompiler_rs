@@ -1,0 +1,7 @@
+Function describe(label As String, count As Int, ratio As Float) As String
+    Return label + ": " + Str(count) + " (" + Str(ratio) + ")"
+EndFunction
+
+Print describe("apples", 3, 0.5)
+Print describe("oranges", 10, 1.25)
+Print describe("bananas", 0, 0.0)

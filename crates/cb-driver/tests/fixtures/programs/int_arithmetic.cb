@@ -1,0 +1,7 @@
+Print Str(2 + 3)
+Print Str(10 - 4)
+Print Str(6 * 7)
+Print Str(20 / 6)
+Print Str(20 Mod 6)
+Print Str(-5)
+Print Str((1 + 2) * 3)

@@ -1,0 +1,17 @@
+Type Player
+    Field hp As Int
+    Field speed As Float
+    Field name As String
+    Field alive As Bool
+EndType
+
+Dim p As Player = New Player
+p.hp = 75
+p.speed = 4.5
+p.name = "Hero"
+p.alive = True
+
+Print p.name
+Print Str(p.hp)
+Print Str(p.speed)
+Print Str(p.alive)

@@ -1,0 +1,19 @@
+Type Point
+    Field x As Float
+    Field y As Float
+EndType
+
+Function FormatPoint(p As Point) As String
+    Return "(" + Str(p.x) + ", " + Str(p.y) + ")"
+EndFunction
+
+Dim a As Point = New Point
+a.x = 1.0
+a.y = 2.0
+
+Dim b As Point = New Point
+b.x = -3.5
+b.y = 4.25
+
+Print FormatPoint(a)
+Print FormatPoint(b)

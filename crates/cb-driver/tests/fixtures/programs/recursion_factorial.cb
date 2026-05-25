@@ -1,0 +1,11 @@
+Function Factorial(n As Int) As Int
+    If n <= 1 Then
+        Return 1
+    EndIf
+    Return n * Factorial(n - 1)
+EndFunction
+
+Print Str(Factorial(0))
+Print Str(Factorial(1))
+Print Str(Factorial(5))
+Print Str(Factorial(10))

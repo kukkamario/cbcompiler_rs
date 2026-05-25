@@ -1,0 +1,16 @@
+Function Classify(n As Int) As String
+    Select n
+        Case 0
+            Return "zero"
+        Case 1
+            Return "one"
+        Case 2
+            Return "two"
+        Default
+            Return "many"
+    EndSelect
+EndFunction
+
+For i = -1 To 4
+    Print Str(i) + ": " + Classify(i)
+Next i

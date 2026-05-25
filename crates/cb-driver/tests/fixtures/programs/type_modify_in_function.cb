@@ -1,0 +1,23 @@
+Type Counter
+    Field value As Int
+EndType
+
+Function Bump(c As Counter)
+    c.value = c.value + 1
+EndFunction
+
+Function BumpBy(c As Counter, amount As Int)
+    c.value = c.value + amount
+EndFunction
+
+Dim c As Counter = New Counter
+c.value = 0
+
+Print Str(c.value)
+Bump(c)
+Print Str(c.value)
+Bump(c)
+Bump(c)
+Print Str(c.value)
+BumpBy(c, 10)
+Print Str(c.value)

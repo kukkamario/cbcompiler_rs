@@ -1,0 +1,29 @@
+Function Sign(n As Int) As String
+    If n > 0 Then
+        Return "positive"
+    ElseIf n < 0 Then
+        Return "negative"
+    Else
+        Return "zero"
+    EndIf
+EndFunction
+
+Function Bucket(n As Int) As String
+    If n < 10 Then
+        Return "small"
+    ElseIf n < 100 Then
+        Return "medium"
+    ElseIf n < 1000 Then
+        Return "large"
+    Else
+        Return "huge"
+    EndIf
+EndFunction
+
+Print Sign(5)
+Print Sign(-3)
+Print Sign(0)
+Print Bucket(1)
+Print Bucket(50)
+Print Bucket(500)
+Print Bucket(5000)

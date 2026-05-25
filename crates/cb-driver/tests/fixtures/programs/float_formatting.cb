@@ -1,0 +1,6 @@
+Print Str(2.5)
+Print Str(3.0)
+Print Str(1.0 / 4.0)
+Print Str(-3.14)
+Print Str(1.5 + 2.5)
+Print Str(10.0 / 3.0)

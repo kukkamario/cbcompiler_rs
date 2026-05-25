@@ -1,0 +1,22 @@
+Function IsEven(n As Int) As Bool
+    If n = 0 Then
+        Return True
+    EndIf
+    Return IsOdd(n - 1)
+EndFunction
+
+Function IsOdd(n As Int) As Bool
+    If n = 0 Then
+        Return False
+    EndIf
+    Return IsEven(n - 1)
+EndFunction
+
+Print Str(IsEven(0))
+Print Str(IsEven(1))
+Print Str(IsEven(4))
+Print Str(IsEven(7))
+Print Str(IsOdd(0))
+Print Str(IsOdd(1))
+Print Str(IsOdd(4))
+Print Str(IsOdd(7))

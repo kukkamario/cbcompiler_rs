@@ -1,0 +1,15 @@
+Dim greeting As String = "Hello, "
+Dim subject As String = "World"
+Print greeting + subject + "!"
+
+Dim n As Int = 42
+Print "count: " + Str(n)
+
+Dim pi As Float = 3.14
+Print "pi ~ " + Str(pi)
+
+Dim flag As Bool = True
+Print "flag: " + Str(flag)
+
+Dim empty As String = ""
+Print "[" + empty + "]"

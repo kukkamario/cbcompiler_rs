@@ -1,0 +1,10 @@
+For i = 1 To 3
+    Dim row As String = ""
+    For j = 1 To 3
+        If j > 1 Then
+            row = row + " "
+        EndIf
+        row = row + Str(i * j)
+    Next j
+    Print row
+Next i
