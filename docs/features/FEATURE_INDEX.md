@@ -8,7 +8,8 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | - |
+| [FD-014](FD-014_RUNTIME_STRING_ABI.md) | Runtime String ABI | Open | Medium | High (blocks FD-013) |
+| [FD-013](FD-013_EXTENDING_RUNTIME_SUPPORT.md) | Extending Runtime Support | Open | High | TBD |
 
 ## Completed
 
