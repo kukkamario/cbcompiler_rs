@@ -1,6 +1,7 @@
 # FD-012: Catalog DSL via C++ Templates and Function Pointers
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-26
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Adding a runtime function becomes a one-line macro invocation. Symbol names, parameter types, and parameter counts can no longer drift from the C++ implementation — drift becomes a compile/link error rather than a runtime miscall.
