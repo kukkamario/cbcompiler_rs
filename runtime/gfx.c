@@ -71,9 +71,13 @@ void cb_rt_color(int32_t r, int32_t g, int32_t b) {
     draw_color = al_map_rgb((unsigned char)r, (unsigned char)g, (unsigned char)b);
 }
 
-void cb_rt_line(float x1, float y1, float x2, float y2) {
+/* CB Float maps to double at the C ABI boundary — the catalog tags this
+   parameter as CB_TYPE_FLOAT and the interpreter's libffi dispatch always
+   pushes f64, so each function takes double regardless of what Allegro's
+   own signature expects. */
+void cb_rt_line(double x1, double y1, double x2, double y2) {
     if (!display) return;
-    al_draw_line(x1, y1, x2, y2, draw_color, 1.0f);
+    al_draw_line((float)x1, (float)y1, (float)x2, (float)y2, draw_color, 1.0f);
 }
 
 int32_t cb_rt_screen_width(void) {

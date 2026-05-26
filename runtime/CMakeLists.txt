@@ -1,13 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(cb_runtime C)
+project(cb_runtime C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# C++20 needed for `template<auto Fn>` deduction used by the catalog DSL.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Allegro CONFIG REQUIRED)
 
 add_library(cb_runtime STATIC
-    catalog.c
+    catalog.cpp
     gfx.c
     input.c
 )

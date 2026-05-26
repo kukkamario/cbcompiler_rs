@@ -4,6 +4,7 @@
 //! when the LLVM backend disagrees.
 
 pub mod error;
+pub mod ffi;
 pub mod heap;
 pub mod interp;
 pub mod observer;

@@ -387,6 +387,7 @@ impl<'a> Lowerer<'a> {
                     params,
                     return_ty,
                     c_symbol,
+                    fn_ptr,
                 } => {
                     let func_id = FuncId(self.func_table.len() as u32);
                     self.func_table.push(FuncDecl {
@@ -397,6 +398,7 @@ impl<'a> Lowerer<'a> {
                         },
                         kind: FuncKind::Runtime {
                             symbol: c_symbol.clone(),
+                            fn_ptr: *fn_ptr,
                         },
                     });
                     self.runtime_func_map.insert(c_symbol.clone(), func_id);
@@ -416,6 +418,7 @@ impl<'a> Lowerer<'a> {
                             },
                             kind: FuncKind::Runtime {
                                 symbol: variant.c_symbol.clone(),
+                                fn_ptr: variant.fn_ptr,
                             },
                         });
                         self.runtime_func_map

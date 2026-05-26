@@ -138,6 +138,8 @@ fn lower_with_catalog(src: &str, catalog: &cb_sema::RuntimeCatalog) -> String {
     cb_ir::print::print_program(&ir, &sema.interner)
 }
 
+extern "C" fn dummy_runtime_fn() {}
+
 #[test]
 fn runtime_function_call() {
     let catalog = cb_sema::RuntimeCatalog {
@@ -145,6 +147,7 @@ fn runtime_function_call() {
         functions: vec![cb_sema::FuncDesc {
             name: "print".to_string(),
             c_symbol: "cb_rt_print".to_string(),
+            fn_ptr: dummy_runtime_fn,
             params: vec![cb_sema::FuncParamDesc {
                 name: Some("text".to_string()),
                 ty: cb_ir::types::IrType::String,

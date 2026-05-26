@@ -208,6 +208,7 @@ impl<'a> Checker<'a> {
                         params,
                         return_ty,
                         c_symbol: desc.c_symbol.clone(),
+                        fn_ptr: desc.fn_ptr,
                     },
                     ty: Type::Void,
                     span,
@@ -223,6 +224,7 @@ impl<'a> Checker<'a> {
                             params,
                             return_ty,
                             c_symbol: desc.c_symbol.clone(),
+                            fn_ptr: desc.fn_ptr,
                         }
                     })
                     .collect();
@@ -802,6 +804,7 @@ impl<'a> Checker<'a> {
                         params,
                         return_ty,
                         c_symbol,
+                        fn_ptr: _,
                     } => {
                         if arg_types.len() != params.len() {
                             self.diagnostics.push(Diagnostic::error(
@@ -2351,10 +2354,13 @@ mod tests {
         }
     }
 
+    extern "C" fn dummy_fn() {}
+
     fn rt_func(name: &str, c_symbol: &str, params: &[(&str, cb_ir::types::IrType)], ret: cb_ir::types::IrType) -> crate::FuncDesc {
         crate::FuncDesc {
             name: name.to_string(),
             c_symbol: c_symbol.to_string(),
+            fn_ptr: dummy_fn,
             params: params.iter().map(|(n, ty)| crate::FuncParamDesc {
                 name: Some(n.to_string()),
                 ty: ty.clone(),
