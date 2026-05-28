@@ -30,7 +30,7 @@ Re-read `docs/cb_syntax.md` before designing — two points pin the design space
 
 ## Solution
 
-**Not yet decided — this FD's job is to pick one.** Three candidates, evaluated primarily through the LLVM lens:
+**Decision: Option B** (locked 2026-05-28 — see [Resolved decisions](#resolved-decisions) for the full lock-in). Options A and C are kept below for the reasoning trail. Three candidates, evaluated primarily through the LLVM lens:
 
 ### Option A — Bare `const char*` (status quo, with explicit ownership rules)
 
@@ -163,14 +163,16 @@ These don't need to be designed here, but the ABI choice should be checked again
 - Refcount stress: 10k-iteration concat loop, no resident-memory growth.
 - Catalog version bump (3 → 4) detected at startup; old runtimes rejected with a clear error.
 
-## Open questions
+## Resolved decisions
 
-- **Single decision blocker:** confirm Option B is the call. If anything pushes us off it, name the specific case.
-- Static-data sentinel encoding: refcount = `-1` (signed) vs. high-bit-set (`UINT32_MAX`) vs. legacy `mOffset != sizeof(LStringData)`. Pick whatever maps cleanest to an LLVM constant initializer.
-- Atomic vs. non-atomic refcount. CB is single-threaded today; atomic is "free" on x86 and future-proofs for an eventual threaded runtime. Recommendation: atomic.
-- Empty string `""` vs. null `CbString*` — do CB programs ever observe a null string? Per §5.3 / §5.6.1, no — an uninitialized String is `""` (§3.5 default value for `String` is `""`). So `cb_rt_*` may assume non-null and avoid null checks; backend is responsible for never producing a null handle. Confirm before locking in.
-- Should the three primitives (`retain`/`release`/`from_literal`) be CB-visible (callable from CB source) or backend-only? Recommend backend-only — exposed through named fields on `CbCatalog`, not the function table.
-- Catalog struct shape: add a sibling `CbStringApi` substruct on `CbCatalog` for these, or inline three pointers? Recommend the substruct — it's the pattern other "primitive types with operations" will follow (memblocks, etc., eventually).
+Locked in 2026-05-28:
+
+1. **ABI choice — Option B.** Opaque refcounted `CbString*`, port of legacy `LString` minus the UTF-32 cache. Options A and C remain documented above for the reasoning trail; if anything pushes us off B during implementation, that's a new FD.
+2. **Static-data sentinel — `refcount = -1` (signed `int32_t`).** Maps cleanly to an LLVM `i32 -1` constant initializer; `cb_rt_string_release` short-circuits when it sees a negative refcount.
+3. **Refcount atomicity — atomic.** Same cost as non-atomic on x86; future-proofs for an eventual threaded runtime without an ABI break.
+4. **Empty string — single global `CB_EMPTY_STRING` static-data instance.** Layout: `{ refcount = -1, byte_len = 0, capacity = 0, offset = sizeof(CbStringData), data = {} }`. Backend uses it for default-init of `String` locals and as the result of any operation that needs to return `""` (e.g., `Mid("", ...)`, `Left(s$, 0)`). Consequences: no null `CbString*` ever crosses the boundary, runtime functions can skip null checks, equality with `""` is a pointer-eq fast path, retain/release are no-ops on the sentinel. Exported from `cb_string.cpp` and declared in `cb_runtime.h`.
+5. **Primitive visibility — backend-only.** `cb_rt_string_retain` / `_release` / `_from_literal` are exposed through the catalog struct, not registered in the CB-visible function table. Not callable from CB source.
+6. **Catalog shape — `CbStringApi` substruct on `CbCatalog`.** Holds the three primitive function pointers plus `const CbString* empty` (pointer to `CB_EMPTY_STRING`). Establishes the pattern for future "primitive type with operations" entries (Memblock, File, Image).
 
 ## Related
 
