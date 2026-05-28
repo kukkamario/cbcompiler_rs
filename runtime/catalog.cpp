@@ -16,12 +16,13 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <type_traits>
 
 extern "C" {
     // Forward-declare implementations defined in the .c TUs (gfx.c, input.c)
     // and below in this TU.
-    void    cb_rt_print(const char* text);
+    void    cb_rt_print(const CbString* text);
     int32_t cb_rt_abs_int(int32_t x);
     double  cb_rt_abs_float(double x);
     CbTestHandle* cb_rt_create_test_handle(void);
@@ -42,12 +43,14 @@ extern "C" int32_t cb_rt_use_test_handle(const CbTestHandle* handle) {
     return static_cast<int32_t>(reinterpret_cast<uintptr_t>(handle));
 }
 
-extern "C" void cb_rt_print(const char* text) {
+extern "C" void cb_rt_print(const CbString* text) {
     if (text) {
-        std::puts(text);
-    } else {
-        std::puts("");
+        std::size_t len = cb_rt_string_len(text);
+        if (len > 0) {
+            std::fwrite(cb_rt_string_data(text), 1, len, stdout);
+        }
     }
+    std::putchar('\n');
 }
 
 extern "C" int32_t cb_rt_abs_int(int32_t x) {
@@ -87,7 +90,12 @@ template<> struct type_tag<uint64_t>      { static constexpr CbTypeTag value = C
 template<> struct type_tag<float>         { static constexpr CbTypeTag value = CB_TYPE_FLOAT; };
 template<> struct type_tag<double>        { static constexpr CbTypeTag value = CB_TYPE_FLOAT; };
 template<> struct type_tag<bool>          { static constexpr CbTypeTag value = CB_TYPE_BOOL; };
-template<> struct type_tag<const char*>   { static constexpr CbTypeTag value = CB_TYPE_STRING; };
+// Strings flow as opaque `CbString*` (catalog v4+). The legacy
+// `const char*` form is intentionally NOT specialized — any runtime
+// function declaring a string parameter as `const char*` now fails to
+// compile, enforcing the v4 ABI at template-deduction time.
+template<> struct type_tag<      CbString*>     { static constexpr CbTypeTag value = CB_TYPE_STRING; };
+template<> struct type_tag<const CbString*>     { static constexpr CbTypeTag value = CB_TYPE_STRING; };
 
 // Opaque handle type tags — two specializations per runtime-defined type,
 // one for `T*` (mutable / owning return) and one for `const T*` (borrowing
@@ -191,6 +199,7 @@ static const CbCatalog catalog = {
     catalog_types,
     static_cast<uint32_t>(sizeof(catalog_funcs) / sizeof(catalog_funcs[0])),
     catalog_funcs,
+    &cb_runtime_string_api,
 };
 
 extern "C" const CbCatalog* cb_runtime_get_catalog(void) {

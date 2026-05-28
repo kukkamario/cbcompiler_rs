@@ -46,11 +46,36 @@ pub struct CbCatalog {
     pub types: *const CbTypeDesc,
     pub func_count: u32,
     pub funcs: *const CbFuncDesc,
+    /// Backend-only API for the primitive String type. Always non-null
+    /// in catalog v4+. See `CbStringApi` below.
+    pub strings: *const CbStringApi,
+}
+
+/// Opaque CbString handle. The C side knows the full layout; consumers
+/// here read length and bytes through `CbStringApi::len` / `::data` and
+/// never reach into the struct directly.
+#[repr(C)]
+pub struct CbString {
+    _private: [u8; 0],
+}
+
+/// String primitive API exposed through `CbCatalog::strings`. Function
+/// pointers are non-null in v4+; `empty` points to the global immortal
+/// empty-string sentinel.
+#[repr(C)]
+pub struct CbStringApi {
+    pub retain:       unsafe extern "C" fn(*mut CbString) -> *mut CbString,
+    pub release:      unsafe extern "C" fn(*mut CbString),
+    pub from_literal: unsafe extern "C" fn(*const u8, usize) -> *mut CbString,
+    pub len:          unsafe extern "C" fn(*const CbString) -> usize,
+    pub data:         unsafe extern "C" fn(*const CbString) -> *const u8,
+    pub concat:       unsafe extern "C" fn(*const CbString, *const CbString) -> *mut CbString,
+    pub empty:        *const CbString,
 }
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-pub const CB_CATALOG_VERSION: u32 = 3;
+pub const CB_CATALOG_VERSION: u32 = 4;
 const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
@@ -69,6 +94,31 @@ const CB_TYPE_STRING: u32 = 9;
 // on each catalog entry, dispatched via libffi by the interpreter.
 unsafe extern "C" {
     pub fn cb_runtime_get_catalog() -> *const CbCatalog;
+
+    /// Instrumentation hook — returns the current refcount of a CbString,
+    /// or a negative value for the static-data sentinel. Used by tests to
+    /// verify retain/release lifecycle; not part of `CbStringApi`.
+    pub fn cb_rt_string_test_refcount(s: *const CbString) -> i32;
+}
+
+/// Get the string API exposed by the loaded runtime catalog. Panics if
+/// the catalog can't be loaded or reports a version other than
+/// [`CB_CATALOG_VERSION`] — both are configuration errors that should
+/// surface immediately at startup rather than be silently absorbed.
+pub fn string_api() -> &'static CbStringApi {
+    let catalog_ptr = unsafe { cb_runtime_get_catalog() };
+    assert!(!catalog_ptr.is_null(), "cb_runtime_get_catalog() returned null");
+    let catalog = unsafe { &*catalog_ptr };
+    assert_eq!(
+        catalog.version, CB_CATALOG_VERSION,
+        "catalog version mismatch (loaded {} but cb-runtime-sys expects {})",
+        catalog.version, CB_CATALOG_VERSION
+    );
+    assert!(
+        !catalog.strings.is_null(),
+        "catalog v{CB_CATALOG_VERSION} has null string API (runtime bug)"
+    );
+    unsafe { &*catalog.strings }
 }
 
 // ── Safe conversion ────────────────────────────────────────────────────
@@ -283,5 +333,65 @@ mod tests {
         assert_eq!(use_h.name, "usetesthandle");
         assert_eq!(use_h.params[0].ty, IrType::RuntimeType("TestHandle".to_string()));
         assert_eq!(use_h.return_ty, IrType::Int);
+    }
+
+    #[test]
+    fn string_api_roundtrip() {
+        let api = string_api();
+
+        // Empty sentinel: immortal (refcount < 0), zero-length, retain/release no-op.
+        assert!(!api.empty.is_null());
+        let empty_rc = unsafe { cb_rt_string_test_refcount(api.empty) };
+        assert!(empty_rc < 0, "empty sentinel refcount must be negative, got {empty_rc}");
+        assert_eq!(unsafe { (api.len)(api.empty) }, 0);
+
+        // retain/release on the sentinel are no-ops and don't perturb refcount.
+        let same = unsafe { (api.retain)(api.empty as *mut CbString) };
+        assert_eq!(same as *const _, api.empty);
+        unsafe { (api.release)(api.empty as *mut CbString) };
+        assert_eq!(unsafe { cb_rt_string_test_refcount(api.empty) }, empty_rc);
+
+        // from_literal: fresh handle, refcount = 1, bytes round-trip.
+        let bytes = b"hello, cb";
+        let h = unsafe { (api.from_literal)(bytes.as_ptr(), bytes.len()) };
+        assert!(!h.is_null());
+        assert_eq!(unsafe { cb_rt_string_test_refcount(h) }, 1);
+        assert_eq!(unsafe { (api.len)(h) }, bytes.len());
+        let read = unsafe { std::slice::from_raw_parts((api.data)(h), (api.len)(h)) };
+        assert_eq!(read, bytes);
+
+        // retain bumps refcount; release brings it back; final release frees.
+        let _h2 = unsafe { (api.retain)(h) };
+        assert_eq!(unsafe { cb_rt_string_test_refcount(h) }, 2);
+        unsafe { (api.release)(h) };
+        assert_eq!(unsafe { cb_rt_string_test_refcount(h) }, 1);
+
+        // Concat — both halves non-empty.
+        let a = unsafe { (api.from_literal)(b"foo".as_ptr(), 3) };
+        let b = unsafe { (api.from_literal)(b"bar".as_ptr(), 3) };
+        let ab = unsafe { (api.concat)(a, b) };
+        assert_eq!(unsafe { (api.len)(ab) }, 6);
+        let read =
+            unsafe { std::slice::from_raw_parts((api.data)(ab), (api.len)(ab)) };
+        assert_eq!(read, b"foobar");
+        unsafe {
+            (api.release)(a);
+            (api.release)(b);
+            (api.release)(ab);
+            (api.release)(h); // final release for the earlier handle
+        }
+
+        // Concat with empty operand returns a retained handle of the other side
+        // (no allocation), and concat-of-empties returns the sentinel.
+        let s = unsafe { (api.from_literal)(b"x".as_ptr(), 1) };
+        let s_plus_empty = unsafe { (api.concat)(s, api.empty) };
+        assert_eq!(s_plus_empty, s); // same pointer, retain bumped
+        assert_eq!(unsafe { cb_rt_string_test_refcount(s) }, 2);
+        unsafe {
+            (api.release)(s_plus_empty);
+            (api.release)(s);
+        }
+        let empty_concat = unsafe { (api.concat)(api.empty, api.empty) };
+        assert_eq!(empty_concat as *const _, api.empty);
     }
 }

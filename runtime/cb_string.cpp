@@ -1,0 +1,154 @@
+// CoolBasic runtime — refcounted opaque string implementation.
+//
+// Port of legacy LString / LStringData (G:\projects\CBCompiler\Runtime\
+// lstring.{h,cpp}), modulo:
+//   - UTF-32 internal representation dropped. CB §3.1 mandates UTF-8 and
+//     §5.3 forbids `[]` indexing on strings, so codepoint-indexed access
+//     never needs to be O(1) — string library functions pay the walk cost.
+//   - Cached `mUtf8String` pointer dropped — inline data is already UTF-8.
+//   - `LString` smart-pointer wrapper dropped. RAII lives Rust-side
+//     (`CbStringHandle` in cb-backend-interp).
+//   - Static-data sentinel encoding switched from
+//     `mOffset != sizeof(LStringData)` to signed `refcount < 0`. Cleaner
+//     match for LLVM constant initializers.
+//
+// All consumers (Rust, future LLVM IR emission) see CbString only through
+// the primitives below, exposed via CbStringApi on the catalog. The struct
+// layout is private to this TU.
+
+#include "cb_runtime.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
+struct CbString {
+    int32_t      refcount;   // accessed via std::atomic_ref; -1 == immortal sentinel
+    uint32_t     pad;        // explicit pad so the size_t fields land on 8-byte alignment
+    std::size_t  byte_len;
+    std::size_t  capacity;
+    std::size_t  offset;     // bytes from struct base to data start
+};
+
+static_assert(sizeof(CbString) % alignof(std::size_t) == 0,
+              "CbString header must keep size_t fields aligned for inline data layout");
+
+// Canonical empty-string sentinel. Declared as a const aggregate so it
+// lives in .rodata; refcount = -1 means retain/release short-circuit.
+// Exposed through cb_runtime_string_api.empty rather than as a public
+// symbol — callers compare via that field, not by symbol name.
+static const CbString CB_EMPTY_STRING_INSTANCE = {
+    /* refcount */ -1,
+    /* pad      */ 0,
+    /* byte_len */ 0,
+    /* capacity */ 0,
+    /* offset   */ sizeof(CbString),
+};
+
+// ─── Internal helpers ───────────────────────────────────────────────────
+
+static inline std::atomic_ref<int32_t> refcount_of(CbString* s) {
+    return std::atomic_ref<int32_t>(s->refcount);
+}
+
+// Plain-load read of the sentinel bit. Safe under the data-race rules
+// because once a string is constructed with negative refcount we never
+// flip it positive, and a string constructed positive never reaches
+// negative — release frees the block at refcount==1 before any decrement
+// could go below zero. So `refcount < 0` is a stable, race-free property.
+static inline bool is_static(const CbString* s) {
+    return std::atomic_ref<int32_t>(const_cast<int32_t&>(s->refcount))
+        .load(std::memory_order_relaxed) < 0;
+}
+
+static inline uint8_t* data_of(CbString* s) {
+    return reinterpret_cast<uint8_t*>(s) + s->offset;
+}
+
+static inline const uint8_t* data_of(const CbString* s) {
+    return reinterpret_cast<const uint8_t*>(s) + s->offset;
+}
+
+// Single-block allocation: header + inline data. Refcount starts at 1;
+// caller is responsible for filling the data region.
+static CbString* alloc_with_data(std::size_t len) {
+    CbString* s = static_cast<CbString*>(std::malloc(sizeof(CbString) + len));
+    if (!s) std::abort();
+    s->refcount = 1;
+    s->pad      = 0;
+    s->byte_len = len;
+    s->capacity = len;
+    s->offset   = sizeof(CbString);
+    return s;
+}
+
+// ─── Primitives ─────────────────────────────────────────────────────────
+
+extern "C" CbString* cb_rt_string_retain(CbString* s) {
+    if (s && !is_static(s)) {
+        refcount_of(s).fetch_add(1, std::memory_order_relaxed);
+    }
+    return s;
+}
+
+extern "C" void cb_rt_string_release(CbString* s) {
+    if (!s || is_static(s)) return;
+    if (refcount_of(s).fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        std::free(s);
+    }
+}
+
+extern "C" CbString* cb_rt_string_from_literal(const uint8_t* data, std::size_t len) {
+    CbString* s = alloc_with_data(len);
+    if (len > 0) std::memcpy(data_of(s), data, len);
+    return s;
+}
+
+extern "C" std::size_t cb_rt_string_len(const CbString* s) {
+    return s ? s->byte_len : 0;
+}
+
+extern "C" const uint8_t* cb_rt_string_data(const CbString* s) {
+    return s ? data_of(s) : nullptr;
+}
+
+extern "C" CbString* cb_rt_string_concat(const CbString* a, const CbString* b) {
+    // Empty-operand fast paths: retain the non-empty side and avoid the
+    // allocation. Mirrors the legacy `LString::operator+` early exit.
+    std::size_t la = cb_rt_string_len(a);
+    std::size_t lb = cb_rt_string_len(b);
+    if (la == 0 && lb == 0) {
+        return cb_rt_string_retain(const_cast<CbString*>(&CB_EMPTY_STRING_INSTANCE));
+    }
+    if (la == 0) return cb_rt_string_retain(const_cast<CbString*>(b));
+    if (lb == 0) return cb_rt_string_retain(const_cast<CbString*>(a));
+
+    CbString* out = alloc_with_data(la + lb);
+    std::memcpy(data_of(out),      data_of(a), la);
+    std::memcpy(data_of(out) + la, data_of(b), lb);
+    return out;
+}
+
+extern "C" int32_t cb_rt_string_test_refcount(const CbString* s) {
+    if (!s) return 0;
+    return std::atomic_ref<int32_t>(const_cast<int32_t&>(s->refcount))
+        .load(std::memory_order_relaxed);
+}
+
+// ─── Catalog wiring ─────────────────────────────────────────────────────
+//
+// The CbStringApi instance is defined in this TU so cb_string.cpp owns
+// everything string-related. catalog.cpp just references it when assembling
+// the CbCatalog struct.
+
+extern "C" const CbStringApi cb_runtime_string_api = {
+    /* retain       */ cb_rt_string_retain,
+    /* release      */ cb_rt_string_release,
+    /* from_literal */ cb_rt_string_from_literal,
+    /* len          */ cb_rt_string_len,
+    /* data         */ cb_rt_string_data,
+    /* concat       */ cb_rt_string_concat,
+    /* empty        */ &CB_EMPTY_STRING_INSTANCE,
+};

@@ -1,9 +1,10 @@
 #ifndef CB_RUNTIME_H
 #define CB_RUNTIME_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-#define CB_CATALOG_VERSION 3
+#define CB_CATALOG_VERSION 4
 
 typedef uint32_t CbTypeTag;
 #define CB_TYPE_VOID    0
@@ -32,6 +33,29 @@ typedef uint32_t CbTypeTag;
    The runtime is free to encode the handle as a slab index, an actual
    pointer, etc.; only the bit pattern matters. */
 typedef struct CbTestHandle CbTestHandle;
+
+/* String handle. Opaque refcounted object; flows across the FFI boundary
+   as `CbString*`. Backends call retain/release/from_literal/len/data/concat
+   through the `CbStringApi` substruct on `CbCatalog` (see below) — these
+   are NOT registered as CB-visible runtime functions.
+
+   Static-data sentinel: a CbString whose internal refcount is negative is
+   treated as immortal — retain/release are no-ops. The global empty-string
+   instance (referenced via CbStringApi::empty) is the canonical sentinel
+   and is the value backends use to default-initialize String locals.
+   This invariant lets the runtime skip null checks: backends MUST NOT
+   produce a null CbString*. */
+typedef struct CbString CbString;
+
+typedef struct {
+    CbString*       (*retain)      (CbString*);
+    void            (*release)     (CbString*);
+    CbString*       (*from_literal)(const uint8_t* data, size_t len);
+    size_t          (*len)         (const CbString*);
+    const uint8_t*  (*data)        (const CbString*);
+    CbString*       (*concat)      (const CbString*, const CbString*);
+    const CbString* empty;
+} CbStringApi;
 
 typedef struct {
     const char* name;
@@ -63,6 +87,9 @@ typedef struct {
     const CbTypeDesc*   types;
     uint32_t            func_count;
     const CbFuncDesc*   funcs;
+    /* Backend-only API for the String primitive. Not callable from CB
+       source; see CbStringApi above for rationale. Always non-null in v4+. */
+    const CbStringApi*  strings;
 } CbCatalog;
 
 #ifdef __cplusplus
@@ -72,9 +99,27 @@ extern "C" {
 const CbCatalog* cb_runtime_get_catalog(void);
 
 /* System */
-void cb_rt_print(const char* text);
+void cb_rt_print(const CbString* text);
 int32_t cb_rt_abs_int(int32_t x);
 double cb_rt_abs_float(double x);
+
+/* String primitive implementation. Catalog v4 routes these through
+   `CbStringApi`; the bare extern declarations are kept so the C++ side
+   can reference them by symbol (e.g. when populating cb_runtime_string_api).
+   They are NOT CB-visible (no `CB_FN` entry). */
+CbString* cb_rt_string_retain(CbString* s);
+void cb_rt_string_release(CbString* s);
+CbString* cb_rt_string_from_literal(const uint8_t* data, size_t len);
+size_t cb_rt_string_len(const CbString* s);
+const uint8_t* cb_rt_string_data(const CbString* s);
+CbString* cb_rt_string_concat(const CbString* a, const CbString* b);
+
+/* Instrumentation hook for tests — returns the current refcount, or a
+   negative value for the static sentinel. Not in CbStringApi; called
+   directly by Rust-side tests via an extern declaration. */
+int32_t cb_rt_string_test_refcount(const CbString* s);
+
+extern const CbStringApi cb_runtime_string_api;
 
 /* Math */
 double cb_rt_sqrt(double x);

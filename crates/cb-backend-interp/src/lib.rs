@@ -8,6 +8,7 @@ pub mod ffi;
 pub mod heap;
 pub mod interp;
 pub mod observer;
+pub mod string_handle;
 pub mod value;
 
 pub use error::InterpError;

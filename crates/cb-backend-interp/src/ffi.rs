@@ -12,18 +12,24 @@
 //!     runtime function takes/returns `double` so libffi can dispatch with
 //!     one uniform float ABI.
 //!   - `IrType::Bool` passes as `u8` (Rust's `bool` ABI).
-//!   - `IrType::String` passes as `*const c_char` (null-terminated UTF-8).
+//!   - `IrType::String` passes as `*mut CbString` — the opaque refcounted
+//!     handle defined in `cb_string.cpp`. Inputs are borrowed (the handle
+//!     stays owned by the caller for the duration of the call); returned
+//!     handles are owned (refcount = 1; `CbStringHandle::from_raw` takes
+//!     ownership without an extra retain).
 //!   - `IrType::RuntimeType` passes as a generic pointer; the runtime
 //!     reinterprets the bits via `(uintptr_t)` casts.
 
 #![allow(unsafe_code)]
 
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::c_void;
 
 use cb_ir::FnSig;
 use cb_ir::types::IrType;
+use cb_runtime_sys::{CbString, CbStringApi};
 use libffi::middle::{Arg, Cif, CodePtr, Type};
 
+use crate::string_handle::CbStringHandle;
 use crate::value::Value;
 
 /// Owned representation of a marshaled argument. Kept alive for the
@@ -38,9 +44,12 @@ enum Marshaled {
     U64(u64),
     F64(f64),
     Bool(u8),
-    /// Owned C string + the raw pointer libffi reads. The CString must
-    /// outlive the call.
-    Str { _owner: CString, ptr: *const c_char },
+    /// Owned string handle plus the raw pointer libffi reads. Holding the
+    /// handle here keeps the refcount > 0 across the call even if the
+    /// source value was a coercion (e.g. `print(5)` → `Convert(Int, String)`
+    /// → marshal would otherwise drop the freshly-allocated handle before
+    /// `cif.call` dereferences it).
+    CbStringArg { _owner: CbStringHandle, ptr: *const c_void },
     Ptr(*const c_void),
 }
 
@@ -55,7 +64,7 @@ impl Marshaled {
             Marshaled::U64(v) => Arg::new(v),
             Marshaled::F64(v) => Arg::new(v),
             Marshaled::Bool(v) => Arg::new(v),
-            Marshaled::Str { ptr, .. } => Arg::new(ptr),
+            Marshaled::CbStringArg { ptr, .. } => Arg::new(ptr),
             Marshaled::Ptr(p) => Arg::new(p),
         }
     }
@@ -107,7 +116,7 @@ fn value_as_f64(v: &Value) -> f64 {
     }
 }
 
-fn marshal(value: &Value, ty: &IrType) -> Marshaled {
+fn marshal(value: &Value, ty: &IrType, string_api: &'static CbStringApi) -> Marshaled {
     match ty {
         IrType::Byte => Marshaled::I8(value_as_i64(value) as i8),
         IrType::Short => Marshaled::I16(value_as_i64(value) as i16),
@@ -118,10 +127,13 @@ fn marshal(value: &Value, ty: &IrType) -> Marshaled {
         IrType::Float => Marshaled::F64(value_as_f64(value)),
         IrType::Bool => Marshaled::Bool(if value.is_truthy() { 1 } else { 0 }),
         IrType::String => {
-            let s = value.as_string();
-            let owner = CString::new(s.as_bytes()).unwrap_or_default();
-            let ptr = owner.as_ptr();
-            Marshaled::Str { _owner: owner, ptr }
+            // Always go through `as_cb_string` — for Value::String this is
+            // a free retain; for anything else it allocates a coerced handle
+            // (matches the old `as_string()` behavior, just without the
+            // `CString::new` allocation).
+            let handle = value.as_cb_string(string_api);
+            let ptr = handle.as_ptr() as *const c_void;
+            Marshaled::CbStringArg { _owner: handle, ptr }
         }
         IrType::RuntimeType(_) => {
             let h = match value {
@@ -147,6 +159,7 @@ pub unsafe fn call(
     fn_ptr: unsafe extern "C" fn(),
     sig: &FnSig,
     args: &[Value],
+    string_api: &'static CbStringApi,
 ) -> Value {
     let arg_types: Vec<Type> = sig.params.iter().map(ir_to_ffi_type).collect();
     let ret_type = ir_to_ffi_type(&sig.ret);
@@ -157,7 +170,7 @@ pub unsafe fn call(
         .params
         .iter()
         .zip(args.iter())
-        .map(|(t, v)| marshal(v, t))
+        .map(|(t, v)| marshal(v, t, string_api))
         .collect();
     let arg_refs: Vec<Arg> = marshaled.iter().map(|m| m.as_arg()).collect();
 
@@ -177,15 +190,16 @@ pub unsafe fn call(
         IrType::Float => Value::Float(unsafe { cif.call::<f64>(code, &arg_refs) }),
         IrType::Bool => Value::Bool(unsafe { cif.call::<u8>(code, &arg_refs) } != 0),
         IrType::String => {
-            let p = unsafe { cif.call::<*const c_char>(code, &arg_refs) };
-            if p.is_null() {
-                Value::String("".into())
+            let p = unsafe { cif.call::<*mut CbString>(code, &arg_refs) };
+            // Per ABI, runtime string-returning functions never produce null —
+            // they yield the empty sentinel instead. Treat null defensively as
+            // the empty handle so a runtime bug doesn't crash the interpreter.
+            let handle = if p.is_null() {
+                CbStringHandle::empty(string_api)
             } else {
-                let s = unsafe { std::ffi::CStr::from_ptr(p) }
-                    .to_string_lossy()
-                    .into_owned();
-                Value::String(s.into())
-            }
+                CbStringHandle::from_raw(string_api, p)
+            };
+            Value::String(handle)
         }
         IrType::RuntimeType(_) => {
             let p = unsafe { cif.call::<*const c_void>(code, &arg_refs) };

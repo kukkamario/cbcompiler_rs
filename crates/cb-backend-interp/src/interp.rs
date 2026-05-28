@@ -6,10 +6,12 @@ use cb_diagnostics::{Interner, Span};
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
 use cb_ir::types::IrType;
 use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg};
+use cb_runtime_sys::CbStringApi;
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
 use crate::heap::{ArrayObj, Slab, TypeInstanceObj, TypeList};
 use crate::observer::{NoopObserver, Observer};
+use crate::string_handle::CbStringHandle;
 use crate::value::{Value, default_value};
 
 pub type Slot = (Value, bool);
@@ -37,15 +39,20 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     type_lists: Vec<TypeList>,
     stdout: Box<dyn Write + 'a>,
     observer: O,
+    /// Runtime string API — used to construct CbString handles for
+    /// literals/coercions and to dispatch concat. Lives in .rodata of the
+    /// loaded runtime library; never moves, never drops.
+    string_api: &'static CbStringApi,
 }
 
 impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
+        let string_api = cb_runtime_sys::string_api();
         let struct_defs = &program.struct_defs;
         let globals = program
             .globals
             .iter()
-            .map(|g| (default_value(&g.ty, struct_defs), false))
+            .map(|g| (default_value(&g.ty, struct_defs, string_api), false))
             .collect();
 
         let mut heap = Slab::new();
@@ -66,6 +73,7 @@ impl<'a> Interpreter<'a, NoopObserver> {
             type_lists,
             stdout: Box::new(std::io::stdout()),
             observer: NoopObserver,
+            string_api,
         }
     }
 }
@@ -87,6 +95,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             type_lists: self.type_lists,
             stdout: self.stdout,
             observer,
+            string_api: self.string_api,
         }
     }
 
@@ -134,11 +143,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         locals.clear();
 
         let struct_defs = &self.program.struct_defs;
+        let string_api = self.string_api;
         for local in &func.locals {
             let val = if local.is_param {
                 Value::Void
             } else {
-                default_value(&local.ty, struct_defs)
+                default_value(&local.ty, struct_defs, string_api)
             };
             locals.push((val, false));
         }
@@ -291,7 +301,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::ConstLong(v) => Ok(Value::Long(*v)),
             InstKind::ConstFloat(v) => Ok(Value::Float(*v)),
             InstKind::ConstBool(v) => Ok(Value::Bool(*v)),
-            InstKind::ConstString(v) => Ok(Value::String(Rc::from(v.as_str()))),
+            InstKind::ConstString(v) => Ok(Value::String(CbStringHandle::from_bytes(
+                self.string_api,
+                v.as_bytes(),
+            ))),
             InstKind::ConstNull => Ok(Value::Null),
 
             // ── Local/Global load/store ────────────────────────────
@@ -378,10 +391,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::NewType { type_def } => {
                 let def = &self.program.type_defs[type_def.0 as usize];
                 let struct_defs = &self.program.struct_defs;
+                let string_api = self.string_api;
                 let fields = def
                     .fields
                     .iter()
-                    .map(|(_, fty)| default_value(fty, struct_defs))
+                    .map(|(_, fty)| default_value(fty, struct_defs, string_api))
                     .collect();
                 let id = self.heap.alloc(TypeInstanceObj {
                     type_def: *type_def,
@@ -585,7 +599,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     .iter()
                     .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
                     .collect();
-                let arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                let arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
                 Ok(Value::Array(Rc::new(RefCell::new(arr))))
             }
             InstKind::GetElement { array, indices } => {
@@ -642,7 +656,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     .iter()
                     .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
                     .collect();
-                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
                 let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
                 let frame = self.call_stack.last_mut().unwrap();
                 frame.locals[local.0 as usize] = (new_val, false);
@@ -654,7 +668,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     .iter()
                     .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
                     .collect();
-                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone());
+                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
                 let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
                 self.globals[global.0 as usize] = (new_val, false);
                 Ok(Value::Void)
@@ -935,20 +949,21 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
-    fn string_binop(&self, op: IrBinOp, a: &Rc<str>, b: &Rc<str>, span: Span) -> Result<Value, InterpError> {
+    fn string_binop(
+        &self,
+        op: IrBinOp,
+        a: &CbStringHandle,
+        b: &CbStringHandle,
+        span: Span,
+    ) -> Result<Value, InterpError> {
         match op {
-            IrBinOp::StrConcat => {
-                let mut s = String::with_capacity(a.len() + b.len());
-                s.push_str(a);
-                s.push_str(b);
-                Ok(Value::String(Rc::from(s.as_str())))
-            }
-            IrBinOp::StrEq => Ok(Value::Bool(**a == **b)),
-            IrBinOp::StrNotEq => Ok(Value::Bool(**a != **b)),
-            IrBinOp::StrLt => Ok(Value::Bool(**a < **b)),
-            IrBinOp::StrGt => Ok(Value::Bool(**a > **b)),
-            IrBinOp::StrLtEq => Ok(Value::Bool(**a <= **b)),
-            IrBinOp::StrGtEq => Ok(Value::Bool(**a >= **b)),
+            IrBinOp::StrConcat => Ok(Value::String(a.concat(b))),
+            IrBinOp::StrEq => Ok(Value::Bool(a.as_bytes() == b.as_bytes())),
+            IrBinOp::StrNotEq => Ok(Value::Bool(a.as_bytes() != b.as_bytes())),
+            IrBinOp::StrLt => Ok(Value::Bool(a.as_bytes() < b.as_bytes())),
+            IrBinOp::StrGt => Ok(Value::Bool(a.as_bytes() > b.as_bytes())),
+            IrBinOp::StrLtEq => Ok(Value::Bool(a.as_bytes() <= b.as_bytes())),
+            IrBinOp::StrGtEq => Ok(Value::Bool(a.as_bytes() >= b.as_bytes())),
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on strings")),
                 span,
@@ -1006,7 +1021,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 }
             }
             IrType::Bool => Ok(Value::Bool(v.is_truthy())),
-            IrType::String => Ok(Value::String(v.as_string())),
+            IrType::String => Ok(Value::String(v.as_cb_string(self.string_api))),
             _ => Ok(v.clone()),
         }
     }
@@ -1022,7 +1037,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Float(x) => *x as i64,
             Value::Bool(true) => 1,
             Value::Bool(false) => 0,
-            Value::String(s) => s.parse().unwrap_or(0),
+            Value::String(s) => std::str::from_utf8(s.as_bytes())
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             _ => 0,
         }
     }
@@ -1038,7 +1056,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Float(x) => *x,
             Value::Bool(true) => 1.0,
             Value::Bool(false) => 0.0,
-            Value::String(s) => s.parse().unwrap_or(0.0),
+            Value::String(s) => std::str::from_utf8(s.as_bytes())
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0),
             _ => 0.0,
         }
     }
@@ -1136,17 +1157,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // deliberate decision that the interpreter needs to handle this
         // function differently from a plain FFI dispatch.
         if symbol == "cb_rt_print" {
-            let text = args
-                .first()
-                .map(|v| v.as_string())
-                .unwrap_or_else(|| Rc::from(""));
-            write!(self.stdout, "{text}").ok();
+            if let Some(Value::String(h)) = args.first() {
+                self.stdout.write_all(h.as_bytes()).ok();
+            }
             writeln!(self.stdout).ok();
             return Ok(Value::Void);
         }
 
         // General path: libffi dispatch using the catalog fn_ptr + IR sig.
-        Ok(unsafe { crate::ffi::call(fn_ptr, sig, args) })
+        Ok(unsafe { crate::ffi::call(fn_ptr, sig, args, self.string_api) })
     }
 
     // ── Error helpers ──────────────────────────────────────────────────

@@ -4,6 +4,7 @@ use std::rc::Rc;
 use cb_diagnostics::Symbol;
 use cb_ir::types::IrType;
 use cb_ir::TypeDefId;
+use cb_runtime_sys::CbStringApi;
 
 use crate::value::{Value, default_value};
 
@@ -143,9 +144,9 @@ pub struct ArrayObj {
 }
 
 impl ArrayObj {
-    pub fn new(dims: Vec<usize>, elem_type: IrType) -> Self {
+    pub fn new(dims: Vec<usize>, elem_type: IrType, string_api: &'static CbStringApi) -> Self {
         let total: usize = dims.iter().product();
-        let default = default_value(&elem_type, &[]);
+        let default = default_value(&elem_type, &[], string_api);
         let data = vec![default; total];
         ArrayObj {
             dims,

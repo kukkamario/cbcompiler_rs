@@ -11,6 +11,7 @@ find_package(Allegro CONFIG REQUIRED)
 
 add_library(cb_runtime STATIC
     catalog.cpp
+    cb_string.cpp
     gfx.c
     input.c
 )
