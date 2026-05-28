@@ -1,6 +1,7 @@
 # FD-014: Runtime String ABI
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-28
 **Priority:** High — blocks the String portion of [FD-013](FD-013_EXTENDING_RUNTIME_SUPPORT.md) and any new runtime function that takes/returns a string beyond `print`. Also blocks meaningful work on the LLVM backend, since strings cross the FFI boundary on every non-trivial CB program.
 **Effort:** Medium (design + small implementation; surface area is `cb_runtime.h`, `catalog.cpp`, `cb-backend-interp/src/ffi.rs`, `cb-backend-interp/src/value.rs`, plus the LLVM emission scheme — even if `cb-backend-llvm` is still a stub, decide the contract now).
 **Impact:** Locks down the cross-language string contract so every future runtime FD (string library, file I/O, text rendering, error messages) can land without re-litigating ownership, encoding, or lifetime each time — *and* so the eventual LLVM backend has a string representation it can emit efficient IR for.
