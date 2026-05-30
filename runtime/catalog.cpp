@@ -14,7 +14,6 @@
 #include "cb_runtime.h"
 
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <type_traits>

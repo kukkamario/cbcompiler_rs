@@ -127,7 +127,17 @@ fn main() {
     }
 
     // Rebuild if runtime sources change
-    for f in &["catalog.cpp", "cb_math.cpp", "cb_string.cpp", "cb_system.cpp", "gfx.c", "input.c", "cb_runtime.h", "CMakeLists.txt"] {
+    for f in &[
+        "catalog.cpp",
+        "cb_math.cpp",
+        "cb_string.cpp",
+        "cb_system.cpp",
+        "cb_gfx.cpp",
+        "cb_input.cpp",
+        "cb_input.h",
+        "cb_runtime.h",
+        "CMakeLists.txt",
+    ] {
         println!("cargo:rerun-if-changed={}", runtime_src.join(f).display());
     }
 }
