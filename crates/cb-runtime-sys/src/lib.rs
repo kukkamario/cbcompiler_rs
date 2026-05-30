@@ -280,10 +280,13 @@ mod tests {
     fn load_catalog_returns_expected_entries() {
         let catalog = load_catalog().expect("catalog should load");
 
-        // Type declarations.
-        assert_eq!(catalog.types.len(), 1);
-        assert_eq!(catalog.types[0].name, "TestHandle");
-        assert_eq!(catalog.types[0].tag, 10);
+        // Type declarations: TestHandle (tag 10) and the Image graphics
+        // handle (tag 11, FD-013 Batch 4).
+        let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
+            catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
+        assert_eq!(catalog.types.len(), 2);
+        assert_eq!(types_by_name["TestHandle"].tag, 10);
+        assert_eq!(types_by_name["Image"].tag, 11);
 
         // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
         // makes this a linker-checked invariant.
@@ -323,6 +326,16 @@ mod tests {
         assert_eq!(by_symbol["cb_rt_drawscreen"].name, "drawscreen");
         assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
         assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
+
+        // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
+        let make_image = by_symbol["cb_rt_make_image"];
+        assert_eq!(make_image.name, "makeimage");
+        assert_eq!(make_image.return_ty, IrType::RuntimeType("Image".to_string()));
+
+        let get_pixel = by_symbol["cb_rt_get_pixel"];
+        assert_eq!(get_pixel.name, "getpixel");
+        assert_eq!(get_pixel.params[0].ty, IrType::RuntimeType("Image".to_string()));
+        assert_eq!(get_pixel.return_ty, IrType::Int);
 
         let create = by_symbol["cb_rt_create_test_handle"];
         assert_eq!(create.name, "createtesthandle");

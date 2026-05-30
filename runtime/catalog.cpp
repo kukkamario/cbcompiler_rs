@@ -103,6 +103,11 @@ constexpr CbTypeTag CB_TYPE_TEST_HANDLE = 10;
 template<> struct type_tag<      CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 template<> struct type_tag<const CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 
+// Image — the graphics opaque handle (FD-013 Batch 4).
+constexpr CbTypeTag CB_TYPE_IMAGE = 11;
+template<> struct type_tag<      CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
+template<> struct type_tag<const CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -151,6 +156,7 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 
 static constexpr CbTypeDesc catalog_types[] = {
     { "TestHandle", ::cb_catalog::CB_TYPE_TEST_HANDLE },
+    { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
 };
 
 // ─── Function catalog ─────────────────────────────────────────────────
@@ -215,11 +221,45 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("chr",              cb_rt_chr),
     CB_FN("hex",              cb_rt_hex),
 
-    // Graphics
+    // Graphics & images (cb_gfx.cpp). Overloads (Screen, Color, ClsColor,
+    // Circle, Box, Lock, Unlock, PutPixel, MaskImage) share a CB name across
+    // multiple C symbols; sema resolves by arity/type. `Image` is the opaque
+    // handle type registered above.
     CB_FN("screen",           cb_rt_screen),
+    CB_FN("screen",           cb_rt_screen_mode),
     CB_FN("drawscreen",       cb_rt_drawscreen),
+    CB_FN("cls",              cb_rt_cls),
+    CB_FN("clscolor",         cb_rt_cls_color),
+    CB_FN("clscolor",         cb_rt_cls_color_a),
+    CB_FN("drawtoscreen",     cb_rt_draw_to_screen),
+    CB_FN("fps",              cb_rt_fps),
+    CB_FN("lock",             cb_rt_lock),
+    CB_FN("lock",             cb_rt_lock_state),
+    CB_FN("lock",             cb_rt_lock_image),
+    CB_FN("lock",             cb_rt_lock_image_state),
+    CB_FN("unlock",           cb_rt_unlock),
+    CB_FN("unlock",           cb_rt_unlock_image),
     CB_FN("color",            cb_rt_color),
+    CB_FN("color",            cb_rt_color_a),
     CB_FN("line",             cb_rt_line),
+    CB_FN("circle",           cb_rt_circle),
+    CB_FN("circle",           cb_rt_circle_fill),
+    CB_FN("box",              cb_rt_box),
+    CB_FN("box",              cb_rt_box_fill),
+    CB_FN("dot",              cb_rt_dot),
+    CB_FN("putpixel",         cb_rt_put_pixel),
+    CB_FN("putpixel",         cb_rt_put_pixel_a),
+    CB_FN("putpixel",         cb_rt_put_pixel_argb),
+    CB_FN("getpixel",         cb_rt_get_pixel),
+    CB_FN("makeimage",        cb_rt_make_image),
+    CB_FN("loadimage",        cb_rt_load_image),
+    CB_FN("drawimage",        cb_rt_draw_image),
+    CB_FN("maskimage",        cb_rt_mask_image),
+    CB_FN("maskimage",        cb_rt_mask_image_a),
+    CB_FN("drawtoimage",      cb_rt_draw_to_image),
+    CB_FN("imagewidth",       cb_rt_image_width),
+    CB_FN("imageheight",      cb_rt_image_height),
+    CB_FN("deleteimage",      cb_rt_delete_image),
     CB_FN("screenwidth",      cb_rt_screen_width),
     CB_FN("screenheight",     cb_rt_screen_height),
 

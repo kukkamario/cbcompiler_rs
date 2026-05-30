@@ -1,0 +1,41 @@
+// FD-013 Batch 4: graphics / image runtime, headless coverage.
+//
+// `Image` is the first real runtime opaque-handle type. MakeImage falls back to
+// a memory bitmap when no window is open, so the handle round-trip and pixel
+// read/write run without a display (CI-safe). Window-only functions (Screen,
+// DrawScreen, drawing primitives) are smoke-tested manually via examples/.
+
+// MakeImage returns an Image handle; dimension queries read it back.
+Dim img As Image
+img = MakeImage(8, 4)
+Print Str(ImageWidth(img))
+Print Str(ImageHeight(img))
+
+// Pixel round-trip: target the image, lock, write a pixel, read it back as
+// packed ARGB. Proves opaque-handle marshalling + pixel read/write.
+DrawToImage(img)
+Lock()
+PutPixel(2, 1, 255, 128, 64)
+Unlock()
+Print Str(GetPixel(img, 2, 1))
+
+// Lock(state:Int) — the 1-arg Int overload, distinct from Lock(img:Image).
+Lock(0)
+PutPixel(5, 3, 10, 20, 30)
+Unlock()
+Print Str(GetPixel(img, 5, 3))
+
+// Lock(img:Image) / Unlock(img:Image) — the Image-typed overloads.
+Lock(img)
+PutPixel(7, 3, 200, 100, 50)
+Unlock(img)
+Print Str(GetPixel(img, 7, 3))
+
+// Packed-ARGB PutPixel overload (3 args): copy pixel (2,1) to (0,0).
+Lock()
+PutPixel(0, 0, GetPixel(img, 2, 1))
+Unlock()
+Print Str(GetPixel(img, 0, 0))
+
+DeleteImage(img)
+Print "done"

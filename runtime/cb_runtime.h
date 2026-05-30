@@ -34,6 +34,11 @@ typedef uint32_t CbTypeTag;
    pointer, etc.; only the bit pattern matters. */
 typedef struct CbTestHandle CbTestHandle;
 
+/* Image handle — the CB-visible `Image` opaque type (FD-013 Batch 4). Wraps an
+   Allegro bitmap; defined in cb_gfx.cpp. Created by MakeImage/LoadImage, freed
+   by DeleteImage. */
+typedef struct CbImage CbImage;
+
 /* String handle. Opaque refcounted object; flows across the FFI boundary
    as `CbString*`. Backends call retain/release/from_literal/len/data/concat
    through the `CbStringApi` substruct on `CbCatalog` (see below) — these
@@ -170,11 +175,45 @@ int32_t cb_rt_rand_max(int32_t max);
 int32_t cb_rt_rand_range(int32_t min, int32_t max);
 void cb_rt_randomize(int32_t seed);
 
-/* Graphics */
-void cb_rt_screen(int32_t w, int32_t h);
-void cb_rt_drawscreen(void);
-void cb_rt_color(int32_t r, int32_t g, int32_t b);
-void cb_rt_line(double x1, double y1, double x2, double y2);
+/* Graphics & images (cb_gfx.cpp, FD-013 Batch 4). CB `Float` args arrive as
+   `double`, `Int` as `int32_t`. `Image` is the opaque CbImage* handle. Many
+   functions are overloaded by arity/type — sema resolves them; each maps to a
+   distinct C symbol below sharing one CB name in catalog.cpp. */
+void    cb_rt_screen(int32_t w, int32_t h);
+void    cb_rt_screen_mode(int32_t w, int32_t h, int32_t mode);
+void    cb_rt_drawscreen(void);
+void    cb_rt_cls(void);
+void    cb_rt_cls_color(int32_t r, int32_t g, int32_t b);
+void    cb_rt_cls_color_a(int32_t r, int32_t g, int32_t b, int32_t a);
+void    cb_rt_draw_to_screen(void);
+int32_t cb_rt_fps(void);
+void    cb_rt_lock(void);
+void    cb_rt_lock_state(int32_t state);
+void    cb_rt_lock_image(CbImage* img);
+void    cb_rt_lock_image_state(CbImage* img, int32_t state);
+void    cb_rt_unlock(void);
+void    cb_rt_unlock_image(CbImage* img);
+void    cb_rt_color(int32_t r, int32_t g, int32_t b);
+void    cb_rt_color_a(int32_t r, int32_t g, int32_t b, int32_t a);
+void    cb_rt_line(double x1, double y1, double x2, double y2);
+void    cb_rt_circle(double x, double y, double d);
+void    cb_rt_circle_fill(double x, double y, double d, int32_t fill);
+void    cb_rt_box(double x, double y, double w, double h);
+void    cb_rt_box_fill(double x, double y, double w, double h, int32_t fill);
+void    cb_rt_dot(double x, double y);
+void    cb_rt_put_pixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b);
+void    cb_rt_put_pixel_a(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b, int32_t a);
+void    cb_rt_put_pixel_argb(int32_t x, int32_t y, int32_t argb);
+int32_t cb_rt_get_pixel(const CbImage* img, int32_t x, int32_t y);
+CbImage* cb_rt_make_image(int32_t w, int32_t h);
+CbImage* cb_rt_load_image(const CbString* path);
+void    cb_rt_draw_image(const CbImage* img, double x, double y);
+void    cb_rt_mask_image(CbImage* img, int32_t r, int32_t g, int32_t b);
+void    cb_rt_mask_image_a(CbImage* img, int32_t r, int32_t g, int32_t b, int32_t a);
+void    cb_rt_draw_to_image(CbImage* img);
+int32_t cb_rt_image_width(const CbImage* img);
+int32_t cb_rt_image_height(const CbImage* img);
+void    cb_rt_delete_image(CbImage* img);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 

@@ -101,6 +101,50 @@ Tested via `runtime_system.{cb,out}` (Timer non-negative/monotonic asserted as b
 exit 0), and parser unit tests (bare `End` → `Stmt::End`; stray `End If` still
 diagnoses). `cargo test --workspace` green.
 
+### Batch 4 — Graphics & Images ✅ (branch `fd-013-runtime`)
+
+Full documented graphics surface (`docs/cb_runtime.md:35-92`) **minus `Text`**
+ported into a new `runtime/cb_gfx.cpp` (migrated from the old `gfx.c`, now C++ so
+it can host the opaque-handle definition). Screen management (`Screen` +
+windowed/fullscreen/resizable overload, `Cls`, `ClsColor`, `DrawToScreen`,
+`Lock`/`Unlock`, `FPS`), drawing primitives (`Color` +alpha, `Circle`, `Box`,
+`Dot`), pixel ops (`PutPixel` ×3 overloads, `GetPixel`), and the **`Image`
+opaque handle** (`MakeImage`, `LoadImage`, `DrawImage`, `MaskImage`,
+`DrawToImage`, `ImageWidth`/`ImageHeight`, `DeleteImage`).
+
+This is the **first real use of the FD-011 opaque-handle machinery** (previously
+exercised only by `TestHandle`). `Image` registers as `CB_TYPE_IMAGE` with
+`type_tag<CbImage*>` specializations + a `CbTypeDesc` entry; everything else
+(catalog load, sema `RuntimeTypeDef`/`RuntimeFn`, IR `RuntimeType` lowering,
+libffi `OpaqueHandle` marshalling) is **already generic — zero Rust-side
+changes** this batch. The legacy `RenderTarget`/`Window`/`Image` class hierarchy
+was flattened to file-static state + a `struct CbImage { ALLEGRO_BITMAP* }`.
+
+Decisions:
+- **Scope minus Text.** `Text(x,y,s)` needs font loading; it stays with the
+  future fonts batch (`cb_text.cpp`).
+- **`DeleteImage` added + documented.** Not in the legacy surface (which leaked
+  until exit); cbcompiler_rs adds explicit cleanup, mirroring
+  `MakeMemblock`/`DeleteMemblock`. Documented in `docs/cb_runtime.md`.
+- **Overloads** (Screen, Color, ClsColor, Circle, Box, Lock, Unlock, PutPixel,
+  MaskImage) are multiple `CB_FN` entries sharing a CB name — sema's existing
+  arity+type resolution handles them. The two same-arity `Lock` overloads
+  (`Lock(state:Int)` vs `Lock(img:Image)`) are unambiguous (Int never converts
+  to a `RuntimeType`).
+- **`MakeImage`/`LoadImage` work headless.** When no display is open they fall
+  back to `ALLEGRO_MEMORY_BITMAP`, so the opaque-handle + pixel round-trip runs
+  in CI without a window.
+
+Known wart (left as-is): `DrawScreen`'s window-close path calls `exit(0)` rather
+than a clean IR `Halt` — routing it back needs a runtime→interpreter trap
+channel that doesn't exist yet.
+
+Tested via `runtime_image.{cb,out}` (headless: `MakeImage`→`ImageWidth/Height`→
+`DrawToImage`+`Lock`+`PutPixel`+`Unlock`→`GetPixel` packed-ARGB round-trip,
+all three `Lock` overloads, packed `PutPixel`, `DeleteImage`). Window-dependent
+functions get a manual smoke demo (`examples/bounce.cb`). `cargo test --workspace`
+green.
+
 ## Problem
 
 FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we don't have is the *breadth* of functions a real CoolBasic program expects. Today's catalog covers:

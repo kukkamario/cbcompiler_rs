@@ -14,7 +14,7 @@ add_library(cb_runtime STATIC
     cb_math.cpp
     cb_string.cpp
     cb_system.cpp
-    gfx.c
+    cb_gfx.cpp
     input.c
 )
 

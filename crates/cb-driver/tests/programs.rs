@@ -142,3 +142,8 @@ fn runtime_string() {
 fn runtime_system() {
     run("runtime_system");
 }
+
+#[test]
+fn runtime_image() {
+    run("runtime_image");
+}

@@ -90,6 +90,7 @@ Each function was exposed via `CBF_` prefix with C linkage (`extern "C"`).
 | `DrawToImage` | `img: Image` | — | Sets image as active render target |
 | `ImageWidth` | `img: Image` | `Int` | Returns image width in pixels |
 | `ImageHeight` | `img: Image` | `Int` | Returns image height in pixels |
+| `DeleteImage` | `img: Image` | — | Frees an image's bitmap and handle (cbcompiler_rs extension — see note) |
 
 ---
 
@@ -279,3 +280,4 @@ String indices are **1-based** in CoolBasic.
 - **1-based indexing**: String positions (InStr, Left, Right, StrRemove) are 1-based per CoolBasic convention.
 - **System / Time** (cbcompiler_rs): `Timer` returns monotonic wall-clock milliseconds since first call, via `std::chrono::steady_clock` (the legacy used CPU-time `clock()`). `Wait(ms)` sleeps for `ms` milliseconds (`ms <= 0` is a no-op). `End` terminates the program with exit code 0; `MakeError(msg)` writes `msg` to stderr and terminates with exit code 1. `End` is a language statement (not a runtime call), lowered to an IR `Halt` terminator.
 - **String character semantics** (cbcompiler_rs): `Len`/`Left`/`Right`/`StrRemove`/`InStr` count Unicode **codepoints**, not bytes (strings are UTF-8). Out-of-range arguments **clamp** rather than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` currently do ASCII-only case mapping; non-ASCII bytes pass through unchanged.
+- **Graphics / images** (cbcompiler_rs, FD-013 Batch 4): implemented on Allegro 5 (`runtime/cb_gfx.cpp`). `Image` is an opaque handle wrapping an Allegro bitmap. `Text` is **not yet implemented** (deferred to the fonts batch). `DeleteImage(img)` is an **addition not present in the legacy surface** — the legacy leaked image handles until process exit; cbcompiler_rs adds explicit cleanup (mirrors `MakeMemblock`/`DeleteMemblock`). Drawing/Cls/PutPixel act on the current render target (set via `DrawToScreen`/`DrawToImage`); `Circle`'s `d` is a diameter; `GetPixel`/`PutPixel`(packed) use 32-bit ARGB. `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap fallback when no display is open). The `DrawScreen` window-close path still calls `exit(0)` rather than a clean IR `Halt` (no runtime→interpreter trap channel yet).

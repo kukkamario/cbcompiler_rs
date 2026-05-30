@@ -1,0 +1,36 @@
+// FD-013 Batch 4 graphics smoke demo (manual — opens a real window).
+//
+//   cargo run -p cb-driver -- examples/bounce.cb
+//
+// A ball bounces around the window; close the window to exit. Exercises Screen,
+// Cls/ClsColor, Color, Circle (filled), Box, and DrawScreen together. Not an
+// automated test — window code can't run headless.
+
+Screen 640, 480
+ClsColor 16, 16, 48
+
+x# = 320.0
+y# = 240.0
+dx# = 3.5
+dy# = 2.5
+r# = 24.0
+
+Repeat
+    Cls
+
+    // Move and bounce off the edges.
+    x = x + dx
+    y = y + dy
+    If x < r Then dx = 0.0 - dx
+    If x > ScreenWidth() - r Then dx = 0.0 - dx
+    If y < r Then dy = 0.0 - dy
+    If y > ScreenHeight() - r Then dy = 0.0 - dy
+
+    // Border box and the ball.
+    Color 80, 80, 160
+    Box 0, 0, ScreenWidth() - 1, ScreenHeight() - 1
+    Color 255, 200, 64
+    Circle x - r, y - r, r * 2.0, 1
+
+    DrawScreen
+Forever
