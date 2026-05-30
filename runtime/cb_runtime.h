@@ -217,9 +217,26 @@ void    cb_rt_delete_image(CbImage* img);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 
-/* Input */
+/* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the legacy CB
+   DirectInput-style numbering (1=Esc, 16=Q, 30=A, 200=Up, …). Edge queries
+   (KeyHit/KeyUp, MouseHit/MouseUp) and movement deltas are relative to the
+   frame boundary, which DrawScreen advances; with no display open every query
+   returns 0. Mouse buttons: 1=left, 2=right, 3=middle. EscapeKey is a pure
+   query (no auto-exit). The cb_input_frame_begin/cb_input_handle_event hooks
+   that drive this state are internal (see cb_input.h), not catalog functions. */
+int32_t cb_rt_key_down(int32_t scancode);
+int32_t cb_rt_key_up(int32_t scancode);
+int32_t cb_rt_key_hit(int32_t scancode);
+int32_t cb_rt_escape_key(void);
 int32_t cb_rt_mouse_x(void);
 int32_t cb_rt_mouse_y(void);
+int32_t cb_rt_mouse_down(int32_t button);
+int32_t cb_rt_mouse_hit(int32_t button);
+int32_t cb_rt_mouse_up(int32_t button);
+int32_t cb_rt_mouse_z(void);
+int32_t cb_rt_mouse_move_x(void);
+int32_t cb_rt_mouse_move_y(void);
+int32_t cb_rt_mouse_move_z(void);
 
 /* Test handle functions for opaque type testing */
 CbTestHandle* cb_rt_create_test_handle(void);

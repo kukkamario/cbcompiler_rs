@@ -145,6 +145,50 @@ all three `Lock` overloads, packed `PutPixel`, `DeleteImage`). Window-dependent
 functions get a manual smoke demo (`examples/bounce.cb`). `cargo test --workspace`
 green.
 
+### Batch 5 — Input ✅ (branch `fd-013-runtime`)
+
+Keyboard input ported and a mouse surface defined, in a new `runtime/cb_input.cpp`
+(renamed from the old `input.c`, now C++ so it can host the state machine). The old
+`input.c` had only `MouseX`/`MouseY` (kept). Added:
+- **Keyboard** (ported 1:1 from legacy `cb_input.cpp` + `inputinterface.cpp`):
+  `KeyDown`, `KeyUp`, `KeyHit`, `EscapeKey` — the full documented surface.
+- **Mouse** (new cbcompiler_rs definitions — the legacy runtime exposed *no*
+  mouse-button/wheel functions): `MouseDown`, `MouseHit`, `MouseUp`, `MouseZ`,
+  `MouseMoveX`, `MouseMoveY`, `MouseMoveZ`.
+
+No joystick (deferred). As with prior batches, **zero Rust-side changes** — all
+the new functions are `Int→Int` / `()→Int` catalog entries dispatched through the
+generic libffi path (FD-012).
+
+Decisions:
+- **Scancodes ported verbatim.** The legacy DirectInput-style CB scancode→Allegro
+  keycode table (`sCBKeyMap`: 1=Esc, 16=Q, 30=A, 200=Up, …) is the authoritative
+  CoolBasic mapping; ported as-is and documented in `docs/cb_runtime.md`. (The
+  syntax reference had no input scancode spec, so the legacy table is the source
+  of truth per the "don't invent semantics" rule.)
+- **2-bit edge-state machine** (legacy model): per key/button, bit0 = down now,
+  bit1 = changed since the frame began. `KeyDown` = down bit; `KeyHit` = `0b11`
+  (down + changed); `KeyUp` = `0b10` (up + changed). Mouse buttons reuse it.
+- **Frame boundary = `DrawScreen`.** `cb_gfx.cpp` owns the Allegro event queue, so
+  `cb_rt_drawscreen` calls the internal hooks `cb_input_frame_begin()` (clears the
+  changed bits, zeroes movement deltas) and `cb_input_handle_event(&ev)` per event.
+  These hooks live in a new internal `runtime/cb_input.h` (they take `ALLEGRO_EVENT`,
+  kept out of the Allegro-free `cb_runtime.h`); they are **not** catalog functions.
+  Input state advances only when the program pumps `DrawScreen` — legacy-faithful.
+- **Mouse functions are new definitions**, Allegro-backed, mirroring the keyboard
+  edge model; buttons 1=left/2=right/3=middle. Documented as cbcompiler_rs additions
+  in `docs/cb_runtime.md` (same precedent as Batch 4's `DeleteImage`).
+- **`EscapeKey` is a pure query.** The legacy "safe exit" (Esc auto-closes the
+  program) is dropped: it needs the not-yet-existing runtime→interpreter trap
+  channel and conflicts with Batch 3's clean `Halt` direction.
+- **Headless-safe.** With no display, no event sources are registered, so no events
+  arrive and every query returns 0 — directly testable in CI.
+
+Tested via `runtime_input.{cb,out}` (headless baseline: every keyboard/mouse query
+returns 0, incl. out-of-range scancodes) plus extended `cb-runtime-sys` catalog
+assertions (new symbols load with correct arity/types). Interactive behaviour gets a
+manual smoke demo (`examples/input_demo.cb`). `cargo test --workspace` green.
+
 ## Problem
 
 FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we don't have is the *breadth* of functions a real CoolBasic program expects. Today's catalog covers:

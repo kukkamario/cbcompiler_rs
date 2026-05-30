@@ -337,6 +337,29 @@ mod tests {
         assert_eq!(get_pixel.params[0].ty, IrType::RuntimeType("Image".to_string()));
         assert_eq!(get_pixel.return_ty, IrType::Int);
 
+        // Input: keyboard + mouse queries (FD-013 Batch 5). All are
+        // Int->Int or ()->Int catalog entries dispatched generically.
+        let key_down = by_symbol["cb_rt_key_down"];
+        assert_eq!(key_down.name, "keydown");
+        assert_eq!(key_down.params.len(), 1);
+        assert_eq!(key_down.params[0].ty, IrType::Int);
+        assert_eq!(key_down.return_ty, IrType::Int);
+
+        let escape_key = by_symbol["cb_rt_escape_key"];
+        assert_eq!(escape_key.name, "escapekey");
+        assert_eq!(escape_key.params.len(), 0);
+        assert_eq!(escape_key.return_ty, IrType::Int);
+
+        let mouse_hit = by_symbol["cb_rt_mouse_hit"];
+        assert_eq!(mouse_hit.name, "mousehit");
+        assert_eq!(mouse_hit.params.len(), 1);
+        assert_eq!(mouse_hit.params[0].ty, IrType::Int);
+        assert_eq!(mouse_hit.return_ty, IrType::Int);
+
+        assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
+        assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
+        assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
+
         let create = by_symbol["cb_rt_create_test_handle"];
         assert_eq!(create.name, "createtesthandle");
         assert_eq!(create.params.len(), 0);

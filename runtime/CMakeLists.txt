@@ -15,7 +15,7 @@ add_library(cb_runtime STATIC
     cb_string.cpp
     cb_system.cpp
     cb_gfx.cpp
-    input.c
+    cb_input.cpp
 )
 
 target_include_directories(cb_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

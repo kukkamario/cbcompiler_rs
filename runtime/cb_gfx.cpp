@@ -14,6 +14,7 @@
 // it crosses the FFI boundary as `CbImage*` (a bit pattern the runtime owns).
 
 #include "cb_runtime.h"
+#include "cb_input.h"
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_primitives.h>
@@ -132,8 +133,14 @@ extern "C" void cb_rt_drawscreen(void) {
         fps_last_sample = now;
     }
 
+    // Advance the input state machine for this frame (FD-013 Batch 5): clear
+    // the per-key/button "changed" bits and zero movement deltas, then route
+    // every queued event into the input module before processing window events.
+    cb_input_frame_begin();
+
     ALLEGRO_EVENT ev;
     while (al_get_next_event(event_queue, &ev)) {
+        cb_input_handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
             // NOTE (FD-013): this exit() is inconsistent with Batch 3's clean
             // IR `Halt` termination, but routing a window-close back to the

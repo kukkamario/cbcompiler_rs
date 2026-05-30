@@ -1,0 +1,41 @@
+// FD-013 Batch 5 input smoke demo (manual — opens a real window).
+//
+//   cargo run -p cb-driver -- examples/input_demo.cb
+//
+// Move the square with the arrow keys; hold the left mouse button to change its
+// colour; the square also snaps to the mouse on a right-click. Press Esc (or
+// close the window) to quit. Exercises KeyDown, EscapeKey, MouseX/Y, MouseDown,
+// and MouseHit together with the graphics surface. Not an automated test —
+// window/input code can't run headless.
+
+Screen 640, 480
+ClsColor 16, 16, 48
+
+x# = 300.0
+y# = 220.0
+speed# = 5.0
+s# = 40.0
+
+Repeat
+    Cls
+
+    // Arrow keys move the square (scancodes: 200=Up, 208=Down, 203=Left, 205=Right).
+    If KeyDown(203) Then x = x - speed
+    If KeyDown(205) Then x = x + speed
+    If KeyDown(200) Then y = y - speed
+    If KeyDown(208) Then y = y + speed
+
+    // Right-click (just pressed) teleports the square to the cursor.
+    If MouseHit(2) Then x = MouseX()
+    If MouseHit(2) Then y = MouseY()
+
+    // Hold the left button to turn the square red, otherwise it's yellow.
+    If MouseDown(1) Then Color 255, 64, 64
+    If MouseDown(1) = 0 Then Color 255, 200, 64
+    Box x, y, s, s, 1
+
+    DrawScreen
+
+    // Esc quits cleanly (pure query — End terminates the program).
+    If EscapeKey() Then End
+Forever

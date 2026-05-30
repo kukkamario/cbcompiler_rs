@@ -147,3 +147,8 @@ fn runtime_system() {
 fn runtime_image() {
     run("runtime_image");
 }
+
+#[test]
+fn runtime_input() {
+    run("runtime_input");
+}

@@ -96,12 +96,62 @@ Each function was exposed via `CBF_` prefix with C linkage (`extern "C"`).
 
 ## Input
 
+State is sampled per **frame**: a frame begins each time the program calls
+`DrawScreen`, which drains the window's event queue. Edge queries (`KeyHit`,
+`KeyUp`, `MouseHit`, `MouseUp`) and movement deltas (`MouseMoveX/Y/Z`) are
+therefore relative to the previous `DrawScreen`. A program that never opens a
+`Screen` (or never calls `DrawScreen`) sees no input events and every query
+returns 0.
+
+### Keyboard
+
+`scancode` uses the legacy CoolBasic DirectInput-style numbering (see the table
+below), **not** raw platform keycodes.
+
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `KeyDown` | `scancode: Int` | `Int` | Returns non-zero if key is currently held down |
-| `KeyUp` | `scancode: Int` | `Int` | Returns non-zero if key is currently released |
-| `KeyHit` | `scancode: Int` | `Int` | Returns non-zero if key was just pressed (edge trigger) |
-| `EscapeKey` | — | `Int` | Returns non-zero if Escape is pressed |
+| `KeyUp` | `scancode: Int` | `Int` | Returns non-zero if key was just released this frame (edge trigger) |
+| `KeyHit` | `scancode: Int` | `Int` | Returns non-zero if key was just pressed this frame (edge trigger) |
+| `EscapeKey` | — | `Int` | Returns non-zero if Escape is currently held down |
+
+### Mouse
+
+Mouse button numbers: **1 = left, 2 = right, 3 = middle** (Allegro convention).
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `MouseX` | — | `Int` | Current mouse X position |
+| `MouseY` | — | `Int` | Current mouse Y position |
+| `MouseDown` | `button: Int` | `Int` | Non-zero if the button is currently held down |
+| `MouseHit` | `button: Int` | `Int` | Non-zero if the button was just pressed this frame (edge trigger) |
+| `MouseUp` | `button: Int` | `Int` | Non-zero if the button was just released this frame (edge trigger) |
+| `MouseZ` | — | `Int` | Mouse wheel position (accumulated) |
+| `MouseMoveX` | — | `Int` | X movement since the last frame |
+| `MouseMoveY` | — | `Int` | Y movement since the last frame |
+| `MouseMoveZ` | — | `Int` | Wheel movement since the last frame |
+
+### Scancode table
+
+CB scancode → key (DirectInput-style; ported from the legacy runtime):
+
+| Scan | Key | Scan | Key | Scan | Key |
+|-----:|-----|-----:|-----|-----:|-----|
+| 1 | Esc | 30 | A | 59–68 | F1–F10 |
+| 2–11 | 1,2,…,9,0 | 31 | S | 87 | F11 |
+| 14 | Backspace | 32 | D | 88 | F12 |
+| 15 | Tab | 44 | Z | 199 | Home |
+| 16 | Q | 45 | X | 200 | Up |
+| 17 | W | 46 | C | 201 | PgUp |
+| 18 | E | 47 | V | 203 | Left |
+| 19 | R | 48 | B | 205 | Right |
+| 28 | Enter | 57 | Space | 207 | End |
+| 29 | LCtrl | 42 | LShift | 208 | Down |
+|    |     | 56 | Alt | 209 | PgDn |
+|    |     |    |     | 211 | Delete |
+
+(Full map in `runtime/cb_input.cpp`; numeric-pad, lock, and modifier keys are
+also covered.)
 
 ---
 
@@ -281,3 +331,4 @@ String indices are **1-based** in CoolBasic.
 - **System / Time** (cbcompiler_rs): `Timer` returns monotonic wall-clock milliseconds since first call, via `std::chrono::steady_clock` (the legacy used CPU-time `clock()`). `Wait(ms)` sleeps for `ms` milliseconds (`ms <= 0` is a no-op). `End` terminates the program with exit code 0; `MakeError(msg)` writes `msg` to stderr and terminates with exit code 1. `End` is a language statement (not a runtime call), lowered to an IR `Halt` terminator.
 - **String character semantics** (cbcompiler_rs): `Len`/`Left`/`Right`/`StrRemove`/`InStr` count Unicode **codepoints**, not bytes (strings are UTF-8). Out-of-range arguments **clamp** rather than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` currently do ASCII-only case mapping; non-ASCII bytes pass through unchanged.
 - **Graphics / images** (cbcompiler_rs, FD-013 Batch 4): implemented on Allegro 5 (`runtime/cb_gfx.cpp`). `Image` is an opaque handle wrapping an Allegro bitmap. `Text` is **not yet implemented** (deferred to the fonts batch). `DeleteImage(img)` is an **addition not present in the legacy surface** — the legacy leaked image handles until process exit; cbcompiler_rs adds explicit cleanup (mirrors `MakeMemblock`/`DeleteMemblock`). Drawing/Cls/PutPixel act on the current render target (set via `DrawToScreen`/`DrawToImage`); `Circle`'s `d` is a diameter; `GetPixel`/`PutPixel`(packed) use 32-bit ARGB. `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap fallback when no display is open). The `DrawScreen` window-close path still calls `exit(0)` rather than a clean IR `Halt` (no runtime→interpreter trap channel yet).
+- **Input** (cbcompiler_rs, FD-013 Batch 5): implemented on Allegro 5 (`runtime/cb_input.cpp`). The keyboard surface (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the DirectInput-style scancode table are ported 1:1 from the legacy runtime. Input state advances per frame inside `DrawScreen` (which drains the event queue), so `KeyHit`/`KeyUp`/`MouseHit`/`MouseUp` and `MouseMoveX/Y/Z` are edge/delta values relative to the previous `DrawScreen`; without a window every query returns 0. The mouse button/wheel/movement functions (`MouseDown`/`MouseHit`/`MouseUp`/`MouseZ`/`MouseMoveX/Y/Z`) are **cbcompiler_rs additions not present in the legacy surface** (the legacy exposed only `KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey` plus `MouseX`/`MouseY`), defined here on Allegro's mouse model and mirroring the keyboard edge semantics. `EscapeKey` is a **pure query** — unlike the legacy "safe exit", pressing Escape does not auto-terminate the program (that would need the missing trap channel and conflicts with the clean `Halt` termination).

@@ -1,0 +1,30 @@
+// FD-013 Batch 5: input runtime, headless coverage.
+//
+// With no window open, no input events ever arrive (the keyboard/mouse event
+// sources are only registered once Screen() opens a display), so every
+// keyboard/mouse query returns its zero baseline. This proves each function
+// calls through the catalog/libffi path. Interactive behaviour (real key and
+// mouse state) is smoke-tested manually via examples/input_demo.cb.
+
+// Keyboard queries by CB scancode (1=Esc, 30=A, 200=Up arrow); EscapeKey().
+Print Str(KeyDown(1))
+Print Str(KeyUp(30))
+Print Str(KeyHit(200))
+Print Str(EscapeKey())
+
+// Unmapped / out-of-range scancodes also return 0 (no crash).
+Print Str(KeyDown(0))
+Print Str(KeyDown(999))
+
+// Mouse buttons (1=left, 2=right, 3=middle): Down/Hit/Up edge queries.
+Print Str(MouseDown(1))
+Print Str(MouseHit(2))
+Print Str(MouseUp(3))
+
+// Wheel position and per-frame movement deltas.
+Print Str(MouseZ())
+Print Str(MouseMoveX())
+Print Str(MouseMoveY())
+Print Str(MouseMoveZ())
+
+Print "done"

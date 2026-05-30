@@ -264,8 +264,19 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("screenheight",     cb_rt_screen_height),
 
     // Input
+    CB_FN("keydown",          cb_rt_key_down),
+    CB_FN("keyup",            cb_rt_key_up),
+    CB_FN("keyhit",           cb_rt_key_hit),
+    CB_FN("escapekey",        cb_rt_escape_key),
     CB_FN("mousex",           cb_rt_mouse_x),
     CB_FN("mousey",           cb_rt_mouse_y),
+    CB_FN("mousedown",        cb_rt_mouse_down),
+    CB_FN("mousehit",         cb_rt_mouse_hit),
+    CB_FN("mouseup",          cb_rt_mouse_up),
+    CB_FN("mousez",           cb_rt_mouse_z),
+    CB_FN("mousemovex",       cb_rt_mouse_move_x),
+    CB_FN("mousemovey",       cb_rt_mouse_move_y),
+    CB_FN("mousemovez",       cb_rt_mouse_move_z),
 
     // Test handles
     CB_FN("createtesthandle", cb_rt_create_test_handle),
