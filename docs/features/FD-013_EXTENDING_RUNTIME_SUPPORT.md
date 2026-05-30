@@ -1,9 +1,11 @@
 # FD-013: Extending Runtime Support
 
-**Status:** In Progress
-**Priority:** TBD
-**Effort:** High (> 4 hours) — likely split across multiple sub-FDs
-**Impact:** Brings the runtime catalog closer to feature parity with the legacy CBCompiler runtime, enabling real CoolBasic programs (graphics, input, file I/O, math, string ops, memblocks) to execute end-to-end.
+**Status:** Pending Verification
+**Priority:** High
+**Effort:** High (> 4 hours) — delivered across five batches
+**Impact:** Brings the runtime catalog from a handful of stubs to the core subsystems a real CoolBasic program needs — math, strings, system/time, graphics & images, and input — so graphical, interactive programs execute end-to-end through the interpreter.
+
+> **Scope (this FD):** the five batches below — **Math, String, System/Time, Graphics & Images, Input** — all implemented and tested on branch `fd-013-runtime`. The remaining legacy subsystems (**File I/O, Memblock, Text/fonts**) and **DLL-plugin catalog extension** are deferred to a **future "extend runtime further" FD**; File I/O in particular wants the runtime trap channel ([FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md)) first for honest error reporting. This FD was scoped down once the five core batches landed; it no longer tracks the deferred work.
 
 ## Progress
 
@@ -191,7 +193,7 @@ manual smoke demo (`examples/input_demo.cb`). `cargo test --workspace` green.
 
 ## Problem
 
-FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we don't have is the *breadth* of functions a real CoolBasic program expects. Today's catalog covers:
+FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we didn't have was the *breadth* of functions a real CoolBasic program expects. At the start of this FD the catalog covered only a handful of stubs:
 
 - System: `print`, `abs(int)`, `abs(float)`
 - Math: `sqrt`
@@ -199,44 +201,50 @@ FD-012 closed the catalog DSL story — adding a runtime function is now a one-l
 - Input: `mousex`, `mousey`
 - Test handles: `createtesthandle`, `usetesthandle`
 
-`docs/cb_runtime.md` documents the legacy surface area: graphics primitives, image handles, pixel ops, text rendering, input (keyboard/mouse/joystick), math library, string functions, file I/O, memblocks, system/window. The legacy implementation lives at `../CBCompiler/Runtime/` (sibling project) and can be used as a reference for behavior, semantics, and edge cases.
+`docs/cb_runtime.md` documents the full legacy surface area: graphics primitives, image handles, pixel ops, text rendering, input (keyboard/mouse/joystick), math library, string functions, file I/O, memblocks, system/window. The legacy implementation lives at `../CBCompiler/Runtime/` (sibling project) and is the reference for behavior, semantics, and edge cases. This FD ports the **core five subsystems** from that surface (see Scope above); the remaining ones are a separate future effort.
 
 ## Solution
 
-Port the legacy runtime in batches by subsystem, each batch following the FD-012 pattern: declare the symbol in `cb_runtime.h`, implement in a `.c` / `.cpp` TU (or here in `catalog.cpp` for trivial ones), add a `CB_FN(...)` line to `catalog_funcs[]`. New opaque handle types (`Image`, `File`, `Memblock`) follow FD-011's pointer-only convention via `type_tag<T*>` specializations and a `CbTypeDesc` entry.
+Port the legacy runtime in batches by subsystem, each batch following the FD-012 pattern: declare the symbol in `cb_runtime.h`, implement in a `.c` / `.cpp` TU (or in `catalog.cpp` for trivial ones), add a `CB_FN(...)` line to `catalog_funcs[]`. New opaque handle types (e.g. `Image`) follow FD-011's pointer-only convention via `type_tag<T*>` specializations and a `CbTypeDesc` entry.
 
-Likely batching (each could become its own sub-FD if scope warrants):
+**The five batches delivered by this FD** (details + decisions in Progress above):
 
-1. **Math** — full set from `cb_math.cpp` (`Sin`, `Cos`, `Tan`, `ATan`, `ATan2`, `Min`, `Max`, `Floor`, `Ceil`, `Pow`, `Log`, `Exp`, `Rand`, `RandSeed`, …). Pure functions, no state — cheapest first batch.
-2. **String** — `cb_string.cpp` / `lstring.*` (`Len`, `Left`, `Right`, `Mid`, `Upper`, `Lower`, `Trim`, `Replace`, `InStr`, `Str`, `Chr`, `Asc`, …). Touches the string ABI — confirm `CB_TYPE_STRING` ownership / lifetime rules before porting.
-3. **System / Time** — `cb_system.cpp` (`Timer`, `WaitKey`, `Wait`, `RND`, `Command`, …).
-4. **Graphics** — finish `gfx.c`: `Cls`, `ClsColor`, `Circle`, `Box`, `Dot`, `Text`, `Lock`/`Unlock`, `PutPixel`/`GetPixel`, `FPS`, plus the `Image` opaque-handle type from `cb_image.cpp`.
-5. **Input** — finish `input.c`: keyboard (`KeyDown`, `KeyHit`, `GetKey`), full mouse (`MouseDown`, `MouseHit`, `MouseWheel`, …), joystick.
-6. **File I/O** — new `File` opaque handle from `cb_file.cpp` / `fileinterface.cpp` (`OpenFile`, `CloseFile`, `ReadLine`, `WriteLine`, `EOF`, …).
-7. **Memblock** — new `Memblock` opaque handle from `cb_mem.cpp` / `memblock.cpp` (`MakeMEMBlock`, `PeekByte`, `PokeByte`, `PeekShort`, …).
-8. **Text rendering / fonts** — `cb_text.cpp` / `textinterface.cpp` if scoped in.
+1. **Math** ✅ — `runtime/cb_math.cpp`: trig (degrees), `Sqrt`/`Log`/`Log10`, rounding, `Min`/`Max` (int+float), `Distance`/`GetAngle`/`WrapAngle`, seedable `Rnd`/`Rand`/`Randomize`.
+2. **String** ✅ — `runtime/cb_string.cpp`: `Upper`/`Lower`/`Trim`/`Left`/`Right`/`StrRemove`/`InStr`/`Chr`/`Hex`, codepoint-aware over the v4 string ABI; string `Len` as a sema intrinsic.
+3. **System / Time** ✅ — `runtime/cb_system.cpp`: `Timer`, `Wait`, `MakeError`; `End` as a language statement lowered to an IR `Halt` terminator.
+4. **Graphics & Images** ✅ — `runtime/cb_gfx.cpp`: screen management, drawing primitives, pixel ops, and the `Image` opaque handle (`MakeImage`/`LoadImage`/`DrawImage`/…/`DeleteImage`). `Text` excluded (needs fonts).
+5. **Input** ✅ — `runtime/cb_input.cpp`: keyboard (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`, ported scancode table + edge-state machine) and a mouse surface (`MouseDown`/`MouseHit`/`MouseUp`/`MouseZ`/`MouseMoveX/Y/Z`); no joystick.
 
-Each batch needs:
-- Backend-agnostic surface: types live in `cb-ir`/`cb-sema` as catalog-loaded entries, no special-casing per function.
-- Test fixtures in `crates/cb-driver/tests/fixtures/` exercising the new calls through the interpreter (FD-010 is the reference impl per CLAUDE.md).
-- Update `docs/cb_runtime.md` if the legacy doc disagrees with what we actually expose.
+Each batch is backend-agnostic (types live in `cb-ir`/`cb-sema` as catalog-loaded entries, no per-function special-casing), has golden-output fixtures in `crates/cb-driver/tests/fixtures/programs/runtime_*`, and keeps `docs/cb_runtime.md` in sync. The interpreter dispatches all runtime calls through libffi (FD-012); only `cb_rt_print` is intrinsic-overridden for test capture — so new functions route through libffi automatically, with no Rust-side work per function (the one exception was string `Len`, which became a cross-crate intrinsic — see Batch 2).
 
-The interpreter dispatches all runtime calls through libffi (FD-012); only `cb_rt_print` is currently intrinsic-overridden for test capture. New functions get routed through libffi automatically — no Rust-side work needed per function.
+### Deferred to a future FD
+
+The remaining legacy subsystems are **out of scope** here and will be planned in a separate "extend runtime further" FD:
+
+- **File I/O** — `File` opaque handle (`OpenToRead/Write/Edit`, `ReadLine`/`WriteLine`, `EOF`, filesystem ops, directory search). Wants the runtime trap channel ([FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md)) first so open/read failures raise real errors instead of sentinels.
+- **Memblock** — `Memblock` opaque handle (`MakeMemblock`/`DeleteMemblock`, `Peek*`/`Poke*`). Self-contained; the cleanest next batch.
+- **Text / fonts** — `Text(x,y,s)` and font loading (the one graphics primitive skipped in Batch 4).
+- **`SortArray`** and any other stragglers from `docs/cb_runtime.md`.
+- **DLL-plugin catalog extension** (FD-009's `--plugin` loader), which builds on the same ABI seam as FD-015.
 
 ## Files to Create/Modify
 
+Delivered (all on branch `fd-013-runtime`):
+
 | File | Action | Purpose |
 |------|--------|---------|
-| `runtime/cb_runtime.h` | MODIFY | Add prototypes for every new `cb_rt_*` symbol, plus new opaque `Cb*` handle structs. |
-| `runtime/catalog.cpp` | MODIFY | Add `CB_FN(...)` entries in `catalog_funcs[]`; add `CbTypeDesc` entries + `type_tag<T*>` specializations for new opaque types. |
-| `runtime/cb_math.cpp` (new) | CREATE | Math functions ported from `../CBCompiler/Runtime/cb_math.cpp`. |
-| `runtime/cb_string.cpp` (new) | CREATE | String functions; needs decision on string ABI / ownership. |
-| `runtime/cb_gfx.cpp`, `cb_image.cpp` | CREATE / extend existing `gfx.c` | Finish graphics surface; Image opaque handle. |
-| `runtime/cb_input.cpp` | CREATE / extend existing `input.c` | Full keyboard + mouse + joystick. |
-| `runtime/cb_file.cpp`, `cb_mem.cpp`, `cb_text.cpp` | CREATE | File / Memblock / Text subsystems. |
-| `runtime/CMakeLists.txt` | MODIFY | Add new TUs to the build. |
-| `crates/cb-driver/tests/fixtures/runtime/*` | CREATE | One fixture per subsystem (golden-output `.cb` programs). |
-| `docs/cb_runtime.md` | MODIFY | Keep in sync as functions land; mark which are implemented. |
+| `runtime/cb_runtime.h` | MODIFY | Prototypes for every new `cb_rt_*` symbol + the `CbImage` opaque handle struct. |
+| `runtime/catalog.cpp` | MODIFY | `CB_FN(...)` entries in `catalog_funcs[]`; `CbTypeDesc` + `type_tag<CbImage*>` for the `Image` type. |
+| `runtime/cb_math.cpp` | CREATE | Math functions (Batch 1). |
+| `runtime/cb_string.cpp` | CREATE | String functions over the v4 string ABI (Batch 2). |
+| `runtime/cb_system.cpp` | CREATE | `Timer`/`Wait`/`MakeError` (Batch 3). |
+| `runtime/cb_gfx.cpp` | CREATE (from `gfx.c`) | Graphics surface + `Image` opaque handle, on Allegro 5 (Batch 4). |
+| `runtime/cb_input.cpp`, `cb_input.h` | CREATE (from `input.c`) | Keyboard + mouse; internal frame/event hooks (Batch 5). |
+| `runtime/CMakeLists.txt` | MODIFY | New TUs added to the build. |
+| `crates/cb-ir`, `cb-sema`, `cb-backend-interp` | MODIFY | `Halt` terminator + `End` (Batch 3); string `Len` intrinsic → `InstKind::StrLen` (Batch 2). Otherwise no per-function Rust work. |
+| `crates/cb-driver/tests/fixtures/programs/runtime_*.{cb,out}` | CREATE | One golden-output fixture per subsystem (`runtime_math`, `runtime_string`, `runtime_system`, `runtime_image`, `runtime_input`). |
+| `examples/bounce.cb`, `examples/input_demo.cb` | CREATE | Manual smoke demos for the window/input paths. |
+| `docs/cb_runtime.md` | MODIFY | Kept in sync as functions landed; cbcompiler_rs-specific notes recorded. |
 
 ## Verification
 
@@ -245,17 +253,22 @@ The interpreter dispatches all runtime calls through libffi (FD-012); only `cb_r
 - Compile-time DSL drift checks (FD-012): renaming a `cb_rt_*` symbol without updating its prototype is a link error.
 - Manual smoke: a small CoolBasic game (e.g., bouncing-ball demo from the legacy project) runs under `cargo run -p cb-driver -- run examples/<name>.cb`.
 
-## Open questions
+## Open questions (resolved)
 
-- String ABI: legacy runtime uses `lstring` (Pascal-style length-prefixed). Current catalog only has `CB_TYPE_STRING = const char*`. Decide ownership / lifetime before porting `cb_string.cpp`.
-- Should each subsystem be its own FD (FD-014 Math, FD-015 String, …) or one umbrella? Suggest splitting once Math lands as a proof-of-pattern.
-- LLVM backend (`cb-backend-llvm`) is still empty — does the runtime expansion happen before or after LLVM codegen exists? Per CLAUDE.md, interp is the reference, so the answer is "before is fine."
-- Which legacy dependencies (allegro, Pascal-string runtime, render targets, reference counter) carry over vs. get rewritten on top of Allegro 5 (already wired via vcpkg)?
+- **String ABI** — resolved by [FD-014](archive/FD-014_RUNTIME_STRING_ABI.md): strings flow as opaque refcounted `CbString*` (catalog ABI v4). Batch 2 built on it.
+- **One umbrella FD vs. per-subsystem** — kept as one umbrella with sub-batches; the umbrella is now capped at five batches and further subsystems get their own FD.
+- **Runtime expansion vs. LLVM codegen order** — expansion happened first; interp is the reference per CLAUDE.md, so this is fine. LLVM backend remains empty.
+- **Legacy dependencies** — rewritten on top of Allegro 5 (vcpkg) for graphics/input; math/string/system use modern C++ std facilities rather than the legacy Pascal-string runtime / render-target / reference-counter machinery.
+
+No open questions remain for the in-scope work. Cross-cutting follow-ups (the runtime trap channel; File I/O / Memblock / Text / plugins) are tracked in [FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md) and the future extend-runtime FD.
 
 ## Related
 
 - [`docs/cb_runtime.md`](../cb_runtime.md) — legacy runtime surface reference.
 - `../CBCompiler/Runtime/` — sibling project, original implementation.
 - [FD-009](archive/FD-009_RUNTIME_LIBRARY.md) — runtime library architecture (catalog ABI v1).
-- [FD-011](archive/FD-011_RUNTIME_CUSTOM_TYPES.md) — opaque handle types (catalog ABI v2).
+- [FD-011](archive/FD-011_RUNTIME_CUSTOM_TYPES.md) — opaque handle types (catalog ABI v2); first real use was the `Image` handle in Batch 4.
 - [FD-012](archive/FD-012_CATALOG_CPP_TEMPLATE_DSL.md) — catalog DSL via C++ templates + libffi dispatch (catalog ABI v3).
+- [FD-014](archive/FD-014_RUNTIME_STRING_ABI.md) — opaque `CbString*` ABI (v4); Batch 2 built on it.
+- [FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md) — runtime trap channel; prerequisite for the deferred File I/O batch.
+- **Future "extend runtime further" FD** (not yet created) — File I/O, Memblock, Text/fonts, `SortArray`, and DLL-plugin catalog extension.

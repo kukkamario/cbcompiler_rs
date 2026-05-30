@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-013](FD-013_EXTENDING_RUNTIME_SUPPORT.md) | Extending Runtime Support | In Progress | High | TBD |
+| [FD-013](FD-013_EXTENDING_RUNTIME_SUPPORT.md) | Extending Runtime Support | Pending Verification | High | High |
 | [FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md) | Runtime Trap Channel | Open | Medium | High |
 
 ## Completed
