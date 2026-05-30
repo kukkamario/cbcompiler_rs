@@ -1,0 +1,39 @@
+// Trigonometry is in degrees.
+Print Str(Sin(0.0))
+Print Str(Sin(90.0))
+Print Str(Cos(0.0))
+Print Str(Tan(0.0))
+Print Str(ASin(1.0))
+Print Str(ACos(1.0))
+Print Str(ATan(0.0))
+
+// General math.
+Print Str(Sqrt(16.0))
+Print Str(Log(1.0))
+Print Str(Log10(100.0))
+Print Str(RoundUp(2.3))
+Print Str(RoundDown(2.7))
+
+// Min / Max — int and float overloads.
+Print Str(Max(3, 7))
+Print Str(Min(3, 7))
+Print Str(Max(3.5, 2.5))
+Print Str(Min(3.5, 2.5))
+
+// Geometry.
+Print Str(Distance(0.0, 0.0, 3.0, 4.0))
+Print Str(WrapAngle(370.0))
+Print Str(WrapAngle(-10.0))
+Print Str(GetAngle(0.0, 0.0, 0.0, 1.0))
+
+// Random — values are non-deterministic, so assert ranges instead of
+// golden values. Randomize seeds the generator first.
+Randomize(12345)
+i = Rand(10)
+If i >= 0 And i < 10 Then Print "rand_ok"
+j = Rand(100, 110)
+If j >= 100 And j < 110 Then Print "rand_range_ok"
+f# = Rnd(5.0)
+If f# >= 0.0 And f# < 5.0 Then Print "rnd_ok"
+g# = Rnd(2.0, 3.0)
+If g# >= 2.0 And g# < 3.0 Then Print "rnd_range_ok"

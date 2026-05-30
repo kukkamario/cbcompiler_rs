@@ -127,3 +127,8 @@ fn if_elseif_else() {
 fn runtime_sqrt() {
     run("runtime_sqrt");
 }
+
+#[test]
+fn runtime_math() {
+    run("runtime_math");
+}

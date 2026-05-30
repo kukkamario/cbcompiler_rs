@@ -1,9 +1,40 @@
 # FD-013: Extending Runtime Support
 
-**Status:** Open
+**Status:** In Progress
 **Priority:** TBD
 **Effort:** High (> 4 hours) — likely split across multiple sub-FDs
 **Impact:** Brings the runtime catalog closer to feature parity with the legacy CBCompiler runtime, enabling real CoolBasic programs (graphics, input, file I/O, math, string ops, memblocks) to execute end-to-end.
+
+## Progress
+
+### Batch 1 — Math ✅ (branch `fd-013-runtime-math`)
+
+Full math surface ported to `runtime/cb_math.cpp` and registered in `catalog.cpp`:
+`Sin`, `Cos`, `Tan`, `ASin`, `ACos`, `ATan`, `Sqrt` (moved here from `catalog.cpp`),
+`Log`, `Log10`, `RoundUp`, `RoundDown`, `Max`/`Min` (int + float overloads),
+`Distance`, `GetAngle`, `WrapAngle`, `Rnd`/`Rand` (1- and 2-arg overloads), `Randomize`.
+
+Decisions made while porting (resolving the proof-of-pattern questions):
+- **Double, not float.** CB `Float` is f64 at the interpreter boundary, so every
+  math fn uses `double` (legacy used 32-bit `float`, which would lose precision
+  against the wider ABI). Matches the existing `cb_rt_sqrt`/`cb_rt_line` convention.
+- **Degrees.** Trig functions take/return degrees (CoolBasic quirk), preserved
+  from legacy via deg↔rad conversion.
+- **Overloads work as-is.** Sema's existing arity+exact-type overload resolution
+  (the `abs` precedent) handles `Max`/`Min`/`Rnd`/`Rand` with no Rust-side changes —
+  just multiple `CB_FN` entries sharing a CB name.
+- **Modernized over the legacy port:** PI from `std::numbers::pi` (not a literal);
+  randomness from a seedable `std::mt19937_64` + `std::uniform_*_distribution`
+  (no modulo bias / short period of legacy `rand() % n`). Fixed default seed keeps
+  programs reproducible until `Randomize` is called, matching legacy determinism.
+
+Tested via `crates/cb-driver/tests/fixtures/programs/runtime_math.{cb,out}` (golden
+output for deterministic fns; range assertions for the non-deterministic random fns).
+`cargo test --workspace` green.
+
+The Math batch validates the per-subsystem pattern. Per the open question below,
+remaining subsystems (String, System/Time, Graphics, Input, File, Memblock, Text)
+should each become their own sub-FD.
 
 ## Problem
 

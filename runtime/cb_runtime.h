@@ -121,8 +121,30 @@ int32_t cb_rt_string_test_refcount(const CbString* s);
 
 extern const CbStringApi cb_runtime_string_api;
 
-/* Math */
+/* Math (implemented in cb_math.cpp). Trig is in DEGREES. */
+double cb_rt_sin(double deg);
+double cb_rt_cos(double deg);
+double cb_rt_tan(double deg);
+double cb_rt_asin(double x);
+double cb_rt_acos(double x);
+double cb_rt_atan(double x);
 double cb_rt_sqrt(double x);
+double cb_rt_log(double x);
+double cb_rt_log10(double x);
+int32_t cb_rt_round_up(double x);
+int32_t cb_rt_round_down(double x);
+int32_t cb_rt_max_int(int32_t a, int32_t b);
+int32_t cb_rt_min_int(int32_t a, int32_t b);
+double cb_rt_max_float(double a, double b);
+double cb_rt_min_float(double a, double b);
+double cb_rt_distance(double x1, double y1, double x2, double y2);
+double cb_rt_get_angle(double x1, double y1, double x2, double y2);
+double cb_rt_wrap_angle(double a);
+double cb_rt_rnd_max(double max);
+double cb_rt_rnd_range(double min, double max);
+int32_t cb_rt_rand_max(int32_t max);
+int32_t cb_rt_rand_range(int32_t min, int32_t max);
+void cb_rt_randomize(int32_t seed);
 
 /* Graphics */
 void cb_rt_screen(int32_t w, int32_t h);

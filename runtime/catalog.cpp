@@ -61,9 +61,7 @@ extern "C" double cb_rt_abs_float(double x) {
     return x < 0.0 ? -x : x;
 }
 
-extern "C" double cb_rt_sqrt(double x) {
-    return std::sqrt(x);
-}
+// Math functions live in cb_math.cpp; their prototypes are in cb_runtime.h.
 
 // ─── Template DSL ─────────────────────────────────────────────────────
 
@@ -171,8 +169,31 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("abs",              cb_rt_abs_int),
     CB_FN("abs",              cb_rt_abs_float),
 
-    // Math
+    // Math (cb_math.cpp). Trig is in degrees. Min/Max/Rnd/Rand are
+    // overloaded; sema resolves by argument type and arity.
+    CB_FN("sin",              cb_rt_sin),
+    CB_FN("cos",              cb_rt_cos),
+    CB_FN("tan",              cb_rt_tan),
+    CB_FN("asin",             cb_rt_asin),
+    CB_FN("acos",             cb_rt_acos),
+    CB_FN("atan",             cb_rt_atan),
     CB_FN("sqrt",             cb_rt_sqrt),
+    CB_FN("log",              cb_rt_log),
+    CB_FN("log10",            cb_rt_log10),
+    CB_FN("roundup",          cb_rt_round_up),
+    CB_FN("rounddown",        cb_rt_round_down),
+    CB_FN("max",              cb_rt_max_int),
+    CB_FN("max",              cb_rt_max_float),
+    CB_FN("min",              cb_rt_min_int),
+    CB_FN("min",              cb_rt_min_float),
+    CB_FN("distance",         cb_rt_distance),
+    CB_FN("getangle",         cb_rt_get_angle),
+    CB_FN("wrapangle",        cb_rt_wrap_angle),
+    CB_FN("rnd",              cb_rt_rnd_max),
+    CB_FN("rnd",              cb_rt_rnd_range),
+    CB_FN("rand",             cb_rt_rand_max),
+    CB_FN("rand",             cb_rt_rand_range),
+    CB_FN("randomize",        cb_rt_randomize),
 
     // Graphics
     CB_FN("screen",           cb_rt_screen),
