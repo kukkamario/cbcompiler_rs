@@ -1,6 +1,7 @@
 # FD-013: Extending Runtime Support
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-05-30
 **Priority:** High
 **Effort:** High (> 4 hours) — delivered across five batches
 **Impact:** Brings the runtime catalog from a handful of stubs to the core subsystems a real CoolBasic program needs — math, strings, system/time, graphics & images, and input — so graphical, interactive programs execute end-to-end through the interpreter.
