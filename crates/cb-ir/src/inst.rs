@@ -39,6 +39,9 @@ pub enum InstKind {
 
     // ── Compiler Intrinsics ─────────────────────────────────────────
     Len { array: Reg, dim: Option<Reg> },
+    /// `Len(s$)` — length of a string in Unicode codepoints. Distinct from
+    /// `Len` (arrays) because the operand and length semantics differ.
+    StrLen { s: Reg },
     ConvertExplicit { value: Reg, target: IrType },
     Convert { value: Reg, from: IrType, to: IrType },
 

@@ -121,6 +121,22 @@ int32_t cb_rt_string_test_refcount(const CbString* s);
 
 extern const CbStringApi cb_runtime_string_api;
 
+/* String library (cb_string.cpp). Character indices/counts are 1-based and
+   measured in Unicode codepoints; out-of-range arguments clamp (never abort).
+   String-returning functions yield an owning CbString* (refcount 1, or the
+   immortal empty sentinel). String Len is handled by a sema intrinsic, not
+   here. */
+CbString* cb_rt_str_upper(const CbString* s);
+CbString* cb_rt_str_lower(const CbString* s);
+CbString* cb_rt_str_trim(const CbString* s);
+CbString* cb_rt_str_left(const CbString* s, int32_t n);
+CbString* cb_rt_str_right(const CbString* s, int32_t n);
+CbString* cb_rt_str_remove(const CbString* s, int32_t pos, int32_t count);
+int32_t cb_rt_str_instr(const CbString* s, const CbString* find);
+int32_t cb_rt_str_instr_from(const CbString* s, const CbString* find, int32_t start);
+CbString* cb_rt_chr(int32_t code);
+CbString* cb_rt_hex(int32_t value);
+
 /* Math (implemented in cb_math.cpp). Trig is in DEGREES. */
 double cb_rt_sin(double deg);
 double cb_rt_cos(double deg);

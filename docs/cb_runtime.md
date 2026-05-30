@@ -277,3 +277,4 @@ String indices are **1-based** in CoolBasic.
 - **Coordinate system**: Graphics use top-left origin, Y increases downward.
 - **Angles**: All trigonometric functions use degrees, not radians.
 - **1-based indexing**: String positions (InStr, Left, Right, StrRemove) are 1-based per CoolBasic convention.
+- **String character semantics** (cbcompiler_rs): `Len`/`Left`/`Right`/`StrRemove`/`InStr` count Unicode **codepoints**, not bytes (strings are UTF-8). Out-of-range arguments **clamp** rather than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` currently do ASCII-only case mapping; non-ASCII bytes pass through unchanged.

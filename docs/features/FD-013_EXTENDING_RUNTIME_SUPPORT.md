@@ -36,6 +36,37 @@ The Math batch validates the per-subsystem pattern. Per the open question below,
 remaining subsystems (String, System/Time, Graphics, Input, File, Memblock, Text)
 should each become their own sub-FD.
 
+### Batch 2 — String ✅ (branch `fd-013-runtime-string`)
+
+Documented string library ported to `runtime/cb_string.cpp` (extending the v4 ABI
+TU) and registered in `catalog.cpp`: `Upper`, `Lower`, `Trim`, `Left`, `Right`,
+`StrRemove`, `InStr` (2- and 3-arg overloads), `Chr`, `Hex`, plus string `Len`.
+`Str` stays a sema intrinsic; `Mid`/`Replace`/`Asc` are out of scope (absent from
+`docs/cb_runtime.md` and legacy `cb_string.cpp`).
+
+Decisions (the FD-013 string ABI open question, now resolved against the v4 ABI):
+- **Codepoint semantics.** The legacy ran on UTF-32 (O(1) char indexing); the v4 ABI
+  stores UTF-8, so `Left`/`Right`/`StrRemove`/`InStr`/`Len` walk the bytes to map a
+  1-based character index ↔ byte offset (new helpers `cp_len` / `byte_offset_of_cp`
+  in `cb_string.cpp`). CB strings are UTF-8 (§3.1) and the docs count "characters".
+- **Clamp, never abort.** Legacy `Left`/`Right`/`StrRemove` called a fatal `error()`
+  on out-of-range args; there is no runtime→interpreter trap channel, so they
+  saturate instead (`Left("hi",5)`→`"hi"`, `n<=0`→`""`). Building a trap mechanism is
+  deferred as a separate cross-cutting concern.
+- **ASCII-only casing** for `Upper`/`Lower` (bytes ≥0x80 pass through untouched, so
+  multibyte sequences survive). Full Unicode casing needs case tables — out of scope.
+
+String `Len` was the one cross-crate change: the array-only `Len` intrinsic now also
+accepts a `String` (`cb-sema` check + lower), lowering to a new `InstKind::StrLen`
+(`cb-ir`, with printer/verifier arms) which the interpreter answers by codepoint-
+counting the handle's bytes in Rust (`cb-backend-interp`). The future LLVM backend
+will instead emit a runtime char-length call; interp computing it directly is fine as
+the reference impl.
+
+Tested via `crates/cb-driver/tests/fixtures/programs/runtime_string.{cb,out}` (ASCII,
+clamp, and multibyte/codepoint cases — e.g. `Len("äbc")`=3, `InStr("äbc","b")`=2) plus
+sema unit tests for string `Len`. `cargo test --workspace` green.
+
 ## Problem
 
 FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we don't have is the *breadth* of functions a real CoolBasic program expects. Today's catalog covers:

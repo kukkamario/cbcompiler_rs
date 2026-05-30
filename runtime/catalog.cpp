@@ -195,6 +195,19 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("rand",             cb_rt_rand_range),
     CB_FN("randomize",        cb_rt_randomize),
 
+    // String (cb_string.cpp). Codepoint-based, 1-based, clamping. `Str`/`Len`
+    // are sema intrinsics, not registered here. InStr is overloaded (2/3 args).
+    CB_FN("upper",            cb_rt_str_upper),
+    CB_FN("lower",            cb_rt_str_lower),
+    CB_FN("trim",             cb_rt_str_trim),
+    CB_FN("left",             cb_rt_str_left),
+    CB_FN("right",            cb_rt_str_right),
+    CB_FN("strremove",        cb_rt_str_remove),
+    CB_FN("instr",            cb_rt_str_instr),
+    CB_FN("instr",            cb_rt_str_instr_from),
+    CB_FN("chr",              cb_rt_chr),
+    CB_FN("hex",              cb_rt_hex),
+
     // Graphics
     CB_FN("screen",           cb_rt_screen),
     CB_FN("drawscreen",       cb_rt_drawscreen),

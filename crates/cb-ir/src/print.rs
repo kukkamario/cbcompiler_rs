@@ -194,6 +194,9 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
                 write!(out, ", {d}").unwrap();
             }
         }
+        InstKind::StrLen { s } => {
+            write!(out, "strlen {s}").unwrap();
+        }
         InstKind::ConvertExplicit { value, target } => {
             write!(
                 out,

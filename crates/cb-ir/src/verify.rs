@@ -154,6 +154,7 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
                 check(*d);
             }
         }
+        InstKind::StrLen { s } => check(*s),
         InstKind::ConvertExplicit { value, .. } | InstKind::Convert { value, .. } => {
             check(*value);
         }

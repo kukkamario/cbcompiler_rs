@@ -965,22 +965,33 @@ impl<'a> Checker<'a> {
                     ));
                     return Some(Type::Error);
                 }
-                let arr_ty = self.check_expr(args[0]);
-                if !matches!(arr_ty, Type::Array { .. }) && !arr_ty.is_error() {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_TYPE_MISMATCH,
-                        "first argument to Len must be an array",
-                        Label::new(self.arena.span_of(args[0])),
-                    ));
-                }
-                if args.len() == 2 {
-                    let dim_ty = self.check_expr(args[1]);
-                    if !dim_ty.is_integer() && !dim_ty.is_error() {
+                let arg0_ty = self.check_expr(args[0]);
+                if matches!(arg0_ty, Type::String) {
+                    // Len(s$) — codepoint length of a string. No dimension arg.
+                    if args.len() == 2 {
+                        self.diagnostics.push(Diagnostic::error(
+                            E_WRONG_ARG_COUNT,
+                            "Len of a string takes exactly 1 argument",
+                            Label::new(span),
+                        ));
+                    }
+                } else {
+                    if !matches!(arg0_ty, Type::Array { .. }) && !arg0_ty.is_error() {
                         self.diagnostics.push(Diagnostic::error(
                             E_TYPE_MISMATCH,
-                            "second argument to Len must be an integer",
-                            Label::new(self.arena.span_of(args[1])),
+                            "first argument to Len must be an array or a string",
+                            Label::new(self.arena.span_of(args[0])),
                         ));
+                    }
+                    if args.len() == 2 {
+                        let dim_ty = self.check_expr(args[1]);
+                        if !dim_ty.is_integer() && !dim_ty.is_error() {
+                            self.diagnostics.push(Diagnostic::error(
+                                E_TYPE_MISMATCH,
+                                "second argument to Len must be an integer",
+                                Label::new(self.arena.span_of(args[1])),
+                            ));
+                        }
                     }
                 }
                 Some(Type::Int)
@@ -2120,6 +2131,24 @@ mod tests {
     #[test]
     fn pass2_intrinsic_len_wrong_arg_count() {
         let result = analyze_src("Len()\n");
+        assert!(
+            error_codes(&result).contains(&"E0305"),
+            "expected E0305, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_intrinsic_len_on_string() {
+        // Len(s$) is valid and yields an Integer (FD-013 Batch 2).
+        let result = analyze_src("Dim n As Integer\nn = Len(\"hello\")\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_intrinsic_len_string_rejects_dim() {
+        // The array dimension argument is meaningless for a string operand.
+        let result = analyze_src("Len(\"hi\", 1)\n");
         assert!(
             error_codes(&result).contains(&"E0305"),
             "expected E0305, got {:?}",

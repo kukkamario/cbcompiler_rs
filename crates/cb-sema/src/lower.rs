@@ -1028,6 +1028,12 @@ impl<'a> Lowerer<'a> {
 
             match name_str.as_str() {
                 "len" => {
+                    // Len(s$) lowers to StrLen; Len(arr[, dim]) to Len. Mirror
+                    // the operand-type probe used for string binops above.
+                    if self.types.get(args[0]).is_some_and(|t| matches!(t, Type::String)) {
+                        let s = self.lower_expr(args[0]);
+                        return self.emit(InstKind::StrLen { s }, span);
+                    }
                     let arr = self.lower_expr(args[0]);
                     let dim = if args.len() > 1 {
                         Some(self.lower_expr(args[1]))

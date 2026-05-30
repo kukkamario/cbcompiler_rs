@@ -693,6 +693,28 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
+            InstKind::StrLen { s } => {
+                // Codepoint count of a UTF-8 string: every byte that is not a
+                // UTF-8 continuation byte (0b10xxxxxx) begins a new codepoint.
+                // Computed here in Rust as the reference impl; the future LLVM
+                // backend will instead emit a runtime char-length call.
+                let frame = self.call_stack.last().unwrap();
+                let val = frame.registers[s.0 as usize].clone();
+                match val {
+                    Value::String(handle) => {
+                        let count = handle
+                            .as_bytes()
+                            .iter()
+                            .filter(|b| (*b & 0xC0) != 0x80)
+                            .count();
+                        Ok(Value::Int(count as i32))
+                    }
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("strlen on non-string".into()),
+                        span,
+                    )),
+                }
+            }
 
             // ── Indirect calls ─────────────────────────────────────
             InstKind::CallIndirect { callee, args } => {

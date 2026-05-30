@@ -132,3 +132,8 @@ fn runtime_sqrt() {
 fn runtime_math() {
     run("runtime_math");
 }
+
+#[test]
+fn runtime_string() {
+    run("runtime_string");
+}

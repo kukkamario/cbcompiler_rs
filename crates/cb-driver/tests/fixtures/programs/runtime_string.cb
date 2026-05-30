@@ -1,0 +1,36 @@
+// Case mapping (ASCII).
+Print Upper("Hello, World!")
+Print Lower("Hello, World!")
+
+// Trim — bracket-wrapped so the stripped whitespace is visible.
+Print "[" + Trim("  spaced out  ") + "]"
+
+// Left / Right with clamping.
+Print Left("abcdef", 3)
+Print Left("hi", 9)
+Print "[" + Left("hi", 0) + "]"
+Print Right("abcdef", 2)
+Print Right("hi", 9)
+
+// StrRemove (1-based pos, codepoint count), with clamp past the end.
+Print StrRemove("abcdef", 2, 3)
+Print StrRemove("abc", 2, 99)
+
+// InStr — found, not found, and a start offset.
+Print Str(InStr("hello", "ll"))
+Print Str(InStr("hello", "z"))
+Print Str(InStr("abcabc", "bc", 4))
+
+// Chr / Hex.
+Print Chr(65)
+Print Hex(255)
+
+// Len of a string (codepoints).
+Print Str(Len("hello"))
+
+// Multibyte UTF-8 ("ä" is one codepoint, two bytes) proves codepoint
+// semantics rather than byte counting.
+Print Str(Len("äbc"))
+Print Left("äbc", 2)
+Print Right("äbc", 1)
+Print Str(InStr("äbc", "b"))
