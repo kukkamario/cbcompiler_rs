@@ -7,7 +7,7 @@
 
 ## Progress
 
-### Batch 1 — Math ✅ (branch `fd-013-runtime-math`)
+### Batch 1 — Math ✅ (branch `fd-013-runtime`)
 
 Full math surface ported to `runtime/cb_math.cpp` and registered in `catalog.cpp`:
 `Sin`, `Cos`, `Tan`, `ASin`, `ACos`, `ATan`, `Sqrt` (moved here from `catalog.cpp`),
@@ -36,7 +36,7 @@ The Math batch validates the per-subsystem pattern. Per the open question below,
 remaining subsystems (String, System/Time, Graphics, Input, File, Memblock, Text)
 should each become their own sub-FD.
 
-### Batch 2 — String ✅ (branch `fd-013-runtime-string`)
+### Batch 2 — String ✅ (branch `fd-013-runtime`)
 
 Documented string library ported to `runtime/cb_string.cpp` (extending the v4 ABI
 TU) and registered in `catalog.cpp`: `Upper`, `Lower`, `Trim`, `Left`, `Right`,
