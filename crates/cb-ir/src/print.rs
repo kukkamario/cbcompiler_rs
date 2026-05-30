@@ -291,6 +291,9 @@ fn print_terminator(out: &mut String, term: &Terminator) {
         Terminator::Return { value: None } => {
             out.push_str("return");
         }
+        Terminator::Halt { code } => {
+            write!(out, "halt {code}").unwrap();
+        }
         Terminator::Trap(kind) => {
             let name = match kind {
                 TrapKind::NullDeref => "null_deref",

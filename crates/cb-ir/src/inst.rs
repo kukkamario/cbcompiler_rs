@@ -121,6 +121,12 @@ pub enum Terminator {
     Return {
         value: Option<Reg>,
     },
+    /// Terminate the whole program with the given process exit code. Lowered
+    /// from the `End` statement (code 0) and `MakeError` (code 1). Distinct
+    /// from `Return` (leaves one function) — `Halt` stops execution entirely.
+    Halt {
+        code: i32,
+    },
     Trap(TrapKind),
 }
 

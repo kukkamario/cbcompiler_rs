@@ -234,6 +234,10 @@ pub enum Stmt {
         count: Option<u32>,
     },
     Continue,
+    /// `End` — terminate the whole program (`cb_runtime.md` §System). Lowered
+    /// to an IR `Halt(0)` terminator. Distinct from the block closers
+    /// (`End If`/`EndFunction`/…), which the block parsers consume directly.
+    End,
     Include {
         path: NodeId,
     },

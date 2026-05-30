@@ -99,7 +99,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
-    pub fn run(&mut self) -> Result<(), InterpError> {
+    /// Run the program. `Ok(code)` is the process exit code (0 for normal
+    /// completion / `End`, the `MakeError` code for an aborting program);
+    /// `Err` is a genuine interpreter trap or internal error.
+    pub fn run(&mut self) -> Result<i32, InterpError> {
         let main_id = self.find_main()?;
         let body_index = match &self.program.func_table[main_id.0 as usize].kind {
             FuncKind::UserDefined { body_index } => *body_index,
@@ -171,7 +174,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         Ok(())
     }
 
-    fn exec_loop(&mut self) -> Result<(), InterpError> {
+    fn exec_loop(&mut self) -> Result<i32, InterpError> {
         loop {
             let frame = self.call_stack.last().unwrap();
             let func = &self.program.functions[frame.body_index];
@@ -259,7 +262,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             .push((old_frame.registers, old_frame.locals));
 
                         if self.call_stack.is_empty() {
-                            return Ok(());
+                            return Ok(0);
                         }
 
                         if let Some(reg) = return_reg {
@@ -270,6 +273,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             }
                             caller.registers[idx] = ret_val;
                         }
+                    }
+                    Some(Terminator::Halt { code }) => {
+                        // `End` / `MakeError`: stop the whole program cleanly.
+                        // Any side effect (MakeError's stderr message) has
+                        // already run as an ordinary instruction in this block.
+                        return Ok(code);
                     }
                     Some(Terminator::Trap(kind)) => {
                         self.observer.on_trap(

@@ -209,6 +209,7 @@ fn format_stmt(s: &Stmt) -> String {
             None => "Break".to_string(),
         },
         Stmt::Continue => "Continue".to_string(),
+        Stmt::End => "End".to_string(),
         Stmt::Include { .. } => "Include".to_string(),
         Stmt::Delete { .. } => "Delete".to_string(),
         Stmt::Error => "Error".to_string(),

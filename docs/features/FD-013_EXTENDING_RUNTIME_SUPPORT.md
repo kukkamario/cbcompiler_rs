@@ -67,6 +67,40 @@ Tested via `crates/cb-driver/tests/fixtures/programs/runtime_string.{cb,out}` (A
 clamp, and multibyte/codepoint cases — e.g. `Len("äbc")`=3, `InStr("äbc","b")`=2) plus
 sema unit tests for string `Len`. `cargo test --workspace` green.
 
+### Batch 3 — System/Time ✅ (branch `fd-013-runtime`)
+
+Documented System/Time surface (`docs/cb_runtime.md:245-248`): **Timer, Wait, End,
+MakeError**. `Timer`/`Wait`/`MakeError`'s message land in a new `runtime/cb_system.cpp`;
+`End` is a language statement, not a runtime call.
+
+Decisions (confirmed with user):
+- **Timer = wall-clock** via `std::chrono::steady_clock`, lazy epoch on first call.
+  The legacy used `clock()` (CPU time), which drifts from wall time under load — wrong
+  for a game loop. Returns `Int` ms.
+- **Wait** via `std::this_thread::sleep_for`; `ms <= 0` is a no-op. (Legacy used
+  `al_rest`; std avoids dragging Allegro init into a pure sleep.)
+- **Clean IR `Halt` terminator** for termination (not C `exit()`). `End` → `Halt(0)`;
+  `MakeError(msg)` → a normal call to `cb_rt_make_error` (writes `msg` to stderr) then
+  `Halt(1)`. The interpreter stops cleanly and returns the process exit code; nothing
+  calls `exit()` from inside a libffi call. Backend-agnostic and observable.
+
+Cross-crate work for the termination machinery:
+- `cb-ir`: new `Terminator::Halt { code }` (+ printer/verifier arms).
+- `cb-frontend`: `Stmt::End` + a guarded `Kw::End` parser arm (a `Kw::End` followed by
+  a block keyword stays a split closer — `End If` etc. — and falls through to the
+  existing stray-closer recovery); ast-printer arm.
+- `cb-sema`: `Stmt::End` lowers to `Halt(0)`; `MakeError` is a normal catalog
+  `RuntimeFn` (String→Void), recognized at lowering by its resolved symbol to append
+  `Halt(1)` (reuses existing arg-checking — no special sema).
+- `cb-backend-interp` + `cb-driver`: `interpret`/`run`/`exec_loop` now return
+  `Result<i32, _>` (the process exit code); `Halt{code}` → `Ok(code)`; the driver maps
+  `Ok(code)` → `ExitCode::from(code)`, keeping `Err` for genuine traps/internal errors.
+
+Tested via `runtime_system.{cb,out}` (Timer non-negative/monotonic asserted as booleans,
+`Wait(1)`, `End` truncates output), `cli.rs` (`MakeError` → stderr + exit 1; `End` →
+exit 0), and parser unit tests (bare `End` → `Stmt::End`; stray `End If` still
+diagnoses). `cargo test --workspace` green.
+
 ## Problem
 
 FD-012 closed the catalog DSL story — adding a runtime function is now a one-line `CB_FN(...)` entry. What we don't have is the *breadth* of functions a real CoolBasic program expects. Today's catalog covers:

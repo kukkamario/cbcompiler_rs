@@ -137,3 +137,8 @@ fn runtime_math() {
 fn runtime_string() {
     run("runtime_string");
 }
+
+#[test]
+fn runtime_system() {
+    run("runtime_system");
+}

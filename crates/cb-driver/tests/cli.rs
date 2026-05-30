@@ -8,6 +8,7 @@
 use std::fs;
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use tempfile::{TempDir, tempdir};
 
@@ -186,6 +187,40 @@ fn runtime_print_typechecks_and_lowers() {
         .success()
         .stdout(contains("call print"))
         .stdout(contains("const_string \"hello world\""));
+}
+
+#[test]
+fn make_error_writes_stderr_and_exits_one() {
+    // `MakeError(msg)` writes the message to stderr and terminates with a
+    // non-zero exit code; the statement after it must not run.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "err.cb",
+        "Print \"before\"\nMakeError(\"boom happened\")\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("before"))
+        .stdout(contains("after").not())
+        .stderr(contains("boom happened"));
+}
+
+#[test]
+fn end_statement_exits_zero() {
+    // A bare `End` terminates cleanly (exit 0); code after it does not run.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "end.cb", "Print \"hi\"\nEnd\nPrint \"unreachable\"\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("hi"))
+        .stdout(contains("unreachable").not());
 }
 
 #[test]

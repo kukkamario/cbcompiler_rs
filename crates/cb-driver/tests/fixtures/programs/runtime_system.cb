@@ -1,0 +1,11 @@
+// Timer is non-deterministic, so assert invariants (non-negative, monotonic)
+// as booleans rather than golden values.
+If Timer() >= 0 Then Print "timer_nonneg"
+t = Timer()
+Wait(1)
+If Timer() >= t Then Print "timer_monotonic"
+
+// End terminates the program: the line after it must never run.
+Print "before_end"
+End
+Print "after_end"

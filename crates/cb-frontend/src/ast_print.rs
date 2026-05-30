@@ -186,6 +186,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             | Stmt::Label { .. }
             | Stmt::Break { .. }
             | Stmt::Continue
+            | Stmt::End
             | Stmt::Error => {}
         },
         Node::TypeExpr(t) => match t {
@@ -262,6 +263,7 @@ fn stmt_variant_name(s: &Stmt) -> &'static str {
         Stmt::Label { .. } => "Label",
         Stmt::Break { .. } => "Break",
         Stmt::Continue => "Continue",
+        Stmt::End => "End",
         Stmt::Include { .. } => "Include",
         Stmt::Delete { .. } => "Delete",
         Stmt::Error => "Error",

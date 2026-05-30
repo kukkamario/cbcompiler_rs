@@ -1310,6 +1310,7 @@ impl<'a> Checker<'a> {
             | Node::Stmt(Stmt::FieldDecl { .. })
             | Node::Stmt(Stmt::Break { .. })
             | Node::Stmt(Stmt::Continue)
+            | Node::Stmt(Stmt::End)
             | Node::Stmt(Stmt::Include { .. })
             | Node::Stmt(Stmt::Error) => {}
             _ => {}

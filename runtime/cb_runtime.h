@@ -137,6 +137,14 @@ int32_t cb_rt_str_instr_from(const CbString* s, const CbString* find, int32_t st
 CbString* cb_rt_chr(int32_t code);
 CbString* cb_rt_hex(int32_t value);
 
+/* System / Time (cb_system.cpp). `End` is not a runtime function — it is a
+   language statement lowered to an IR `Halt` terminator. `MakeError` only
+   writes its message to stderr here; the lowerer appends `Halt(1)` to
+   terminate. */
+int32_t cb_rt_timer(void);
+void cb_rt_wait(int32_t ms);
+void cb_rt_make_error(const CbString* msg);
+
 /* Math (implemented in cb_math.cpp). Trig is in DEGREES. */
 double cb_rt_sin(double deg);
 double cb_rt_cos(double deg);

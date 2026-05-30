@@ -169,6 +169,13 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("abs",              cb_rt_abs_int),
     CB_FN("abs",              cb_rt_abs_float),
 
+    // System / Time (cb_system.cpp). `End` is a language statement (IR Halt),
+    // not registered here. `makeerror` prints its message; the lowerer appends
+    // the terminating Halt.
+    CB_FN("timer",            cb_rt_timer),
+    CB_FN("wait",             cb_rt_wait),
+    CB_FN("makeerror",        cb_rt_make_error),
+
     // Math (cb_math.cpp). Trig is in degrees. Min/Max/Rnd/Rand are
     // overloaded; sema resolves by argument type and arity.
     CB_FN("sin",              cb_rt_sin),

@@ -940,6 +940,14 @@ impl<'t> Parser<'t> {
                 Kw::Continue => self.parse_continue(),
                 Kw::Delete => self.parse_delete(),
 
+                // Bare `End` (terminate the program). A split block closer
+                // (`End If`/`End Function`/…) is NOT a statement — the guard
+                // lets it fall through to the stray-closer error below; block
+                // parsers consume their own closers before reaching here.
+                Kw::End if split_end_to_joined(self.cursor.peek_n(1)).is_none() => {
+                    self.parse_end()
+                }
+
                 // Block statements.
                 Kw::If => self.parse_if(),
                 Kw::While => self.parse_while(),
@@ -1305,6 +1313,14 @@ impl<'t> Parser<'t> {
         let span = self.cursor.bump().span;
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(Node::Stmt(Stmt::Continue), span))
+    }
+
+    /// Parse a bare `End` statement (terminate the program). The caller's
+    /// match guard has already ruled out the split block-closer forms.
+    fn parse_end(&mut self) -> Result<NodeId, ParseError> {
+        let span = self.cursor.bump().span;
+        self.consume_stmt_sep_or_terminator()?;
+        Ok(self.alloc(Node::Stmt(Stmt::End), span))
     }
 
     /// Parse `Delete <expr>` (§3.3). The operand is parsed as a full
@@ -5105,6 +5121,29 @@ mod decl_tests {
             "expected diagnostic for non-Field in Type body"
         );
         assert!(matches!(stmt_of(&r.arena, r.program[0]), Stmt::Type { .. }));
+    }
+
+    #[test]
+    fn bare_end_is_terminate_statement() {
+        // A standalone `End` parses as the terminate-program statement, not a
+        // stray block closer.
+        let src = "Print \"hi\"\nEnd\n";
+        let r = parse_src(src);
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        assert!(matches!(stmt_of(&r.arena, r.program[1]), Stmt::End));
+    }
+
+    #[test]
+    fn split_end_closer_is_not_a_statement() {
+        // `End If` with no opening `If` is a misplaced closer, not an `End`
+        // statement — the guard lets it fall through to a diagnostic.
+        let src = "End If\n";
+        let r = parse_src(src);
+        assert!(
+            !r.diagnostics.is_empty(),
+            "expected diagnostic for stray `End If`"
+        );
+        assert!(!matches!(stmt_of(&r.arena, r.program[0]), Stmt::End));
     }
 }
 

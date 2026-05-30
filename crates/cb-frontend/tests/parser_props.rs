@@ -119,6 +119,7 @@ fn node_header(node: &Node) -> &'static str {
             Stmt::Label { .. } => "Stmt::Label",
             Stmt::Break { .. } => "Stmt::Break",
             Stmt::Continue => "Stmt::Continue",
+            Stmt::End => "Stmt::End",
             Stmt::Include { .. } => "Stmt::Include",
             Stmt::Delete { .. } => "Stmt::Delete",
             Stmt::Error => "Stmt::Error",

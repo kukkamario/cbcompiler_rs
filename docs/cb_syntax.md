@@ -897,6 +897,21 @@ cleanup:
 
 `Goto` may jump **only within the current function** (or within top-level code, treated as one scope). Crossing function boundaries is a compile error. Jumping into the middle of a `For` block from outside is also a compile error, since the loop variable would not be initialised.
 
+### 6.5 End
+
+A bare `End` statement terminates the whole program immediately (exit code 0), from anywhere — including inside nested functions or loops:
+
+```cb
+If fatalCondition Then
+    Print "stopping"
+    End                  // program halts here; nothing after runs
+EndIf
+```
+
+`End` (the statement) is distinct from the block closers `End If` / `EndFunction` / `EndType` / `EndStruct` / `EndSelect`, which close their respective blocks. A standalone `End` is only the terminate-program statement when it is **not** immediately followed by one of those block keywords.
+
+Compiler note: `End` lowers to an IR `Halt` terminator (it is not a runtime function). The related runtime function `MakeError(msg$)` writes `msg` to stderr and terminates with exit code 1.
+
 ## 7. Subroutines and functions
 
 ### 7.1 Function

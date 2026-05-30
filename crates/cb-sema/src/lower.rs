@@ -1179,6 +1179,17 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 self.lower_expr(expr);
+                // `MakeError(msg)` terminates the program. The call itself
+                // (cb_rt_make_error) only writes the message to stderr; the
+                // termination is this Halt(1). Detected via the resolved
+                // runtime symbol, so MakeError needs no special sema.
+                let is_make_error = matches!(
+                    self.resolved_calls.get(&expr),
+                    Some(ResolvedCall::RuntimeFn { c_symbol }) if c_symbol == "cb_rt_make_error"
+                );
+                if is_make_error {
+                    self.terminate(Terminator::Halt { code: 1 }, self.arena.span_of(expr));
+                }
             }
             Node::Stmt(Stmt::Dim {
                 names,
@@ -1216,6 +1227,11 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::Return { value }) => {
                 let val = value.map(|v| self.lower_expr(v));
                 self.terminate(Terminator::Return { value: val }, self.arena.span_of(id));
+            }
+            Node::Stmt(Stmt::End) => {
+                // Terminate the whole program with exit code 0. Like Return,
+                // this ends the block; any following statements are dead.
+                self.terminate(Terminator::Halt { code: 0 }, self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Delete { operand }) => {
                 let span = self.arena.span_of(id);

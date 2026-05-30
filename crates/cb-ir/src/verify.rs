@@ -208,7 +208,7 @@ fn verify_terminator_targets(term: &Terminator, block_ids: &HashSet<BlockId>) {
             check(*then_block);
             check(*else_block);
         }
-        Terminator::Return { .. } | Terminator::Trap(_) => {}
+        Terminator::Return { .. } | Terminator::Halt { .. } | Terminator::Trap(_) => {}
     }
 }
 
@@ -220,7 +220,10 @@ fn verify_terminator_regs(term: &Terminator, defined: &HashSet<Reg>) {
     match term {
         Terminator::BranchIf { cond, .. } => check(*cond),
         Terminator::Return { value: Some(r) } => check(*r),
-        Terminator::Return { value: None } | Terminator::Goto(_) | Terminator::Trap(_) => {}
+        Terminator::Return { value: None }
+        | Terminator::Goto(_)
+        | Terminator::Halt { .. }
+        | Terminator::Trap(_) => {}
     }
 }
 

@@ -13,6 +13,7 @@ add_library(cb_runtime STATIC
     catalog.cpp
     cb_math.cpp
     cb_string.cpp
+    cb_system.cpp
     gfx.c
     input.c
 )

@@ -203,11 +203,17 @@ fn main() -> ExitCode {
 
         if !dump_ast && !dump_ir {
             #[cfg(feature = "interp")]
-            if matches!(_backend, Backend::Interp)
-                && let Err(e) = cb_backend_interp::interpret(&ir_program, &sema_result.interner)
-            {
-                eprintln!("cb: {e}");
-                return ExitCode::from(1);
+            if matches!(_backend, Backend::Interp) {
+                // `Ok(code)` is the program's own exit code (`End` → 0,
+                // `MakeError` → 1); `Err` is an interpreter trap / internal
+                // error, which always maps to exit 1 with a diagnostic.
+                match cb_backend_interp::interpret(&ir_program, &sema_result.interner) {
+                    Ok(code) => return ExitCode::from(code as u8),
+                    Err(e) => {
+                        eprintln!("cb: {e}");
+                        return ExitCode::from(1);
+                    }
+                }
             }
         }
     }

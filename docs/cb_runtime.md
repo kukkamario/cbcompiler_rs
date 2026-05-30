@@ -277,4 +277,5 @@ String indices are **1-based** in CoolBasic.
 - **Coordinate system**: Graphics use top-left origin, Y increases downward.
 - **Angles**: All trigonometric functions use degrees, not radians.
 - **1-based indexing**: String positions (InStr, Left, Right, StrRemove) are 1-based per CoolBasic convention.
+- **System / Time** (cbcompiler_rs): `Timer` returns monotonic wall-clock milliseconds since first call, via `std::chrono::steady_clock` (the legacy used CPU-time `clock()`). `Wait(ms)` sleeps for `ms` milliseconds (`ms <= 0` is a no-op). `End` terminates the program with exit code 0; `MakeError(msg)` writes `msg` to stderr and terminates with exit code 1. `End` is a language statement (not a runtime call), lowered to an IR `Halt` terminator.
 - **String character semantics** (cbcompiler_rs): `Len`/`Left`/`Right`/`StrRemove`/`InStr` count Unicode **codepoints**, not bytes (strings are UTF-8). Out-of-range arguments **clamp** rather than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` currently do ASCII-only case mapping; non-ASCII bytes pass through unchanged.
