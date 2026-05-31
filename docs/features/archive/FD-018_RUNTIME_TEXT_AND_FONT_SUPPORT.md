@@ -1,6 +1,7 @@
 # FD-018: Runtime Text and Font Support
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-05-31
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings the last major missing graphics subsystem online — on-screen text and TrueType fonts — so CoolBasic programs can render UI, HUDs, and debug overlays.
