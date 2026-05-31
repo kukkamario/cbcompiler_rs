@@ -239,14 +239,11 @@ impl<'a> Lowerer<'a> {
         self.interner.intern(text)
     }
 
-    fn intern_ident(&mut self, name_span: Span, sigil: Option<cb_frontend::Sigil>) -> Symbol {
-        let raw = name_span.slice(self.source);
-        let bare = if sigil.is_some() {
-            &raw[..raw.len() - 1]
-        } else {
-            raw
-        };
-        self.interner.intern(bare)
+    fn intern_ident(&mut self, name_span: Span, _sigil: Option<cb_frontend::Sigil>) -> Symbol {
+        // `name_span` is the bare-name span (parser strips the sigil byte). The
+        // sigil never participates in variable identity, so lowering must key
+        // locals by the bare name — matching the checker (cb_syntax.md §1.3–§1.4).
+        self.interner.intern(name_span.slice(self.source))
     }
 
     fn sema_type_to_ir(&self, ty: &Type) -> IrType {

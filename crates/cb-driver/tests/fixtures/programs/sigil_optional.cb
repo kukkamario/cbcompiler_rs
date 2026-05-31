@@ -1,0 +1,22 @@
+// Type sigils are optional on later references (cb_syntax.md §1.3–§1.4).
+// A variable keeps a single identity whether or not the sigil is written;
+// declaring with a sigil does not force every later reference to repeat it.
+
+// Declared with a sigil, then mutated and read via the bare name.
+total# = 1.5
+total = total + 2.0
+Print Str(total)
+
+// Declared with a sigil, mutated bare, read bare.
+count% = 10
+count = count + 5
+Print Str(count)
+
+// Declared bare (type fixed at first use as Int), later read with a sigil.
+score = 7
+Print Str(score%)
+
+// String: written bare, read back through the sigil.
+name$ = "foo"
+name = name + "bar"
+Print name$

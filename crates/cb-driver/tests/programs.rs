@@ -117,6 +117,11 @@ fn select_case() {
 }
 
 #[test]
+fn sigil_optional() {
+    run("sigil_optional");
+}
+
+#[test]
 fn if_elseif_else() {
     run("if_elseif_else");
 }

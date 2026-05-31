@@ -97,14 +97,12 @@ impl<'a> Checker<'a> {
         self.interner.intern(text)
     }
 
-    fn intern_ident(&mut self, name_span: Span, sigil: Option<Sigil>) -> Symbol {
-        let raw = name_span.slice(self.source);
-        let bare = if sigil.is_some() {
-            &raw[..raw.len() - 1]
-        } else {
-            raw
-        };
-        self.interner.intern(bare)
+    fn intern_ident(&mut self, name_span: Span, _sigil: Option<Sigil>) -> Symbol {
+        // `name_span` is already the bare-name span — the parser excludes the
+        // trailing sigil byte via `bare_name_span`. The sigil is *not* part of
+        // the variable's identity (cb_syntax.md §1.3–§1.4), so `x`, `x%`, and a
+        // later bare `x` all intern to the same symbol.
+        self.interner.intern(name_span.slice(self.source))
     }
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
@@ -1993,6 +1991,41 @@ mod tests {
             "expected E0302, got {:?}",
             error_codes(&result)
         );
+    }
+
+    #[test]
+    fn pass2_sigil_decl_bare_ref_same_var() {
+        // Declared with a sigil, referenced bare — the sigil is not part of the
+        // name, so both refer to the same variable (cb_syntax.md §1.3–§1.4).
+        let result = analyze_src("Dim total# = 1.5\ntotal = 2.0\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_bare_decl_matching_sigil_ref_ok() {
+        // Implicitly declared bare (Int), later referenced with a matching sigil.
+        let result = analyze_src("x = 5\nx% = 6\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_bare_decl_conflicting_sigil_ref_e0302() {
+        // Type is fixed at first use (bare ⇒ Int); a later non-matching sigil
+        // must still be rejected.
+        let result = analyze_src("x = 5\nx# = 1.0\n");
+        assert!(
+            error_codes(&result).contains(&"E0302"),
+            "expected E0302, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_single_char_sigil_bare_ref_same_var() {
+        // Guards against the historical double-strip collapsing single-char
+        // sigil'd names to the empty string.
+        let result = analyze_src("a$ = \"hi\"\na = \"bye\"\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     // ── pass 2 tests: expression typing ─────────────────────────────────
