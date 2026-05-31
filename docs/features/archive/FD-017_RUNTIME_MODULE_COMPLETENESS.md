@@ -1,6 +1,7 @@
 # FD-017: Runtime Module Completeness Pass
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-05-31
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings the runtime modules we already ship — Math, String, System/Time, Graphics, Images, Input — up to full parity with the cbEnchanted surface documented in `docs/cb_runtime.md`, without yet introducing any new subsystem.
