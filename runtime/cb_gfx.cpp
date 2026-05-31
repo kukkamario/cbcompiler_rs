@@ -142,12 +142,20 @@ extern "C" void cb_rt_drawscreen(void) {
     while (al_get_next_event(event_queue, &ev)) {
         cb_input_handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
-            // NOTE (FD-013): this exit() is inconsistent with Batch 3's clean
-            // IR `Halt` termination, but routing a window-close back to the
-            // interpreter needs a runtime→interpreter trap channel that does
-            // not exist yet. Left as-is; tracked in the FD.
+            // FD-015: route window-close through the trap channel for a clean
+            // Halt/Ok(0) termination instead of exit(0). Tear down our own
+            // display here (about_to_exit is reserved/null), ask the host to
+            // exit, and return — the interpreter drains the pending Exit(0)
+            // right after this runtime call returns. The `return` is essential:
+            // `display` is now null and the code below would deref it. Fall
+            // back to exit(0) only if no host is connected.
             al_destroy_display(display);
             display = nullptr;
+            const CbHostApi* h = cb_host();
+            if (h) {
+                h->request_exit(0);
+                return;
+            }
             exit(0);
         }
     }

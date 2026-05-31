@@ -134,6 +134,7 @@ fn main() {
     // Rebuild if runtime sources change
     for f in &[
         "catalog.cpp",
+        "cb_host.cpp",
         "cb_math.cpp",
         "cb_string.cpp",
         "cb_strfuncs.cpp",

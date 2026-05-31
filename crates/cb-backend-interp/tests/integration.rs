@@ -395,6 +395,41 @@ fn observer_sees_function_calls() {
     assert_eq!(output_str, "42\n");
 }
 
+// FD-015: a runtime function that raises an error via the trap channel
+// surfaces as an `Err(RuntimeError)` from `run` AND fires `on_runtime_error`.
+struct ErrorRecorder {
+    errors: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+}
+
+impl Observer for ErrorRecorder {
+    fn on_runtime_error(&mut self, _frame: &Frame, msg: &str, _span: Span) {
+        self.errors.borrow_mut().push(msg.to_string());
+    }
+}
+
+#[test]
+fn observer_sees_runtime_error() {
+    let (ir, interner) = compile_program("TestRaiseError(\"boom\")\n");
+
+    let recorder = ErrorRecorder { errors: Default::default() };
+    let seen = recorder.errors.clone();
+
+    let mut output = Vec::new();
+    let result = {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(recorder);
+        interp.run()
+    };
+
+    let err = result.expect_err("raise_error should produce an Err");
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m == "boom"),
+        "expected RuntimeError(\"boom\"), got {err:?}",
+    );
+    assert_eq!(*seen.borrow(), vec!["boom".to_string()]);
+}
+
 // ── Trap / error tests ────────────────────────────────────────────
 
 fn run_err(src: &str) -> InterpError {
