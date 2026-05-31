@@ -1,6 +1,7 @@
 # FD-016: Runtime Core / Functionality Split
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-31
 **Priority:** Medium
 **Effort:** High (> 4 hours) — build-system refactor + header partition + ABI contract definition
 **Impact:** Separates the irreducible runtime **core** (string type, catalog ABI structs, FD-015 host/hook types) from the **functionality** library (Math, String funcs, System, Graphics, Input) so that plugins can statically link a tiny, Allegro-free core to handle `String` parameters and register catalog entries — without dragging in the whole functionality library or its Allegro/vcpkg dependency closure. Produces a clean plugin SDK surface (`cb_runtime_core.h` + `cb_runtime_core.lib`) for free.
