@@ -275,6 +275,8 @@ CbString    cb_string_retain(CbString s);       // increment refcount, return s
 void        cb_string_release(CbString s);      // decrement refcount; frees at 0
 ```
 
+> **⚠️ Superseded (FD-014, FD-016).** The `typedef char* CbString` representation and the `cb_string_*` API below were **not** the final design. [FD-014](FD-014_RUNTIME_STRING_ABI.md) replaced them with an **opaque refcounted `CbString*`** (single-block `{ int32 refcount; pad; size_t byte_len, capacity, offset; data[] }`, negative refcount = immortal sentinel) implemented in `runtime/cb_string.cpp`, with primitives named `cb_rt_string_from_literal`/`retain`/`release`/`len`/`data`/`concat` exposed to the Rust host through the `CbStringApi` substruct on `CbCatalog`. [FD-016](../FD-016_RUNTIME_CORE_FUNCTIONALITY_SPLIT.md) places these in a separate Allegro-free **`cb_runtime_core`** library that plugins statically link to handle `String` parameters directly (no vtable indirection on the hot path); cross-module safety rests on the shared dynamic `/MD` CRT and the value-based identity rules (emptiness = `len==0`, immortality = `refcount<0` — never an address compare).
+
 This representation is efficient: `CbString` is a plain `char*` that can be passed directly to C standard library functions (`printf`, `strcmp`, etc.). The metadata at negative offsets is an internal implementation detail — callers use `cb_string_len()` to get the length and `cb_string_retain()`/`cb_string_release()` for ownership.
 
 Ownership protocol:
@@ -337,6 +339,10 @@ The default runtime is statically linked (always available). Plugin DLLs extend 
 - **Symbol resolution:** The interpreter resolves each plugin function's `symbol` field via `dlsym`/`GetProcAddress` from the loaded DLL
 - **C header:** `runtime/include/cb_runtime.h` is the public API for plugin developers — everything needed to write a plugin in C/C++
 - **Plugins can also use runtime string/type APIs:** A plugin DLL that manipulates strings can call `cb_string_new()`, `cb_string_len()`, etc. from the statically linked runtime (the compiler binary exports these symbols, or the plugin links against the runtime library independently)
+
+> **⚠️ Superseded (FD-012, FD-014, FD-016).** Two details of the plugin model above were refined by later work:
+> - **Per-call dispatch is by `fn_ptr`, not symbol name.** [FD-012](FD-012_CATALOG_CPP_TEMPLATE_DSL.md) added a `fn_ptr` field to `CbFuncDesc`; the interpreter dispatches every runtime call through that pointer via libffi. `dlsym`/`GetProcAddress` is used only to find a plugin's `cb_runtime_get_catalog` entry point — **not** to resolve each function's `symbol`. (The `symbol` field remains, reserved for the future LLVM backend's `declare`/`call` emission.)
+> - **Plugins reach the string type by statically linking the core library, not by back-linking the host executable.** The "compiler binary exports these symbols" alternative is unreliable (on Windows a loaded DLL cannot resolve symbols in the loading `.exe`). [FD-016](../FD-016_RUNTIME_CORE_FUNCTIONALITY_SPLIT.md) makes the supported model explicit: a plugin statically links the Allegro-free `cb_runtime_core` lib and calls `cb_rt_string_*` directly. The string functions are named `cb_rt_string_from_literal`/etc. (FD-014), not `cb_string_new`.
 
 ### Dependency graph
 

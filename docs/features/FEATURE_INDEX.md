@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-015](FD-015_RUNTIME_TRAP_CHANNEL.md) | Runtime Trap Channel | Open | Medium | High |
+| [FD-016](FD-016_RUNTIME_CORE_FUNCTIONALITY_SPLIT.md) | Runtime Core / Functionality Split | Open | High | Medium |
 
 ## Completed
 
