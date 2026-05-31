@@ -50,6 +50,19 @@ int32_t cb_rt_str_instr(const CbString* s, const CbString* find);
 int32_t cb_rt_str_instr_from(const CbString* s, const CbString* find, int32_t start);
 CbString* cb_rt_chr(int32_t code);
 CbString* cb_rt_hex(int32_t value);
+/* FD-017 completeness pass. Same codepoint/1-based/clamp conventions. */
+CbString* cb_rt_str_mid(const CbString* s, int32_t pos, int32_t len);
+CbString* cb_rt_str_replace(const CbString* s, const CbString* find, const CbString* repl);
+CbString* cb_rt_str_lset(const CbString* s, int32_t len);
+CbString* cb_rt_str_rset(const CbString* s, int32_t len);
+int32_t   cb_rt_str_asc(const CbString* s);
+CbString* cb_rt_bin(int32_t value);
+CbString* cb_rt_str_repeat(const CbString* s, int32_t count);
+CbString* cb_rt_str_flip(const CbString* s);
+CbString* cb_rt_str_insert(const CbString* s, int32_t pos, const CbString* txt);
+CbString* cb_rt_str_move(const CbString* s, int32_t pos, int32_t len, int32_t offset);
+int32_t   cb_rt_count_words(const CbString* s, const CbString* sep);
+CbString* cb_rt_get_word(const CbString* s, int32_t n, const CbString* sep);
 
 /* System / Time (cb_system.cpp). `End` is not a runtime function — it is a
    language statement lowered to an IR `Halt` terminator. `MakeError` only
@@ -58,6 +71,12 @@ CbString* cb_rt_hex(int32_t value);
 int32_t cb_rt_timer(void);
 void cb_rt_wait(int32_t ms);
 void cb_rt_make_error(const CbString* msg);
+/* FD-017. Date "D Mon YYYY"; Time "HH:MM:SS"; CommandLine/GetEXEName read the
+   running process (for the interpreter, that is the `cb` executable). */
+CbString* cb_rt_date(void);
+CbString* cb_rt_time(void);
+CbString* cb_rt_command_line(void);
+CbString* cb_rt_get_exe_name(void);
 
 /* Math (implemented in cb_math.cpp). Trig is in DEGREES. */
 double cb_rt_sin(double deg);
@@ -79,10 +98,15 @@ double cb_rt_distance(double x1, double y1, double x2, double y2);
 double cb_rt_get_angle(double x1, double y1, double x2, double y2);
 double cb_rt_wrap_angle(double a);
 double cb_rt_rnd_max(double max);
-double cb_rt_rnd_range(double min, double max);
+double cb_rt_rnd_range(double low, double high);
 int32_t cb_rt_rand_max(int32_t max);
-int32_t cb_rt_rand_range(int32_t min, int32_t max);
+int32_t cb_rt_rand_range(int32_t low, int32_t high);
 void cb_rt_randomize(int32_t seed);
+/* FD-017. CurveValue/CurveAngle ease current->target; BoxOverlap is AABB. */
+double cb_rt_curve_value(double target, double current, double smoothness);
+double cb_rt_curve_angle(double target, double current, double smoothness);
+int32_t cb_rt_box_overlap(double x1, double y1, double w1, double h1,
+                          double x2, double y2, double w2, double h2);
 
 /* Graphics & images (cb_gfx.cpp, FD-013 Batch 4). CB `Float` args arrive as
    `double`, `Int` as `int32_t`. `Image` is the opaque CbImage* handle. Many
@@ -90,7 +114,10 @@ void cb_rt_randomize(int32_t seed);
    distinct C symbol below sharing one CB name in catalog.cpp. */
 void    cb_rt_screen(int32_t w, int32_t h);
 void    cb_rt_screen_mode(int32_t w, int32_t h, int32_t mode);
+void    cb_rt_screen_depth_mode(int32_t w, int32_t h, int32_t depth, int32_t mode);
+int32_t cb_rt_screen_buffer_id(void);
 void    cb_rt_drawscreen(void);
+void    cb_rt_drawscreen_args(int32_t cls, int32_t vsync);
 void    cb_rt_cls(void);
 void    cb_rt_cls_color(int32_t r, int32_t g, int32_t b);
 void    cb_rt_cls_color_a(int32_t r, int32_t g, int32_t b, int32_t a);
@@ -104,7 +131,13 @@ void    cb_rt_unlock(void);
 void    cb_rt_unlock_image(CbImage* img);
 void    cb_rt_color(int32_t r, int32_t g, int32_t b);
 void    cb_rt_color_a(int32_t r, int32_t g, int32_t b, int32_t a);
+int32_t cb_rt_get_rgb(int32_t channel);
+void    cb_rt_pick_color(int32_t x, int32_t y);
+void    cb_rt_smooth_2d(int32_t enabled);
+void    cb_rt_screen_gamma(int32_t r, int32_t g, int32_t b);
+void    cb_rt_screenshot(const CbString* path);
 void    cb_rt_line(double x1, double y1, double x2, double y2);
+void    cb_rt_ellipse(double x, double y, double w, double h, int32_t fill);
 void    cb_rt_circle(double x, double y, double d);
 void    cb_rt_circle_fill(double x, double y, double d, int32_t fill);
 void    cb_rt_box(double x, double y, double w, double h);
@@ -114,6 +147,9 @@ void    cb_rt_put_pixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b);
 void    cb_rt_put_pixel_a(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b, int32_t a);
 void    cb_rt_put_pixel_argb(int32_t x, int32_t y, int32_t argb);
 int32_t cb_rt_get_pixel(const CbImage* img, int32_t x, int32_t y);
+int32_t cb_rt_get_pixel2(int32_t x, int32_t y);
+void    cb_rt_copy_box(double srcX, double srcY, double w, double h,
+                       double destX, double destY, int32_t srcBuf, int32_t destBuf);
 CbImage* cb_rt_make_image(int32_t w, int32_t h);
 CbImage* cb_rt_load_image(const CbString* path);
 void    cb_rt_draw_image(const CbImage* img, double x, double y);
@@ -123,8 +159,25 @@ void    cb_rt_draw_to_image(CbImage* img);
 int32_t cb_rt_image_width(const CbImage* img);
 int32_t cb_rt_image_height(const CbImage* img);
 void    cb_rt_delete_image(CbImage* img);
+/* FD-017 image additions (single-frame; multi-frame deferred). */
+void     cb_rt_default_mask(int32_t enabled, int32_t r, int32_t g, int32_t b);
+CbImage* cb_rt_clone_image(const CbImage* img);
+void     cb_rt_resize_image(CbImage* img, int32_t w, int32_t h);
+void     cb_rt_rotate_image(CbImage* img, double angle);
+void     cb_rt_pick_image_color(const CbImage* img, int32_t x, int32_t y);
+void     cb_rt_save_image(const CbImage* img, const CbString* path, int32_t frame);
+void     cb_rt_draw_ghost_image(const CbImage* img, double x, double y, double alpha);
+void     cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
+                              double sw, double sh, double tx, double ty);
+void     cb_rt_hotspot(CbImage* img, int32_t x, int32_t y);
+int32_t  cb_rt_images_overlap(const CbImage* a, double x1, double y1,
+                              const CbImage* b, double x2, double y2);
+int32_t  cb_rt_images_collide(const CbImage* a, double x1, double y1, int32_t frame1,
+                              const CbImage* b, double x2, double y2, int32_t frame2);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
+int32_t cb_rt_screen_depth(void);
+int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
 
 /* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the legacy CB
    DirectInput-style numbering (1=Esc, 16=Q, 30=A, 200=Up, …). Edge queries
@@ -146,6 +199,20 @@ int32_t cb_rt_mouse_z(void);
 int32_t cb_rt_mouse_move_x(void);
 int32_t cb_rt_mouse_move_y(void);
 int32_t cb_rt_mouse_move_z(void);
+/* FD-017 input additions. WaitKey/WaitMouse block on the window event queue;
+   with no window open they return 0 immediately (headless-safe). */
+int32_t cb_rt_get_key(void);
+int32_t cb_rt_left_key(void);
+int32_t cb_rt_right_key(void);
+int32_t cb_rt_up_key(void);
+int32_t cb_rt_down_key(void);
+void    cb_rt_clear_keys(void);
+int32_t cb_rt_wait_key(void);
+int32_t cb_rt_get_mouse(void);
+int32_t cb_rt_wait_mouse(void);
+void    cb_rt_position_mouse(int32_t x, int32_t y);
+void    cb_rt_show_mouse(int32_t mode);
+void    cb_rt_clear_mouse(void);
 
 /* Test handle functions for opaque type testing */
 CbTestHandle* cb_rt_create_test_handle(void);

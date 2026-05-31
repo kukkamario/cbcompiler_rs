@@ -1099,7 +1099,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         from: &IrType,
         to: &IrType,
     ) -> Result<Value, InterpError> {
-        let i = self.value_to_i64(v);
+        // Language-level conversion to an integer type uses CoolBasic's
+        // `toInt` semantics (cb_runtime.md §Math): a Float is rounded half-up
+        // (`(int)(x + 0.5)`), not truncated toward zero, and a String is
+        // parsed as a leading integer after trimming. The raw `value_to_i64`
+        // helper (truncating) stays for internal, non-language uses.
+        let i = self.value_to_int_cb(v);
         let f = self.value_to_f64(v);
 
         match to {
@@ -1119,6 +1124,17 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrType::Bool => Ok(Value::Bool(v.is_truthy())),
             IrType::String => Ok(Value::String(v.as_cb_string(self.string_api))),
             _ => Ok(v.clone()),
+        }
+    }
+
+    /// CoolBasic `toInt` conversion: Float rounds half-up (`(int)(x + 0.5)`,
+    /// truncating toward zero afterward), String trims then parses a leading
+    /// integer (0 on no leading digits), everything else matches `value_to_i64`.
+    fn value_to_int_cb(&self, v: &Value) -> i64 {
+        match v {
+            Value::Float(x) => (*x + 0.5) as i64,
+            Value::String(s) => parse_leading_int(s.as_bytes()),
+            _ => self.value_to_i64(v),
         }
     }
 
@@ -1323,4 +1339,32 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             })
             .collect()
     }
+}
+
+/// Parse a leading integer from UTF-8 bytes, mirroring `stoi(trim(s))`: skip
+/// leading ASCII whitespace, accept an optional `+`/`-`, then consume digits
+/// up to the first non-digit. Returns 0 when no digits lead (matching
+/// cbEnchanted's `try { stoi } catch { 0 }`). Saturates rather than wrapping.
+fn parse_leading_int(bytes: &[u8]) -> i64 {
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let mut neg = false;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        neg = bytes[i] == b'-';
+        i += 1;
+    }
+    let start = i;
+    let mut val: i64 = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        val = val
+            .saturating_mul(10)
+            .saturating_add((bytes[i] - b'0') as i64);
+        i += 1;
+    }
+    if i == start {
+        return 0; // no leading digits
+    }
+    if neg { -val } else { val }
 }

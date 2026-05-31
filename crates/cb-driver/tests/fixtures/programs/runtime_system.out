@@ -1,3 +1,7 @@
 timer_nonneg
 timer_monotonic
+time_len_ok
+date_ok
+exename_ok
+cmdline_ok
 before_end

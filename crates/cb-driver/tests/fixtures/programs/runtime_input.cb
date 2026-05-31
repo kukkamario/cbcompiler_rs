@@ -27,4 +27,22 @@ Print Str(MouseMoveX())
 Print Str(MouseMoveY())
 Print Str(MouseMoveZ())
 
+// FD-017 additions. Headless: the char/button queues are empty and the arrow
+// keys are up, so GetKey/GetMouse and Left/Right/Up/DownKey return 0. WaitKey/
+// WaitMouse have no event queue to block on, so they return 0 immediately
+// (never hang). ClearKeys/ClearMouse/PositionMouse/ShowMouse are no-ops here.
+Print Str(GetKey())
+Print Str(LeftKey())
+Print Str(RightKey())
+Print Str(UpKey())
+Print Str(DownKey())
+Print Str(WaitKey())
+Print Str(GetMouse())
+Print Str(WaitMouse())
+ClearKeys()
+ClearMouse()
+PositionMouse(10, 20)
+ShowMouse(1)
+ShowMouse(0)
+
 Print "done"

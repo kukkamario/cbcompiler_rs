@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-017](FD-017_RUNTIME_MODULE_COMPLETENESS.md) | Runtime Module Completeness Pass | Open | High | Medium |
+| [FD-017](FD-017_RUNTIME_MODULE_COMPLETENESS.md) | Runtime Module Completeness Pass | Pending Verification | High | Medium |
 
 ## Completed
 

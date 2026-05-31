@@ -1,6 +1,6 @@
 # FD-017: Runtime Module Completeness Pass
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings the runtime modules we already ship — Math, String, System/Time, Graphics, Images, Input — up to full parity with the cbEnchanted surface documented in `docs/cb_runtime.md`, without yet introducing any new subsystem.
@@ -159,17 +159,43 @@ Signature changes to existing functions (`DrawScreen`, `MakeImage`, `DrawImage`,
 `PutPixel`/`GetPixel`) will touch existing golden fixtures — update them in the same
 batch.
 
-## Open Questions
+## Resolved Decisions
 
-%% Q1: String storage — cbEnchanted is single-byte CP-1252 and counts bytes; we are UTF-8 and count codepoints (a documented, intentional divergence). For this completeness pass, do we keep UTF-8/codepoint semantics and just add the missing functions on that basis, or converge to byte semantics now? (Recommendation: keep UTF-8 for this FD, add functions on current basis, leave convergence to a separate FD.)
+The open questions were resolved with the user (2026-05-31):
 
-%% Q2: PutPixel/GetPixel packed format — converge to the spec's `0xRRGGBB` or keep our 32-bit ARGB and document the divergence? This also affects the `buffer` argument and the `GetPixel(x,y,buffer)` vs current `GetPixel(img,x,y)` signature.
+- **Q1 — String semantics: keep UTF-8/codepoint.** All new index-based string
+  functions are added on the existing UTF-8/codepoint basis (matching
+  `Left`/`Right`/`StrRemove`). Byte-semantics convergence is left to a separate FD.
+- **Q2 — Pixel format: keep 32-bit ARGB, document divergence.** Retain the current
+  32-bit ARGB packing, add `PutPixel2`/`GetPixel2` aliases, and document the
+  divergence from the spec's `0xRRGGBB`. No rewrite of existing pixel behavior.
+- **Q3 — Multi-frame images: defer to its own FD.** FD-017 is scoped to
+  single-frame images. `LoadAnimImage` and the `frame` params on
+  `DrawImage`/`MakeImage` are **deferred** (a new FD will add `CbImage` frames).
+- **Q4 — Borderline System funcs: defer the plumbing-heavy ones.** Implement the
+  pure functions (`Date`, `Time`, `CommandLine`, `GetEXEName`). `SetWindow`,
+  `FrameLimit`, `Errors`, and file-path `Crc32` are **deferred** — they need
+  window/loop/error-display plumbing that is thin today.
+- **Q5 — Confirmed.** The 🚧 items (`DrawToWorld`, `UpdateGame`, `DrawGame`,
+  `MouseWX`/`MouseWY`, `Input`/`CloseInput`/`SafeExit`) remain deferred as blocked
+  on unimplemented subsystems (camera/objects/interactive input).
 
-%% Q3: Multi-frame images — take on sprite-sheet support (`CbImage` gains frames) in this FD so `LoadAnimImage` and the `frame` params are real, or scope this FD to single-frame and defer multi-frame to its own FD?
+### Revised in-scope surface after these decisions
 
-%% Q4: Scope of borderline System funcs — are `SetWindow`, `FrameLimit`, `Errors`, and file-path `Crc32` in scope here, or deferred? They touch window/loop/error-display plumbing that may be thin today.
-
-%% Q5: Confirm the 🚧 items (DrawToWorld, UpdateGame, DrawGame, MouseWX/WY, Input/CloseInput/SafeExit) are correctly deferred as blocked on unimplemented subsystems (camera/objects/interactive input).
+- **Math:** `CurveValue`, `CurveAngle`, `BoxOverlap`; verify `Int`/`Float`/`Rnd`/`Rand`.
+- **String:** `Mid`, `Replace`, `LSet`, `RSet`, `Asc`, `Bin`, `String`, `Flip`,
+  `StrInsert`, `StrMove`, `CountWords`, `GetWord`.
+- **System/Time:** `Date`, `Time`, `CommandLine`, `GetEXEName`.
+  (`FrameLimit`/`Errors`/`SetWindow`/`Crc32` deferred.)
+- **Graphics:** `ScreenDepth`, `GFXModeExists`, `ScreenGamma`, `ScreenShot`,
+  `GetRGB`, `PickColor`, `Smooth2D`, `Ellipse`, `CopyBox`, `Screen()` no-arg form;
+  `PutPixel2`/`GetPixel2` aliases (ARGB retained). `DrawScreen(cls,vsync)` args.
+- **Images (single-frame only):** `CloneImage`, `DrawGhostImage`, `DrawImageBox`,
+  `DefaultMask`, `HotSpot`, `ResizeImage`, `RotateImage`, `PickImageColor`,
+  `SaveImage`, `ImagesOverlap`, `ImagesCollide`.
+  (`LoadAnimImage`, `MakeImage(frameCount)`, `DrawImage(frame,useMask)` deferred.)
+- **Input:** `GetKey`, `WaitKey`, `ClearKeys`, `LeftKey`/`RightKey`/`UpKey`/`DownKey`,
+  `GetMouse`, `WaitMouse`, `PositionMouse`, `ShowMouse`, `ClearMouse`.
 
 ## Files to Create/Modify
 
@@ -185,6 +211,41 @@ batch.
 | `crates/cb-backend-interp/tests/*` | MODIFY | Golden fixtures per module; update fixtures affected by signature changes |
 | `crates/cb-driver/tests/cli.rs` | MODIFY | Exit-code / output assertions where relevant |
 | `docs/cb_runtime.md` | MODIFY | Update the "Implementation status" section as each module reaches parity |
+
+## Implementation summary (all six batches complete)
+
+Implemented across `runtime/` (catalog + the owning `.cpp`), plus two Rust-side
+changes for the String module and the `Int` intrinsic. `cargo test --workspace`
+and `cargo clippy --workspace --all-targets -- -D warnings` are green.
+
+- **String** — `Mid`, `Replace`, `LSet`, `RSet`, `Asc`, `Bin`, `String`, `Flip`,
+  `StrInsert`, `StrMove`, `CountWords`, `GetWord` (codepoint/1-based). Frontend:
+  `String(...)` now parses as a call (`parser.rs` keyword-callee arm +
+  `is_expr_start`). **`InStr` not-found reconciled `-1` → `0`** (spec).
+- **Math** — `CurveValue`, `CurveAngle`, `BoxOverlap`. **`Rnd`/`Rand` `high<low`
+  special case** fixed (no longer `return min`); **`Rand` is now inclusive
+  `[low,high]`** (cbEnchanted parity, user-chosen). **`Int(Float)` rounds half-up
+  and `Int(String)` trims+parses a leading int** — in `convert_value`, so explicit
+  `Int()` and implicit Float→Int coercion agree (`interp.rs`).
+- **System/Time** — `Date`, `Time`, `CommandLine`, `GetEXEName`
+  (`FrameLimit`/`Errors`/`SetWindow`/`Crc32` deferred).
+- **Graphics** — `Screen(w,h,depth,mode)` + no-arg `Screen()`, `ScreenDepth`,
+  `GFXModeExists`, `DrawScreen(cls,vsync)`, `GetRGB`, `PickColor`, `Smooth2D`,
+  `Ellipse`, `CopyBox`, `PutPixel2`/`GetPixel2` (ARGB). `ScreenGamma`/`ScreenShot`
+  best-effort (no portable display gamma / no-op headless).
+- **Images (single-frame)** — `CloneImage`, `ResizeImage`, `RotateImage`,
+  `PickImageColor`(`2`), `SaveImage`, `DrawGhostImage`, `DrawImageBox`,
+  `DefaultMask`, `HotSpot` (per-image form), `ImagesOverlap`, `ImagesCollide`
+  (pixel-precise via alpha). `CbImage` gained a hotspot; `MakeImage` clears to
+  opaque black.
+- **Input** — `GetKey`, `WaitKey`, `ClearKeys`, `LeftKey`/`RightKey`/`UpKey`/
+  `DownKey`, `GetMouse`, `WaitMouse`, `PositionMouse`, `ShowMouse`, `ClearMouse`.
+  `WaitKey`/`WaitMouse` return 0 immediately with no window (headless-safe).
+
+New/updated golden fixtures (`crates/cb-driver/tests/fixtures/programs/`):
+`runtime_string_fd017`, `runtime_gfx_fd017`, `runtime_image_fd017` (new);
+`runtime_math`, `runtime_system`, `runtime_input`, `runtime_string`,
+`mixed_arithmetic` (updated).
 
 ## Verification
 

@@ -1,0 +1,53 @@
+// FD-017 String completeness pass. Codepoint/1-based/clamp semantics.
+
+// Mid — len chars from 1-based pos, clamping past the end; pos<=0 -> "".
+Print Mid("abcdef", 2, 3)
+Print Mid("abcdef", 4, 10)
+Print "[" + Mid("abc", 5, 2) + "]"
+Print "[" + Mid("abc", 0, 2) + "]"
+
+// Replace — all occurrences; empty find leaves the string unchanged.
+Print Replace("a.b.c", ".", "-")
+Print Replace("aaa", "a", "bb")
+Print Replace("abc", "", "-")
+
+// LSet / RSet — field width, padding or truncating (bracketed to show spaces).
+Print "[" + LSet("hi", 5) + "]"
+Print "[" + LSet("hello", 3) + "]"
+Print "[" + RSet("hi", 5) + "]"
+Print "[" + RSet("hello", 3) + "]"
+
+// Asc — value of the first character; empty -> 0.
+Print Str(Asc("A"))
+Print Str(Asc(""))
+
+// Bin — 32-bit binary string.
+Print Bin(5)
+Print Bin(0)
+
+// String — repeat; cbEnchanted quirk: count<1 still yields one copy.
+Print String("ab", 3)
+Print "[" + String("x", 0) + "]"
+
+// Flip — reversed string (by codepoint).
+Print Flip("abc")
+
+// StrInsert — 1-based insert; front, middle, and append-past-end.
+Print StrInsert("abc", 1, "X")
+Print StrInsert("abc", 2, "XY")
+Print StrInsert("abc", 99, "Z")
+
+// StrMove — cut len at pos, reinsert at pos+offset.
+Print StrMove("abcdef", 1, 2, 2)
+
+// CountWords / GetWord — explicit and default (empty -> space) separators.
+Print Str(CountWords("a,b,c", ","))
+Print GetWord("a,b,c", 2, ",")
+Print Str(CountWords("one two three", ""))
+Print GetWord("one two three", 3, "")
+
+// Multibyte UTF-8: "ä" is one codepoint (two bytes), proving codepoint
+// semantics in Flip / Mid / Asc.
+Print Flip("aäb")
+Print Mid("aäbc", 2, 2)
+Print Str(Asc("ä"))

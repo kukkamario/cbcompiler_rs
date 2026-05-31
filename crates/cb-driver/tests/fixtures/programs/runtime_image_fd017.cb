@@ -1,0 +1,94 @@
+// FD-017 image additions (single-frame). Headless: MakeImage falls back to a
+// memory bitmap and clears to opaque black, so clone / resize / rotate / pick /
+// overlap / collide / default-mask all run without a display.
+
+// CloneImage — an independent copy (same pixels, separate storage).
+Dim a As Image
+a = MakeImage(4, 4)
+DrawToImage(a)
+Lock()
+PutPixel(1, 1, 10, 20, 30)
+Unlock()
+Dim b As Image
+b = CloneImage(a)
+If GetPixel(b, 1, 1) = GetPixel(a, 1, 1) Then Print "clone_copy_ok"
+DrawToImage(a)
+Lock()
+PutPixel(1, 1, 200, 200, 200)
+Unlock()
+If GetPixel(b, 1, 1) <> GetPixel(a, 1, 1) Then Print "clone_independent_ok"
+
+// ResizeImage — dimensions update.
+Dim c As Image
+c = MakeImage(4, 4)
+ResizeImage(c, 8, 6)
+Print Str(ImageWidth(c))
+Print Str(ImageHeight(c))
+
+// RotateImage — a 4x2 image rotated 90 degrees has a 2x4 bounding box.
+Dim d As Image
+d = MakeImage(4, 2)
+RotateImage(d, 90.0)
+Print Str(ImageWidth(d))
+Print Str(ImageHeight(d))
+
+// PickImageColor — read an image pixel into the draw color.
+Dim e As Image
+e = MakeImage(4, 4)
+DrawToImage(e)
+Lock()
+PutPixel(2, 2, 11, 22, 33)
+Unlock()
+PickImageColor(e, 2, 2)
+Print Str(GetRGB(1))
+Print Str(GetRGB(2))
+Print Str(GetRGB(3))
+
+// ImagesOverlap — bounding boxes (overlapping vs disjoint).
+Dim f As Image
+Dim g As Image
+f = MakeImage(8, 8)
+g = MakeImage(8, 8)
+Print Str(ImagesOverlap(f, 0.0, 0.0, g, 4.0, 4.0))
+Print Str(ImagesOverlap(f, 0.0, 0.0, g, 50.0, 50.0))
+
+// ImagesCollide — opaque images (cleared black) collide on overlap; disjoint
+// boxes never collide.
+Print Str(ImagesCollide(f, 0.0, 0.0, 0, g, 4.0, 4.0, 0))
+Print Str(ImagesCollide(f, 0.0, 0.0, 0, g, 50.0, 50.0, 0))
+
+// DefaultMask — black becomes transparent for images made afterward; a fresh
+// image's pixel reads back fully transparent (packed 0). And two all-transparent
+// images do not collide even where their boxes overlap.
+DefaultMask(1, 0, 0, 0)
+Dim m As Image
+m = MakeImage(4, 4)
+Print Str(GetPixel(m, 0, 0))
+Dim p As Image
+Dim q As Image
+p = MakeImage(8, 8)
+q = MakeImage(8, 8)
+Print Str(ImagesCollide(p, 0.0, 0.0, 0, q, 4.0, 4.0, 0))
+DefaultMask(0, 0, 0, 0)
+
+// HotSpot / DrawGhostImage / DrawImageBox / SaveImage — exercise (no crash).
+Dim canvas As Image
+canvas = MakeImage(16, 16)
+DrawToImage(canvas)
+HotSpot(a, 2, 2)
+HotSpot(a, -1, -1)
+DrawGhostImage(a, 0.0, 0.0, 50.0)
+DrawImageBox(a, 0.0, 0.0, 2.0, 2.0, 4.0, 4.0)
+Print "img_done"
+
+DeleteImage(a)
+DeleteImage(b)
+DeleteImage(c)
+DeleteImage(d)
+DeleteImage(e)
+DeleteImage(f)
+DeleteImage(g)
+DeleteImage(m)
+DeleteImage(p)
+DeleteImage(q)
+DeleteImage(canvas)

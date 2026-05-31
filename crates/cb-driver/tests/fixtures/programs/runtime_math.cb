@@ -26,13 +26,34 @@ Print Str(WrapAngle(370.0))
 Print Str(WrapAngle(-10.0))
 Print Str(GetAngle(0.0, 0.0, 0.0, 1.0))
 
-// Random — values are non-deterministic, so assert ranges instead of
-// golden values. Randomize seeds the generator first.
+// CurveValue / CurveAngle — deterministic easing.
+Print Str(CurveValue(10.0, 0.0, 2.0))
+Print Str(CurveValue(100.0, 50.0, 5.0))
+// CurveAngle takes the shortest path across the 360 wrap: 10 -> 350 is -20,
+// halved to -10, so 10 - (-10) ... wrapped lands on 0.
+Print Str(CurveAngle(350.0, 10.0, 2.0))
+Print Str(CurveAngle(0.0, 90.0, 2.0))
+
+// BoxOverlap — AABB intersection (1) and disjoint (0).
+Print Str(BoxOverlap(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))
+Print Str(BoxOverlap(0.0, 0.0, 10.0, 10.0, 50.0, 50.0, 10.0, 10.0))
+
+// Int(Float) rounds half-up (+0.5 then truncate), not toward zero.
+Print Str(Int(2.4))
+Print Str(Int(2.5))
+Print Str(Int(-2.5))
+// Int(String) trims and parses a leading integer; 0 on no digits.
+Print Str(Int("42"))
+Print Str(Int("  17abc"))
+Print Str(Int("xyz"))
+
+// Random — values are non-deterministic, so assert ranges instead of golden
+// values. Rand is INCLUSIVE [low,high] (cbEnchanted parity); Rnd is [low,high).
 Randomize(12345)
 i = Rand(10)
-If i >= 0 And i < 10 Then Print "rand_ok"
+If i >= 0 And i <= 10 Then Print "rand_ok"
 j = Rand(100, 110)
-If j >= 100 And j < 110 Then Print "rand_range_ok"
+If j >= 100 And j <= 110 Then Print "rand_range_ok"
 f# = Rnd(5.0)
 If f# >= 0.0 And f# < 5.0 Then Print "rnd_ok"
 g# = Rnd(2.0, 3.0)

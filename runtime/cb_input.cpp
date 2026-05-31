@@ -24,6 +24,9 @@
 
 #include <allegro5/allegro.h>
 
+#include <cstring>
+#include <deque>
+
 // ─── Edge-state model ──────────────────────────────────────────────────
 //
 // Per key/button: bit0 = down now, bit1 = changed since the last frame begin.
@@ -49,6 +52,18 @@ int32_t sMouseZ  = 0;
 int32_t sMouseDX = 0;
 int32_t sMouseDY = 0;
 int32_t sMouseDZ = 0;
+
+// FIFO queues for GetKey/GetMouse: typed character codepoints (KEY_CHAR) and
+// button-down button numbers (MOUSE_BUTTON_DOWN), accumulated as DrawScreen
+// drains events and consumed one per call.
+std::deque<int32_t> sCharQueue;
+std::deque<int32_t> sMouseDownQueue;
+
+// ClearKeys/ClearMouse set these to swallow input events for the rest of the
+// frame; cb_input_frame_begin clears them (mirrors cbEnchanted's clearKeyboard
+// / clearMouse flags — "ignored until the next frame").
+bool sIgnoreKeyboard = false;
+bool sIgnoreMouse    = false;
 
 // CB DirectInput-style scancode -> Allegro keycode. Ported verbatim from
 // legacy inputinterface.cpp. Index is the CB scancode (1..221); value is the
@@ -173,6 +188,17 @@ int scancode_to_allegro_key(int scan) {
     return 0;
 }
 
+// Reverse of scancode_to_allegro_key: an Allegro keycode -> CB scancode, or 0
+// if unmapped. Used by WaitKey's function form (mirrors cbEnchanted's loop).
+int allegro_key_to_scancode(int keycode) {
+    init_key_map();
+    if (keycode <= 0) return 0;
+    for (int i = 1; i < SCANCODE_MAX; ++i) {
+        if (sCBKeyMap[i] == keycode) return i;
+    }
+    return 0;
+}
+
 // Apply a press/release to a 2-bit slot, marking it changed only on a genuine
 // transition (mirrors the legacy handleKeyEvent toggle so key-repeat events
 // don't re-trigger the "changed" bit).
@@ -195,27 +221,44 @@ extern "C" void cb_input_frame_begin(void) {
     sMouseDX = 0;
     sMouseDY = 0;
     sMouseDZ = 0;
+    // A ClearKeys/ClearMouse swallow lasts only until the next frame begins.
+    sIgnoreKeyboard = false;
+    sIgnoreMouse    = false;
 }
 
 extern "C" void cb_input_handle_event(const ALLEGRO_EVENT* ev) {
     if (!ev) return;
     switch (ev->type) {
         case ALLEGRO_EVENT_KEY_DOWN: {
+            if (sIgnoreKeyboard) break;
             int kc = ev->keyboard.keycode;
             if (kc > 0 && kc < ALLEGRO_KEY_MAX) apply_transition(sKeyStates[kc], true);
             break;
         }
         case ALLEGRO_EVENT_KEY_UP: {
+            if (sIgnoreKeyboard) break;
             int kc = ev->keyboard.keycode;
             if (kc > 0 && kc < ALLEGRO_KEY_MAX) apply_transition(sKeyStates[kc], false);
             break;
         }
+        case ALLEGRO_EVENT_KEY_CHAR: {
+            // Queue typed characters for GetKey (codepoint; ASCII == CP-1252).
+            // Skip auto-repeat so GetKey yields one code per physical press.
+            if (sIgnoreKeyboard || ev->keyboard.repeat) break;
+            sCharQueue.push_back(ev->keyboard.unichar);
+            break;
+        }
         case ALLEGRO_EVENT_MOUSE_BUTTON_DOWN: {
+            if (sIgnoreMouse) break;
             unsigned b = ev->mouse.button;
-            if (b > 0 && b < (unsigned)MOUSE_BUTTON_COUNT) apply_transition(sMouseButtons[b], true);
+            if (b > 0 && b < (unsigned)MOUSE_BUTTON_COUNT) {
+                apply_transition(sMouseButtons[b], true);
+                sMouseDownQueue.push_back((int32_t)b);
+            }
             break;
         }
         case ALLEGRO_EVENT_MOUSE_BUTTON_UP: {
+            if (sIgnoreMouse) break;
             unsigned b = ev->mouse.button;
             if (b > 0 && b < (unsigned)MOUSE_BUTTON_COUNT) apply_transition(sMouseButtons[b], false);
             break;
@@ -289,3 +332,115 @@ extern "C" int32_t cb_rt_mouse_z(void)      { return sMouseZ; }
 extern "C" int32_t cb_rt_mouse_move_x(void) { return sMouseDX; }
 extern "C" int32_t cb_rt_mouse_move_y(void) { return sMouseDY; }
 extern "C" int32_t cb_rt_mouse_move_z(void) { return sMouseDZ; }
+
+// ─── FD-017 keyboard additions ─────────────────────────────────────────
+//
+// GetKey returns the next queued typed character (codepoint; ASCII == CP-1252),
+// or 0 if none queued. Like the rest of the input model, the queue only fills
+// while the program pumps DrawScreen; headless it stays empty (returns 0).
+extern "C" int32_t cb_rt_get_key(void) {
+    if (sCharQueue.empty()) return 0;
+    int32_t c = sCharQueue.front();
+    sCharQueue.pop_front();
+    return c;
+}
+
+// Arrow-key level queries.
+extern "C" int32_t cb_rt_left_key(void) {
+    return (sKeyStates[ALLEGRO_KEY_LEFT] & DOWN_BIT) ? 1 : 0;
+}
+extern "C" int32_t cb_rt_right_key(void) {
+    return (sKeyStates[ALLEGRO_KEY_RIGHT] & DOWN_BIT) ? 1 : 0;
+}
+extern "C" int32_t cb_rt_up_key(void) {
+    return (sKeyStates[ALLEGRO_KEY_UP] & DOWN_BIT) ? 1 : 0;
+}
+extern "C" int32_t cb_rt_down_key(void) {
+    return (sKeyStates[ALLEGRO_KEY_DOWN] & DOWN_BIT) ? 1 : 0;
+}
+
+// Clears key states and the typed-char queue, and swallows keyboard events for
+// the rest of the frame (until the next DrawScreen).
+extern "C" void cb_rt_clear_keys(void) {
+    std::memset(sKeyStates, 0, sizeof(sKeyStates));
+    sCharQueue.clear();
+    sIgnoreKeyboard = true;
+}
+
+// Blocks until a key is pressed; returns its CB scancode (0 on window close).
+// With no window open there is no event queue to wait on, so it returns 0
+// immediately rather than hang — the headless-safe degenerate behaviour.
+extern "C" int32_t cb_rt_wait_key(void) {
+    ALLEGRO_EVENT_QUEUE* q = cb_gfx_event_queue();
+    if (!q) return 0;
+    ALLEGRO_EVENT e;
+    while (true) {
+        al_wait_for_event(q, &e);
+        cb_input_handle_event(&e);
+        if (e.type == ALLEGRO_EVENT_KEY_DOWN) {
+            return allegro_key_to_scancode(e.keyboard.keycode);
+        }
+        if (e.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
+            const CbHostApi* h = cb_host();
+            if (h) h->request_exit(0);
+            return 0;
+        }
+    }
+}
+
+// ─── FD-017 mouse additions ────────────────────────────────────────────
+//
+// GetMouse returns the next queued button-down (button number), or 0 if none.
+extern "C" int32_t cb_rt_get_mouse(void) {
+    if (sMouseDownQueue.empty()) return 0;
+    int32_t b = sMouseDownQueue.front();
+    sMouseDownQueue.pop_front();
+    return b;
+}
+
+// Blocks until a mouse button is pressed; returns the button (0 on window
+// close). Headless (no event queue) returns 0 immediately rather than hang.
+extern "C" int32_t cb_rt_wait_mouse(void) {
+    ALLEGRO_EVENT_QUEUE* q = cb_gfx_event_queue();
+    if (!q) return 0;
+    ALLEGRO_EVENT e;
+    while (true) {
+        al_wait_for_event(q, &e);
+        cb_input_handle_event(&e);
+        if (e.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
+            return (int32_t)e.mouse.button;
+        }
+        if (e.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
+            const CbHostApi* h = cb_host();
+            if (h) h->request_exit(0);
+            return 0;
+        }
+    }
+}
+
+// Moves the cursor to screen coordinates. No-op without a window.
+extern "C" void cb_rt_position_mouse(int32_t x, int32_t y) {
+    ALLEGRO_DISPLAY* d = cb_gfx_display();
+    if (d) al_set_mouse_xy(d, x, y);
+}
+
+// Cursor mode: 0=hide, 1=standard cursor. cbEnchanted's `>1`=use image-id form
+// has no equivalent here (images are opaque handles, not integer ids), so any
+// value > 1 falls back to showing the standard cursor. No-op without a window.
+extern "C" void cb_rt_show_mouse(int32_t mode) {
+    ALLEGRO_DISPLAY* d = cb_gfx_display();
+    if (!d) return;
+    if (mode == 0) {
+        al_hide_mouse_cursor(d);
+    } else {
+        al_show_mouse_cursor(d);
+    }
+}
+
+// Clears mouse button states and the button-down queue, and swallows mouse
+// events for the rest of the frame (until the next DrawScreen).
+extern "C" void cb_rt_clear_mouse(void) {
+    std::memset(sMouseButtons, 0, sizeof(sMouseButtons));
+    sMouseDownQueue.clear();
+    sIgnoreMouse = true;
+}

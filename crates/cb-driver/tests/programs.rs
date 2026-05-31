@@ -139,6 +139,11 @@ fn runtime_string() {
 }
 
 #[test]
+fn runtime_string_fd017() {
+    run("runtime_string_fd017");
+}
+
+#[test]
 fn runtime_system() {
     run("runtime_system");
 }
@@ -146,6 +151,16 @@ fn runtime_system() {
 #[test]
 fn runtime_image() {
     run("runtime_image");
+}
+
+#[test]
+fn runtime_gfx_fd017() {
+    run("runtime_gfx_fd017");
+}
+
+#[test]
+fn runtime_image_fd017() {
+    run("runtime_image_fd017");
 }
 
 #[test]

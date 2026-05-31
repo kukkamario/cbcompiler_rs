@@ -710,32 +710,75 @@ cbcompiler_rs currently implements a subset, and in places diverges
 intentionally. Known status and divergences as of the latest runtime work
 (FD-013/014/015/016):
 
-- **String semantics divergence.** cbcompiler_rs strings are **UTF-8** and
-  `Len`/`Left`/`Right`/`StrRemove`/`InStr` count Unicode **codepoints**, whereas
-  cbEnchanted is single-byte CP-1252 and counts bytes. Out-of-range arguments
-  **clamp** rather than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower`
-  are ASCII-only for now.
+- **String semantics divergence.** cbcompiler_rs strings are **UTF-8** and all
+  char-indexed ops count Unicode **codepoints**, whereas cbEnchanted is
+  single-byte CP-1252 and counts bytes. Out-of-range arguments **clamp** rather
+  than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` are ASCII-only
+  for now. The **full String surface is implemented** (FD-017): `Mid`, `Replace`,
+  `LSet`, `RSet`, `Asc`, `Bin`, `String`, `Flip`, `StrInsert`, `StrMove`,
+  `CountWords`, `GetWord` join the FD-013 set. `InStr` not-found returns `0` (per
+  spec). Codepoint-specific notes: `Flip` reverses by codepoint (valid UTF-8 out);
+  `Asc` returns the first **codepoint** (inverse of `Chr`), not a 0–255 byte;
+  `StrInsert` uses proper 1-based indexing (cbEnchanted's StrInsert has an
+  off-by-one its StrRemove/StrMove siblings do not — not reproduced); `String(s,n)`
+  with `n<1` still yields one copy (cbEnchanted parity).
+- **Math.** Full surface implemented (FD-017 adds `CurveValue`, `CurveAngle`,
+  `BoxOverlap`). `Rand(low,high)` is **inclusive** `[low,high]` and `Rnd(low,high)`
+  is `[low,high)` (cbEnchanted parity); the `high < low` branch is the documented
+  special case (Rnd → `randf()*low`, Rand → `rand(low)`), not a swap. `Int(Float)`
+  rounds **half-up** (`(int)(x+0.5)`), and `Int(String)` trims then parses a
+  leading integer — both via the interpreter's `convert_value` (so explicit
+  `Int()` and implicit Float→Int coercion agree).
 - **System / Time.** `Timer` returns monotonic ms since first call
   (`std::chrono::steady_clock`; the legacy used CPU-time `clock()`). `Wait(ms)`
   sleeps (`ms <= 0` is a no-op). `End` is a language statement lowered to an IR
-  `Halt`; `MakeError(msg)` writes to stderr and exits with code 1.
+  `Halt`; `MakeError(msg)` writes to stderr and exits with code 1. FD-017 adds
+  `Date` (`"D Mon YYYY"`), `Time` (`"HH:MM:SS"`), `CommandLine`, and `GetEXEName`;
+  the last two read the running `cb` process (no separate compiled program exists
+  as in cbEnchanted). `FrameLimit`/`Errors`/`SetWindow`/`Crc32` remain deferred
+  (window/loop/error-display plumbing).
 - **Graphics / images** (FD-013 Batch 4, Allegro 5, `runtime/cb_gfx.cpp`).
   `Image` wraps an Allegro bitmap. `Text` was not yet implemented (fonts batch).
   `DeleteImage` exists (the legacy leaked image handles until exit). `Circle`'s
   argument is a diameter; `GetPixel`/`PutPixel` packed form uses 32-bit ARGB.
   `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap fallback).
+  FD-017 adds `Screen(w,h,depth,mode)` (depth ignored — always 32-bit) and the
+  no-arg `Screen()` (buffer id 0), `ScreenDepth` (32), `GFXModeExists`
+  (best-effort: any positive mode → 1), `DrawScreen(cls,vsync)`, `GetRGB`,
+  `PickColor` (reads the current target), `Smooth2D` (linear filtering on new
+  bitmaps), `Ellipse`, `CopyBox` (current target only), `PutPixel2`/`GetPixel2`
+  (ARGB aliases; the buffer-id arg models only the current target). `ScreenGamma`
+  is stored but not applied and `ScreenShot` is a no-op without a window
+  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017,
+  single-frame — multi-frame `LoadAnimImage`/`frame` params deferred):
+  `CloneImage`, `ResizeImage`, `RotateImage` (rotated bounding box, centered
+  hotspot), `PickImageColor`/`PickImageColor2`, `SaveImage` (`frame` ignored),
+  `DrawGhostImage` (alpha 0–100), `DrawImageBox`, `DefaultMask`, `ImagesOverlap`
+  (AABB), and `ImagesCollide` (pixel-precise via non-zero alpha; `frame` args
+  ignored). `MakeImage` now clears to opaque black (defined contents). `CbImage`
+  gained a **hotspot** (default top-left); `HotSpot(img, x, y)` is the per-image
+  form (x<0 || y<0 auto-centers) — cbEnchanted's integer-id `0`/`1` default toggle
+  has no analogue since `Image` is an opaque handle, not an int id.
 - **Input** (FD-013 Batch 5, `runtime/cb_input.cpp`). Keyboard
   (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the scancode table are ported 1:1.
   Input advances per frame inside `DrawScreen`. The mouse functions
   (`MouseDown`/`MouseHit`/`MouseUp`/`MouseZ`/`MouseMove*`) were added on Allegro's
-  mouse model. `EscapeKey` is a pure query (no legacy auto-exit).
+  mouse model. `EscapeKey` is a pure query (no legacy auto-exit). FD-017 adds
+  `GetKey` (typed-char queue), `LeftKey`/`RightKey`/`UpKey`/`DownKey`,
+  `ClearKeys`/`ClearMouse` (swallow events until the next frame), `GetMouse`
+  (button-down queue), `PositionMouse`, `ShowMouse` (0=hide/1=show; image cursors
+  unsupported — `Image` is an opaque handle, not an int id), and `WaitKey`/
+  `WaitMouse` (block on the window event queue; with no window they return 0
+  immediately rather than hang). `MouseWX`/`MouseWY` and `Input`/`CloseInput`/
+  `SafeExit` remain deferred (camera / interactive on-screen entry).
 - **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
   cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
   implementing.
 - **Not yet implemented** in cbcompiler_rs: objects/sprites, collision, camera,
   tile maps, sound, video playback, particles, fonts/text, file I/O, memblocks,
-  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and most of System (`Date`,
-  `Time`, `CommandLine`, `Crc32`, `SetWindow`, `FrameLimit`, …).
+  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, multi-frame sprite sheets
+  (`LoadAnimImage` and the `frame` params), and the plumbing-heavy System funcs
+  (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)
 

@@ -1,0 +1,53 @@
+// FD-017 graphics additions. Headless-safe: drawing targets a memory-bitmap
+// image (MakeImage falls back to a memory bitmap with no window open), so the
+// pixel/color round-trips run without a display. Window-only behaviour (real
+// gamma, screenshots, vsync) is smoke-tested via examples/, not here.
+
+// Constant / best-effort queries.
+Print Str(ScreenDepth())                 // 32-bit ARGB backbuffer
+Print Str(GFXModeExists(640, 480, 32))   // any positive mode -> 1
+Print Str(GFXModeExists(0, 0, 0))        // invalid -> 0
+Print Str(Screen())                      // screen buffer id (0)
+
+Dim img As Image
+img = MakeImage(8, 8)
+DrawToImage(img)
+
+// GetRGB returns components of the current draw color (1=R,2=G,3=B,4=A).
+Color(10, 20, 30)
+Print Str(GetRGB(1))
+Print Str(GetRGB(2))
+Print Str(GetRGB(3))
+Print Str(GetRGB(4))
+
+// PickColor reads a pixel from the current target into the draw color.
+Lock()
+PutPixel(1, 1, 70, 80, 90)
+Unlock()
+PickColor(1, 1)
+Print Str(GetRGB(1))
+Print Str(GetRGB(2))
+Print Str(GetRGB(3))
+
+// PutPixel2 writes packed ARGB; GetPixel2 reads the current target back.
+Lock()
+PutPixel2(0, 0, GetPixel(img, 1, 1))
+Unlock()
+If GetPixel2(0, 0) = GetPixel(img, 1, 1) Then Print "putpixel2_ok"
+
+// CopyBox moves a 1x1 region from (1,1) to (5,5) on the current target.
+CopyBox(1, 1, 1, 1, 5, 5, 0, 0)
+If GetPixel2(5, 5) = GetPixel(img, 1, 1) Then Print "copybox_ok"
+
+// Ellipse (filled) draws with the current color; center pixel reads back red.
+Color(255, 0, 0)
+Ellipse(0, 0, 8, 8, 1)
+If GetPixel2(4, 4) = GetPixel(img, 4, 4) Then Print "ellipse_ok"
+
+// Smooth2D / ScreenGamma / ScreenShot are accepted (no window: no-ops).
+Smooth2D(1)
+ScreenGamma(128, 128, 128)
+ScreenShot("unused_no_display.png")
+Print "gfx_done"
+
+DeleteImage(img)

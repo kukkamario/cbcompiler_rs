@@ -477,10 +477,13 @@ impl<'t> Parser<'t> {
                 self.cursor.bump();
                 Ok(self.alloc(Node::Expr(Expr::NullLit), tok.span))
             }
-            // Keywords used as intrinsic calls: Int(v), Float(v), Bool(v), Next(n).
-            // Only when followed by `(` — otherwise fall through to the error arm.
-            TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::Next)
-                if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
+            // Keywords used as intrinsic/runtime calls: Int(v), Float(v),
+            // Bool(v), Next(n), String(s, count) — each is also a type or loop
+            // keyword, so this arm only fires when followed by `(`; otherwise it
+            // falls through to the type/keyword handling elsewhere.
+            TokenKind::Keyword(
+                Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::Next | Kw::String,
+            ) if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
             {
                 self.cursor.bump();
                 Ok(self.alloc(
@@ -2639,6 +2642,11 @@ fn is_expr_start(k: TokenKind) -> bool {
             | TokenKind::Punct(Punct::LParen)
             | TokenKind::Op(Op::Plus | Op::Minus)
             | TokenKind::Keyword(Kw::True | Kw::False | Kw::Null | Kw::Not | Kw::BinNot | Kw::New)
+            // Keywords that double as builtin calls when followed by `(`
+            // (Int(v), Float(v), Bool(v), String(s,n)). Treating them as
+            // expression starts lets them appear as a paren-less call argument
+            // (`Print String("ab", 3)`); parse_primary still requires the `(`.
+            | TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::String)
     )
 }
 

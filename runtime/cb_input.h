@@ -21,6 +21,11 @@ void cb_input_frame_begin(void);
 // down/up, mouse buttons, mouse axes). Ignores event types it doesn't track.
 void cb_input_handle_event(const ALLEGRO_EVENT* ev);
 
+// Accessors into cb_gfx.cpp's display/event-queue state, used by the FD-017
+// blocking/cursor input functions. Both return null when no window is open.
+ALLEGRO_DISPLAY* cb_gfx_display(void);
+ALLEGRO_EVENT_QUEUE* cb_gfx_event_queue(void);
+
 #ifdef __cplusplus
 }
 #endif
