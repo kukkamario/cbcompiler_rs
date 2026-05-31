@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-018](FD-018_RUNTIME_TEXT_AND_FONT_SUPPORT.md) | Runtime Text and Font Support | Open | High | Medium |
 
 ## Completed
 
