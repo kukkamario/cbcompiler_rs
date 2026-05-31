@@ -15,14 +15,18 @@
 
 #include "cb_runtime.h"
 #include "cb_input.h"
+#include "cb_font.h"
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_primitives.h>
 #include <allegro5/allegro_image.h>
+#include <allegro5/allegro_font.h>
+#include <allegro5/allegro_ttf.h>
 
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 // ─── Opaque Image handle ──────────────────────────────────────────────
 //
@@ -36,6 +40,16 @@ struct CbImage {
     ALLEGRO_BITMAP* bmp;
     int32_t hotspot_x = 0;
     int32_t hotspot_y = 0;
+};
+
+// ─── Opaque Font handle ───────────────────────────────────────────────
+//
+// The CB-visible `Font` type (FD-018). Wraps an Allegro font; always passed and
+// returned by pointer. Created by LoadFont, freed by DeleteFont. The built-in
+// default font is owned separately (see `default_font` below) and is never
+// wrapped in a heap CbFont, so the program cannot DeleteFont it.
+struct CbFont {
+    ALLEGRO_FONT* font;
 };
 
 // ─── Shared graphics state ─────────────────────────────────────────────
@@ -70,6 +84,28 @@ static double               gamma_b         = 1.0;
 static bool                 default_mask_on = false;
 static ALLEGRO_COLOR        default_mask_color;
 
+// ─── Text & font state (FD-018) ────────────────────────────────────────
+//
+// `default_font` is loaded once (Courier New 12pt, or Allegro's built-in 8x8
+// font as a never-fail fallback) and owned for the process lifetime.
+// `current_font` is what Text/AddText/TextWidth use; it points at default_font
+// or at a LoadFont'd font's ALLEGRO_FONT*. The queued-text list holds AddText
+// entries that re-render every DrawScreen until ClearText (mirrors cbEnchanted's
+// TextInterface::texts). `text_loc_x/y` is the AddText cursor (Locate).
+static ALLEGRO_FONT*        default_font  = nullptr;
+static ALLEGRO_FONT*        current_font  = nullptr;
+static int32_t              text_loc_x    = 0;
+static int32_t              text_loc_y    = 0;
+
+struct QueuedText {
+    ALLEGRO_FONT* font;
+    std::string   utf8;
+    int32_t       x;
+    int32_t       y;
+    ALLEGRO_COLOR col;
+};
+static std::vector<QueuedText> queued_texts;
+
 // Lazily initialize the Allegro subsystems the graphics runtime needs. Safe to
 // call repeatedly. Image functions call this too, so images work (on memory
 // bitmaps) before any window is opened.
@@ -88,6 +124,29 @@ static void ensure_init(void) {
     }
     if (!al_is_keyboard_installed()) {
         al_install_keyboard();
+    }
+    if (!al_is_font_addon_initialized()) {
+        al_init_font_addon();
+    }
+    if (!al_is_ttf_addon_initialized()) {
+        al_init_ttf_addon();
+    }
+    if (!default_font) {
+        // Default font: Courier New 12pt monochrome (cbEnchanted's default). If
+        // the system font is unavailable, fall back to Allegro's built-in 8x8
+        // bitmap font so a current font always exists — Text and the metric
+        // queries never crash and work headless (improving on cbEnchanted,
+        // which warned and risked a crash).
+        std::string path = cb_findfont("Courier New");
+        if (!path.empty()) {
+            default_font = al_load_font(path.c_str(), 12, ALLEGRO_TTF_MONOCHROME);
+        }
+        if (!default_font) {
+            default_font = al_create_builtin_font();
+        }
+        if (!current_font) {
+            current_font = default_font;
+        }
     }
 }
 
@@ -176,10 +235,17 @@ extern "C" void cb_rt_screenshot(const CbString* path) {
     al_save_bitmap(p.c_str(), al_get_backbuffer(display));
 }
 
+// Renders the persistent AddText queue onto the backbuffer (defined in the Text
+// & fonts section). Called each frame just before the flip.
+static void render_queued_texts(void);
+
 // Shared DrawScreen body. `clear_after` controls whether the backbuffer is
 // cleared once events are drained (the `cls` flag of the 2-arg form).
 static void do_draw_screen(bool clear_after) {
     if (!display) return;
+
+    // Composite queued (Locate/AddText) text onto this frame before presenting.
+    render_queued_texts();
 
     al_flip_display();
 
@@ -800,4 +866,199 @@ extern "C" ALLEGRO_EVENT_QUEUE* cb_gfx_event_queue(void) {
 extern "C" int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth) {
     (void)depth;
     return (w > 0 && h > 0) ? 1 : 0;
+}
+
+// ─── Text & fonts (FD-018) ─────────────────────────────────────────────
+//
+// Ported from cbEnchanted's TextInterface (../cbEnchanted/src/textinterface.cpp)
+// onto this file's shared state: text draws in the current `draw_color` onto the
+// active `current_target`, font lookup honours `smooth_2d`, and the persistent
+// AddText queue re-renders every DrawScreen (render_queued_texts, above) until
+// ClearText. `Font` crosses the FFI as the opaque CbFont* handle.
+
+// Reads a CbString into a UTF-8 std::string (empty when null).
+static std::string cb_text_to_utf8(const CbString* s) {
+    std::string out;
+    if (s) {
+        std::size_t len = cb_rt_string_len(s);
+        if (len > 0) {
+            out.assign(reinterpret_cast<const char*>(cb_rt_string_data(s)), len);
+        }
+    }
+    return out;
+}
+
+// Splits a UTF-8 string into its codepoint substrings (1–4 bytes each). Used by
+// VerticalText so it advances one *character* per line, not one byte (cbEnchanted
+// iterated raw bytes — wrong for multibyte text).
+static std::vector<std::string> utf8_chars(const std::string& s) {
+    std::vector<std::string> out;
+    std::size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        std::size_t n = 1;
+        if      (c >= 0xF0) n = 4;
+        else if (c >= 0xE0) n = 3;
+        else if (c >= 0xC0) n = 2;
+        if (i + n > s.size()) n = 1;  // truncated/invalid lead byte: emit one byte
+        out.push_back(s.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+// Composites the persistent AddText queue onto the display backbuffer. Forward-
+// declared above do_draw_screen, which calls it once per frame before the flip.
+static void render_queued_texts(void) {
+    if (queued_texts.empty() || !display) return;
+    al_set_target_backbuffer(display);
+    for (const QueuedText& t : queued_texts) {
+        if (t.font) {
+            al_draw_text(t.font, t.col, (float)t.x, (float)t.y, 0, t.utf8.c_str());
+        }
+    }
+}
+
+// Text(x, y, s): draws immediately at (x, y) in the current font/color onto the
+// active render target. (DrawToWorld/camera coordinates are not yet modelled, so
+// this is always screen/target space.)
+extern "C" void cb_rt_text(double x, double y, const CbString* s) {
+    ensure_init();
+    if (!current_target || !current_font) return;
+    std::string txt = cb_text_to_utf8(s);
+    al_draw_text(current_font, draw_color, (float)x, (float)y, 0, txt.c_str());
+}
+
+// CenterText(x, y, s, style): style 0=horizontal centering, 1=vertical, 2=both
+// (mirrors cbEnchanted's HCenter/VCenter/Center alignment).
+extern "C" void cb_rt_center_text(int32_t x, int32_t y, const CbString* s,
+                                  int32_t style) {
+    ensure_init();
+    if (!current_target || !current_font) return;
+    std::string txt = cb_text_to_utf8(s);
+    float fx = (float)x;
+    float fy = (float)y;
+    float half_ascent = al_get_font_ascent(current_font) * 0.5f;
+    switch (style) {
+        case 1:  // vertical only: shift up half an ascent, left-aligned
+            al_draw_text(current_font, draw_color, fx, fy - half_ascent, 0,
+                         txt.c_str());
+            break;
+        case 2:  // both axes
+            al_draw_text(current_font, draw_color, fx, fy - half_ascent,
+                         ALLEGRO_ALIGN_CENTRE, txt.c_str());
+            break;
+        case 0:  // horizontal only
+        default:
+            al_draw_text(current_font, draw_color, fx, fy, ALLEGRO_ALIGN_CENTRE,
+                         txt.c_str());
+            break;
+    }
+}
+
+// VerticalText(x, y, s): one character per line, top-to-bottom.
+//
+// NOTE: our docs (docs/cb_runtime.md) specify VerticalText(x, y, s); cbEnchanted
+// pops its arguments as (y, x, s), a likely long-standing label swap there. We
+// follow the documented (x, y, s) order.
+extern "C" void cb_rt_vertical_text(int32_t x, int32_t y, const CbString* s) {
+    ensure_init();
+    if (!current_target || !current_font) return;
+    std::string txt = cb_text_to_utf8(s);
+    int32_t line_h = al_get_font_line_height(current_font);
+    float fy = (float)y;
+    for (const std::string& ch : utf8_chars(txt)) {
+        al_draw_text(current_font, draw_color, (float)x, fy, 0, ch.c_str());
+        fy += (float)line_h;
+    }
+}
+
+// Locate(x, y): sets the AddText cursor.
+extern "C" void cb_rt_locate(int32_t x, int32_t y) {
+    text_loc_x = x;
+    text_loc_y = y;
+}
+
+// AddText(s): queues persistent on-screen text at the cursor (snapshotting the
+// current font/color), then advances the cursor one line.
+extern "C" void cb_rt_add_text(const CbString* s) {
+    ensure_init();
+    QueuedText t;
+    t.font = current_font;
+    t.utf8 = cb_text_to_utf8(s);
+    t.x    = text_loc_x;
+    t.y    = text_loc_y;
+    t.col  = draw_color;
+    queued_texts.push_back(std::move(t));
+    if (current_font) {
+        text_loc_y += al_get_font_line_height(current_font);
+    }
+}
+
+// ClearText(): drops the queued text and resets the cursor.
+extern "C" void cb_rt_clear_text(void) {
+    queued_texts.clear();
+    text_loc_x = 0;
+    text_loc_y = 0;
+}
+
+// LoadFont(name, size, bold, italic, underline) -> Font. `name` with a '.' is a
+// file path; otherwise it is a system font family name resolved via cb_findfont.
+// Smooth2D selects antialiased vs monochrome rendering. `underline` is accepted
+// but not rendered (cbEnchanted TODO). Returns null (CB `0`) on failure.
+extern "C" CbFont* cb_rt_load_font(const CbString* name, int32_t size,
+                                   int32_t bold, int32_t italic,
+                                   int32_t underline) {
+    ensure_init();
+    (void)underline;
+    std::string fontname = cb_text_to_utf8(name);
+    std::string path;
+    if (fontname.find('.') != std::string::npos) {
+        path = fontname;  // looks like a file path → load directly
+    } else {
+        path = cb_findfont(fontname.c_str(), bold != 0, italic != 0);
+    }
+    if (path.empty()) return nullptr;
+
+    int flags = smooth_2d ? 0 : ALLEGRO_TTF_MONOCHROME;
+    ALLEGRO_FONT* f = al_load_font(path.c_str(), size, flags);
+    if (!f) return nullptr;
+    return new CbFont{f};
+}
+
+// SetFont(f): makes `f` the current font; a null handle resets to the default.
+extern "C" void cb_rt_set_font(CbFont* f) {
+    ensure_init();
+    current_font = (f && f->font) ? f->font : default_font;
+}
+
+// DeleteFont(f): frees a font. If it was current, falls back to the default so
+// later text never dereferences a freed font.
+extern "C" void cb_rt_delete_font(CbFont* f) {
+    if (!f) return;
+    if (current_font == f->font) {
+        current_font = default_font;
+    }
+    if (f->font) {
+        al_destroy_font(f->font);
+    }
+    delete f;
+}
+
+// TextWidth(s): pixel width of `s` in the current font (0 with no font).
+extern "C" int32_t cb_rt_text_width(const CbString* s) {
+    ensure_init();
+    if (!current_font) return 0;
+    std::string txt = cb_text_to_utf8(s);
+    return al_get_text_width(current_font, txt.c_str());
+}
+
+// TextHeight(s): pixel height of `s` in the current font (0 with no font).
+extern "C" int32_t cb_rt_text_height(const CbString* s) {
+    ensure_init();
+    if (!current_font) return 0;
+    std::string txt = cb_text_to_utf8(s);
+    int bx, by, bw, bh;
+    al_get_text_dimensions(current_font, txt.c_str(), &bx, &by, &bw, &bh);
+    return bh;
 }

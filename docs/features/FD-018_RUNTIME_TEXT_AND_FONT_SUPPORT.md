@@ -1,6 +1,6 @@
 # FD-018: Runtime Text and Font Support
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings the last major missing graphics subsystem online — on-screen text and TrueType fonts — so CoolBasic programs can render UI, HUDs, and debug overlays.
@@ -88,6 +88,38 @@ Open design questions to resolve before/while implementing:
   and visually confirm placement/centering/color/font.
 - `Font` opaque handle round-trips: assignable, null-comparable, rejected for
   arithmetic by sema (inherits FD-011 custom-type rules for free).
+
+## Implementation Notes
+
+Delivered as designed. Decisions confirmed with the user: opaque `CbFont*`
+(`CB_TYPE_FONT = 12`); **full faithful** `findfont` port; **builtin-font
+fallback** for the default font.
+
+- **`runtime/cb_font.cpp` + `cb_font.h`** — `cb_findfont(name, bold, italic)`:
+  Windows ports cbEnchanted's 4 family→file tables verbatim under `%WINDIR%\Fonts`
+  (guarded against a null `WINDIR`); non-Windows uses fontconfig under
+  `FONTCONFIG_FOUND`, else returns `""`.
+- **`runtime/cb_gfx.cpp`** — `struct CbFont`; font/ttf addon init + default-font
+  load (Courier New 12pt monochrome → `al_create_builtin_font()` fallback) in
+  `ensure_init`; the 11 `cb_rt_*` functions; persistent `queued_texts` rendered by
+  `render_queued_texts()`, called in `do_draw_screen` just before the flip.
+  `VerticalText` iterates UTF-8 **codepoints** (cbEnchanted iterated raw bytes);
+  implemented as documented `(x, y, s)`, with the cbEnchanted `(y, x, s)` swap
+  noted in a comment.
+- **`catalog.cpp` / `cb_runtime_func.h`** — `CbFont` typedef, `CB_TYPE_FONT` tag +
+  `type_tag` pair, `"Font"` type row, 11 `CB_FN` rows, 11 prototypes.
+- **Rust:** one real fix surfaced by `LoadFont`'s failure path — `ffi.rs` now maps a
+  **null opaque return to `Value::Null`** (was `OpaqueHandle(0)`), so the
+  documented "0 on failure" / `= Null` comparison works for every opaque-returning
+  runtime function (also benefits `LoadImage`). No other Rust changes; `Font`
+  registers from the catalog like `Image`.
+
+**Verified:** `cargo build`, `cargo test --workspace` (all green, incl. new
+`runtime_text_fd018`), `cargo clippy --workspace --all-targets -D warnings` clean.
+`Font` round-trips: declarable, `LoadFont`-returned, `= Null`-comparable, and
+arithmetic rejected (E0301). The `runtime_text_fd018` golden runs headless with
+font-independent assertions. **Remaining:** the manual real-display smoke test
+(placement/centering/color/font face, AddText persistence) is not yet done.
 
 ## Related
 

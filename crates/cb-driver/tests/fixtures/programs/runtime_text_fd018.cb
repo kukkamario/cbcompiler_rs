@@ -1,0 +1,39 @@
+// FD-018 text & font smoke test. Headless: drawing targets a memory-bitmap
+// image (DrawToImage), so the Text / CenterText / VerticalText draw paths run
+// without a window. The asserted output uses only font-independent invariants
+// (empty width is 0; the monospace default font doubles width for doubled
+// text), so the golden is stable regardless of which system font backs the
+// default — Courier New where present, Allegro's built-in 8x8 font otherwise.
+
+Dim img As Image
+img = MakeImage(64, 32)
+DrawToImage(img)
+
+// Exercise every draw path onto the image (success == no crash; the visible
+// result is the trailing "done").
+Color(255, 255, 255)
+Text 2, 2, "hi"
+CenterText 32, 16, "mid", 2
+VerticalText 0, 0, "abc"
+Locate 4, 4
+AddText "line one"
+AddText "line two"
+ClearText
+
+// A bogus family name is in no font table and is not a file path, so LoadFont
+// reliably resolves it to Null (the null Font handle) on every machine.
+If LoadFont("no_such_font_zzz", 12, 0, 0, 0) = Null Then Print "missing_font_ok"
+
+// Font handle lifecycle. If "Courier New" is present this loads a real font;
+// if not, LoadFont returns 0 and SetFont/DeleteFont degrade safely. Either way
+// DeleteFont restores the default font for the metric checks below.
+Dim f As Font
+f = LoadFont("Courier New", 16, 0, 0, 0)
+SetFont f
+DeleteFont f
+
+// Font-independent metric invariants (the default font is monospace).
+If TextWidth("") = 0 Then Print "empty_width_ok"
+If TextWidth("AA") = TextWidth("A") * 2 Then Print "monospace_ok"
+If TextHeight("Mg") > 0 Then Print "height_ok"
+Print "done"

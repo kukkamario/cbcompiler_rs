@@ -738,7 +738,7 @@ intentionally. Known status and divergences as of the latest runtime work
   as in cbEnchanted). `FrameLimit`/`Errors`/`SetWindow`/`Crc32` remain deferred
   (window/loop/error-display plumbing).
 - **Graphics / images** (FD-013 Batch 4, Allegro 5, `runtime/cb_gfx.cpp`).
-  `Image` wraps an Allegro bitmap. `Text` was not yet implemented (fonts batch).
+  `Image` wraps an Allegro bitmap.
   `DeleteImage` exists (the legacy leaked image handles until exit). `Circle`'s
   argument is a diameter; `GetPixel`/`PutPixel` packed form uses 32-bit ARGB.
   `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap fallback).
@@ -771,11 +771,22 @@ intentionally. Known status and divergences as of the latest runtime work
   `WaitMouse` (block on the window event queue; with no window they return 0
   immediately rather than hang). `MouseWX`/`MouseWY` and `Input`/`CloseInput`/
   `SafeExit` remain deferred (camera / interactive on-screen entry).
+- **Text / fonts** (FD-018, Allegro font/ttf addons, `runtime/cb_gfx.cpp` +
+  `runtime/cb_font.cpp`). `Font` is an opaque handle (like `Image`). Immediate
+  `Text`/`CenterText`/`VerticalText` draw in the current color onto the active
+  target; the `Locate`/`AddText`/`ClearText` queue re-renders every `DrawScreen`
+  until cleared. `LoadFont` takes a system family name (resolved via a ported
+  Windows font table / fontconfig on Linux) or a file path (name containing a
+  `.`); `Smooth2D` toggles antialiased vs monochrome glyphs; `underline` is
+  accepted but not rendered (cbEnchanted TODO). The default font is Courier New
+  12pt, falling back to Allegro's built-in 8×8 font so `Text`/`TextWidth`/
+  `TextHeight` never crash and work headless. `VerticalText` is documented as
+  `(x, y, s)` (cbEnchanted's command pops `(y, x, s)` — a likely label swap).
 - **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
   cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
   implementing.
 - **Not yet implemented** in cbcompiler_rs: objects/sprites, collision, camera,
-  tile maps, sound, video playback, particles, fonts/text, file I/O, memblocks,
+  tile maps, sound, video playback, particles, file I/O, memblocks,
   `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, multi-frame sprite sheets
   (`LoadAnimImage` and the `frame` params), and the plumbing-heavy System funcs
   (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).

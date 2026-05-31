@@ -320,13 +320,14 @@ mod tests {
     fn load_catalog_returns_expected_entries() {
         let catalog = load_catalog().expect("catalog should load");
 
-        // Type declarations: TestHandle (tag 10) and the Image graphics
-        // handle (tag 11, FD-013 Batch 4).
+        // Type declarations: TestHandle (tag 10), the Image graphics handle
+        // (tag 11, FD-013 Batch 4), and the Font handle (tag 12, FD-018).
         let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
             catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
-        assert_eq!(catalog.types.len(), 2);
+        assert_eq!(catalog.types.len(), 3);
         assert_eq!(types_by_name["TestHandle"].tag, 10);
         assert_eq!(types_by_name["Image"].tag, 11);
+        assert_eq!(types_by_name["Font"].tag, 12);
 
         // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
         // makes this a linker-checked invariant.
