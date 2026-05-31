@@ -158,3 +158,44 @@ fn runtime_function_call() {
     let ir = lower_with_catalog("print(\"hello world\")\n", &catalog);
     insta::assert_snapshot!(ir);
 }
+
+// Regression: a bare (no-paren, no-arg) call to an *overloaded* command must
+// lower to a 0-arg call. `DrawScreen` gained a 2-arg overload (FD-017), turning
+// it into an OverloadSet; lowering previously only handled Function/RuntimeFn
+// for bare statements, so `DrawScreen` was silently dropped — the window never
+// flipped or pumped events (black, unclosable). See lower.rs ExprStmt handling.
+#[test]
+fn bare_overloaded_command_lowers_to_call() {
+    let two_param = || {
+        vec![
+            cb_sema::FuncParamDesc { name: None, ty: cb_ir::types::IrType::Int },
+            cb_sema::FuncParamDesc { name: None, ty: cb_ir::types::IrType::Int },
+        ]
+    };
+    let catalog = cb_sema::RuntimeCatalog {
+        types: Vec::new(),
+        functions: vec![
+            // 0-arg variant
+            cb_sema::FuncDesc {
+                name: "drawscreen".to_string(),
+                c_symbol: "cb_rt_drawscreen".to_string(),
+                fn_ptr: dummy_runtime_fn,
+                params: Vec::new(),
+                return_ty: cb_ir::types::IrType::Void,
+            },
+            // 2-arg variant — makes `drawscreen` an overload set
+            cb_sema::FuncDesc {
+                name: "drawscreen".to_string(),
+                c_symbol: "cb_rt_drawscreen_args".to_string(),
+                fn_ptr: dummy_runtime_fn,
+                params: two_param(),
+                return_ty: cb_ir::types::IrType::Void,
+            },
+        ],
+    };
+    let ir = lower_with_catalog("DrawScreen\n", &catalog);
+    assert!(
+        ir.contains("call drawscreen"),
+        "bare overloaded command did not lower to a call:\n{ir}"
+    );
+}

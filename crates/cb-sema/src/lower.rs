@@ -1166,6 +1166,14 @@ impl<'a> Lowerer<'a> {
                             DeclKind::RuntimeFn { c_symbol, .. } => {
                                 self.runtime_func_map.get(c_symbol).copied()
                             }
+                            // An overloaded command called bare (no parens, no
+                            // args) — e.g. `DrawScreen`, `Lock` — resolves to its
+                            // zero-parameter variant. Without this arm the call is
+                            // silently dropped (the window never flips/pumps).
+                            DeclKind::OverloadSet { variants } => variants
+                                .iter()
+                                .find(|v| v.params.is_empty())
+                                .and_then(|v| self.runtime_func_map.get(&v.c_symbol).copied()),
                             _ => None,
                         };
                         if let Some(func_id) = func_id {

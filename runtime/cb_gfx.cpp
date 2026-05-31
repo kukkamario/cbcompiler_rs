@@ -99,6 +99,10 @@ extern "C" void cb_rt_screen(int32_t w, int32_t h) {
     if (display) {
         al_destroy_display(display);
     }
+    // Request vsync so the present is throttled to the monitor refresh; without
+    // it a `Repeat ... DrawScreen ... Forever` loop spins the render thread at
+    // max FPS (100% CPU). Best-effort — a driver may ignore the suggestion.
+    al_set_new_display_option(ALLEGRO_VSYNC, 1, ALLEGRO_SUGGEST);
     display = al_create_display(w, h);
     if (!display) return;
     screen_w = w;
