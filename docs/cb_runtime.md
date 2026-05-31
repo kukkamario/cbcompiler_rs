@@ -321,6 +321,22 @@ String indices are **1-based** in CoolBasic.
 
 ---
 
+## Runtime Library Architecture (cbcompiler_rs, FD-016)
+
+The C++ runtime is split into two static libraries with a strict, one-directional dependency (functionality → core; core depends on nothing functional):
+
+- **`cb_runtime_core`** — the irreducible, plugin-facing ABI. Contains the opaque `CbString` type and its primitives, the `CbStringApi` table, the catalog descriptor structs (`CbTypeTag`, `CbTypeDesc`, `CbParamDesc`, `CbFuncDesc`, `CbCatalog`), `CB_CATALOG_VERSION`, and the `cb_runtime_get_catalog` declaration. (FD-015 adds the `CbHostApi`/`CbRuntimeHooks`/`cb_runtime_init` trap-channel handshake here.) **Zero Allegro dependency** — it links nothing but the C/C++ standard library. Header: `runtime/cb_runtime_core.h`. Single TU: `runtime/cb_string.cpp`.
+- **`cb_runtime`** (functionality) — the feature subsystems built on core: the catalog assembly, the String library (`cb_strfuncs.cpp`), Math, System/Time, Graphics, Input. Links `cb_runtime_core` plus the full Allegro transitive closure. Header: `runtime/cb_runtime_func.h`.
+
+`runtime/cb_runtime.h` remains as a back-compat umbrella that includes both narrow headers; it will be removed once every TU migrates to the header it actually needs.
+
+### Plugin ABI contract
+
+Plugins (separate DLLs, loaded per FD-009) handle `String` parameters by **statically linking `cb_runtime_core`** and calling its primitives directly — no function-pointer indirection on the hot path. This works because cross-module `CbString` values share one heap and rely only on value-based identity, not addresses:
+
+- **Shared heap is required.** A `CbString*` allocated in one module and freed in another must hit the same `malloc`/`free`. Plugins **must** be built against the same dynamic CRT (`/MD` on Windows; the project's `x64-windows-static-md` triplet guarantees a single shared ucrt heap) and the same `cb_runtime_core.h` ABI version (`CB_CATALOG_VERSION` guards header-revision drift). A static-CRT plugin breaks cross-module `free`.
+- **Identity is value-based, never address-based.** Emptiness is `len == 0`; immortality (retain/release no-op) is `refcount < 0`. The single `CB_EMPTY_STRING_INSTANCE` address is only an intra-module allocation-avoidance shortcut — each module may have its own empty sentinel, and code must **never** compare a string pointer against `cb_runtime_string_api.empty` for correctness. The in-tree String library (`cb_strfuncs.cpp`) is a worked example: it builds strings using only the public core primitives.
+
 ## Notes
 
 - **Overload resolution**: Many functions have multiple overloads (e.g., `Color` with 3 or 4 args, `Rnd` with 1 or 2 args). The compiler resolves these by parameter count and type at compile time.
