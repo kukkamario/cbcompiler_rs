@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-019](FD-019_RUNTIME_DEFINED_CONSTANTS.md) | Runtime-Defined Constants | Open | Medium | Medium |
 
 ## Completed
 
