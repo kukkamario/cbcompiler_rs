@@ -70,7 +70,12 @@ fn main() {
         "cargo:rustc-link-search=native={}",
         out_dir.join("Release").display()
     );
+    // Functionality lib before core lib: cb_runtime references core symbols,
+    // and GNU ld resolves left-to-right (a dependent must precede its
+    // dependency). MSVC is order-insensitive for static libs. The Allegro
+    // transitive closure (parsed below) needs only the functionality lib.
     println!("cargo:rustc-link-lib=static=cb_runtime");
+    println!("cargo:rustc-link-lib=static=cb_runtime_core");
 
     // Read the transitive link list emitted by runtime/CMakeLists.txt.
     // Multi-config generators (MSVC) produce per-config files; we only ever
@@ -131,6 +136,7 @@ fn main() {
         "catalog.cpp",
         "cb_math.cpp",
         "cb_string.cpp",
+        "cb_strfuncs.cpp",
         "cb_system.cpp",
         "cb_gfx.cpp",
         "cb_input.cpp",

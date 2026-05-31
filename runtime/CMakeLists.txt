@@ -9,16 +9,32 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Allegro CONFIG REQUIRED)
 
+# ─── Core library (FD-016) ───────────────────────────────────────────────
+# The irreducible, plugin-facing runtime: the opaque string type + its
+# primitives and the CbStringApi table. ZERO Allegro / functionality
+# dependency — this is what a plugin statically links to handle String
+# parameters. (FD-015 will add cb_host.cpp here for the trap-channel
+# handshake.)
+add_library(cb_runtime_core STATIC
+    cb_string.cpp
+)
+target_include_directories(cb_runtime_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# ─── Functionality library ───────────────────────────────────────────────
+# The feature subsystems built on top of core: the catalog assembly, the
+# String library, Math, System/Time, Graphics, Input. Links core + Allegro;
+# the whole Allegro transitive-closure machinery below is attached here only.
 add_library(cb_runtime STATIC
     catalog.cpp
     cb_math.cpp
-    cb_string.cpp
+    cb_strfuncs.cpp
     cb_system.cpp
     cb_gfx.cpp
     cb_input.cpp
 )
 
 target_include_directories(cb_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cb_runtime PUBLIC cb_runtime_core)
 
 set(CB_ALLEGRO_MODULES
     Allegro::allegro
