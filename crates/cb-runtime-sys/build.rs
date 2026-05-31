@@ -136,6 +136,8 @@ fn main() {
         "cb_input.cpp",
         "cb_input.h",
         "cb_runtime.h",
+        "cb_runtime_core.h",
+        "cb_runtime_func.h",
         "CMakeLists.txt",
     ] {
         println!("cargo:rerun-if-changed={}", runtime_src.join(f).display());
