@@ -1,0 +1,99 @@
+// FD-018 Text & Fonts showcase (manual — opens a real window).
+//
+//   cargo run -p cb-driver -- examples/text_showcase.cb
+//
+// Draws lots of on-screen text in many faces, styles, sizes, colours, and
+// alignments, exercising every command in the Text & Fonts surface:
+//   LoadFont / SetFont / DeleteFont, Text / CenterText / VerticalText,
+//   Locate / AddText / ClearText, TextWidth / TextHeight, and the default font.
+// Press Esc (or close the window) to quit. Not an automated test — window code
+// can't run headless.
+
+Screen 800, 600
+ClsColor 12, 12, 24
+
+// Smooth2D before LoadFont so the loaded faces are anti-aliased (LoadFont
+// honors the current Smooth2D state). 1 = on, 0 = off.
+Smooth2D 1
+
+// --- Load a spread of fonts: family name + size + bold/italic/underline ---
+// LoadFont(name$, size, bold, italic, underline) -> Font; 0 / Null on failure.
+title    As Font = LoadFont("Arial",           40, 1, 0, 0)   // big bold
+heading  As Font = LoadFont("Arial",           22, 1, 0, 0)
+italic   As Font = LoadFont("Times New Roman", 22, 0, 1, 0)   // italic serif
+under    As Font = LoadFont("Arial",           22, 0, 0, 1)   // underlined
+mono     As Font = LoadFont("Courier New",     18, 0, 0, 0)   // monospace
+small    As Font = LoadFont("Arial",           14, 0, 0, 0)
+
+frame = 0
+
+Repeat
+    Cls
+    frame = frame + 1
+
+    // --- Banner: big bold centred title (style 0 = horizontal centring) ---
+    SetFont title
+    Color 255, 220, 80
+    CenterText 400, 40, "Text & Font Showcase", 0
+
+    // --- Immediate Text in several colours, default-ish heading font ---
+    SetFont heading
+    Color 255, 120, 120 : Text 40, 110, "Text() draws at an exact (x, y)."
+    Color 120, 255, 120 : Text 40, 150, "The current Color tints every glyph."
+    Color 120, 180, 255 : Text 40, 190, "Switch fonts with SetFont at any time."
+
+    // --- Style sampler: one line per face/style ---
+    SetFont italic
+    Color 230, 230, 230 : Text 40, 250, "Italic serif (Times New Roman)"
+    SetFont under
+    Color 230, 230, 230 : Text 40, 290, "Underlined Arial"
+    SetFont mono
+    Color 180, 255, 200 : Text 40, 330, "Monospaced Courier New 0123456789"
+
+    // --- TextWidth / TextHeight: measure, then box the measured text ---
+    SetFont heading
+    sample$ = "Measured box"
+    w = TextWidth(sample$)
+    h = TextHeight(sample$)
+    Color 80, 80, 120
+    Box 40, 380, w, h, 0          // outline exactly around the text
+    Color 255, 255, 255
+    Text 40, 380, sample$
+
+    // --- VerticalText: one character per line, down the right edge ---
+    SetFont heading
+    Color 255, 180, 255
+    VerticalText 760, 110, "VERTICAL"
+
+    // --- CenterText styles: 0=horizontal, 1=vertical, 2=both ---
+    SetFont small
+    Color 200, 200, 120
+    CenterText 620, 250, "centre-h (style 0)", 0
+    CenterText 620, 300, "centre-v (style 1)", 1
+    CenterText 620, 350, "centre-both (style 2)", 2
+
+    // --- Queued text: Locate sets the cursor, AddText stacks lines ---
+    // Rebuilt every frame so the live counter updates; ClearText resets it.
+    ClearText
+    Locate 40, 440
+    SetFont small
+    Color 160, 220, 255
+    AddText "Queued text via Locate + AddText:"
+    AddText "  frame = " + frame
+    AddText "  each AddText drops one line"
+    AddText "  ClearText wipes the queue"
+
+    // --- Default font (no SetFont needed) for the footer hint ---
+    SetFont small
+    Color 140, 140, 140
+    Text 40, 560, "Esc to quit"
+
+    DrawScreen
+
+    If EscapeKey() Then End
+Forever
+
+// Fonts are freed by the OS on exit, but DeleteFont is how you'd release them
+// explicitly if this were a long-running program loading fonts on the fly:
+//   DeleteFont title : DeleteFont heading : DeleteFont italic
+//   DeleteFont under : DeleteFont mono : DeleteFont small
