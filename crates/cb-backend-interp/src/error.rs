@@ -13,6 +13,11 @@ pub struct InterpError {
 pub enum InterpErrorKind {
     Trap(TrapKind),
     RuntimeError(String),
+    /// Clean program exit requested by the runtime via the trap channel
+    /// (FD-015 `request_exit`). Carried as an error so it propagates up the
+    /// `?` chain like a trap, but `run` intercepts it and converts it to
+    /// `Ok(code)` — it should never reach the driver's error path.
+    Exit(i32),
 }
 
 #[derive(Debug)]
@@ -36,6 +41,8 @@ impl fmt::Display for InterpError {
                 write!(f, "runtime trap: {msg}")
             }
             InterpErrorKind::RuntimeError(msg) => write!(f, "runtime error: {msg}"),
+            // Should be intercepted by `run` and never displayed; defensive.
+            InterpErrorKind::Exit(code) => write!(f, "exit {code}"),
         }
     }
 }

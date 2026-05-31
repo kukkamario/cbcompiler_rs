@@ -21,7 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define CB_CATALOG_VERSION 4
+#define CB_CATALOG_VERSION 5
 
 typedef uint32_t CbTypeTag;
 #define CB_TYPE_VOID    0
@@ -113,6 +113,36 @@ typedef struct {
     const CbStringApi*  strings;
 } CbCatalog;
 
+/* ─── Runtime Trap Channel (FD-015) ──────────────────────────────────────
+   A cooperative, runtime-originated signalling channel. A `cb_rt_*` function
+   asks the host to terminate cleanly or raise a runtime error by calling back
+   through `CbHostApi`; the callback records the intent and RETURNS (it never
+   unwinds the C frame). The host delivers its API once, at startup, via the
+   `cb_runtime_init` handshake (modelled on SQLite's loadable-extension pApi);
+   each module — the main runtime and every plugin DLL — keeps its own
+   `g_host`. `CbCatalog`/`CbStringApi` stay const and are unaffected. */
+
+typedef struct {
+    uint32_t size;             /* sizeof(CbHostApi) — caller-set ABI guard */
+    uint32_t abi_version;      /* == CB_CATALOG_VERSION */
+    void (*request_exit)(int32_t code);        /* clean exit; host → Ok(code) */
+    void (*raise_error)(const CbString* msg);  /* fatal runtime error → exit 1 */
+    /* grow by appending; readers gate on `size` */
+} CbHostApi;
+
+typedef struct {
+    uint32_t size;             /* sizeof(CbRuntimeHooks) — callee-set */
+    void (*about_to_exit)(void);   /* host calls before shutdown; nullable.
+                                      RESERVED — returned null for now. */
+    /* grow by appending */
+} CbRuntimeHooks;
+
+/* can-trap flag bit for CbFuncDesc.flags — RESERVED for a future LLVM backend
+   to gate its post-call pending-check so pure math/trig pays nothing. The
+   interpreter drains the channel unconditionally after every call and ignores
+   this bit. */
+#define CB_FUNC_CAN_TRAP 0x1u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -137,11 +167,17 @@ int32_t cb_rt_string_test_refcount(const CbString* s);
 
 extern const CbStringApi cb_runtime_string_api;
 
-/* FD-015 (Runtime Trap Channel): the host/hook handshake types
-   (CbHostApi, CbRuntimeHooks) and the `cb_runtime_init` entry point will be
-   added here, in core, by that FD — they are functionality-agnostic and a
-   core-only plugin needs them without dragging in Allegro. CB_CATALOG_VERSION
-   bumps 4 -> 5 at that point. */
+/* Runtime Trap Channel handshake (FD-015). The host passes its API by const
+   pointer; the runtime stashes it in a file-static and returns the hook table
+   it wants connected (null hooks = not connected). Kept separate from
+   cb_runtime_get_catalog, which must stay retrievable as pure data before
+   init runs. Each plugin DLL exports both entry points. */
+const CbRuntimeHooks* cb_runtime_init(const CbHostApi* host);
+
+/* Runtime-side accessor for `g_host` — `cb_rt_*` functions call
+   `cb_host()->request_exit(...)` / `->raise_error(...)`. Returns null before
+   cb_runtime_init has run. */
+const CbHostApi* cb_host(void);
 
 #ifdef __cplusplus
 }

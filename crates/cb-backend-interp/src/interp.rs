@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::Write;
 use std::rc::Rc;
 
@@ -6,7 +6,7 @@ use cb_diagnostics::{Interner, Span};
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
 use cb_ir::types::IrType;
 use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg};
-use cb_runtime_sys::CbStringApi;
+use cb_runtime_sys::{CbHostApi, CbString, CbStringApi};
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
 use crate::heap::{ArrayObj, Slab, TypeInstanceObj, TypeList};
@@ -18,6 +18,57 @@ pub type Slot = (Value, bool);
 type FrameBuf = (Vec<Value>, Vec<Slot>);
 
 const MAX_CALL_DEPTH: usize = 10_000;
+
+// ── Runtime trap channel (FD-015) ──────────────────────────────────────
+//
+// A runtime (C) function asks the host to terminate cleanly or raise an error
+// by calling back through `HOST_API`; the callback records the request in this
+// thread-local slot and returns (it must never unwind the C frame). The
+// interpreter drains the slot in `call_runtime` immediately after each FFI
+// dispatch and routes it through the normal `Result`-up-the-stack path.
+
+enum PendingTrap {
+    Exit(i32),
+    Error(String),
+}
+
+thread_local! {
+    static PENDING_TRAP: Cell<Option<PendingTrap>> = const { Cell::new(None) };
+}
+
+extern "C" fn host_request_exit(code: i32) {
+    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Exit(code))));
+}
+
+#[allow(unsafe_code)]
+extern "C" fn host_raise_error(msg: *const CbString) {
+    // Copy the message bytes into an owned String at the boundary — the
+    // CbString argument is only borrowed for the duration of the call.
+    let text = if msg.is_null() {
+        String::new()
+    } else {
+        let api = cb_runtime_sys::string_api();
+        let len = unsafe { (api.len)(msg) };
+        if len == 0 {
+            String::new()
+        } else {
+            let data = unsafe { (api.data)(msg) };
+            let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    };
+    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Error(text))));
+}
+
+/// The host API handed to the runtime via `cb_runtime_init` at startup.
+/// `'static` so the runtime may hold the pointer for the whole program; the
+/// callbacks write to the thread-local `PENDING_TRAP` slot.
+static HOST_API: CbHostApi = CbHostApi {
+    size: std::mem::size_of::<CbHostApi>() as u32,
+    abi_version: cb_runtime_sys::CB_CATALOG_VERSION,
+    request_exit: host_request_exit,
+    raise_error: host_raise_error,
+};
 
 pub struct Frame {
     pub func_id: FuncId,
@@ -48,6 +99,11 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
 impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
         let string_api = cb_runtime_sys::string_api();
+        // FD-015: hand the runtime the host trap-channel API once, before any
+        // runtime function runs. The returned hooks (about_to_exit) are
+        // reserved/unused for now. Clear any stale pending trap on this thread.
+        let _ = cb_runtime_sys::runtime_init(&HOST_API);
+        PENDING_TRAP.with(|slot| slot.set(None));
         let struct_defs = &program.struct_defs;
         let globals = program
             .globals
@@ -114,7 +170,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         };
 
         self.push_frame(main_id, body_index, &[], None)?;
-        self.exec_loop()
+        // FD-015: a runtime `request_exit(code)` surfaces as `Exit(code)` from
+        // `call_runtime`; intercept it here and convert to the clean exit code,
+        // mirroring the `Terminator::Halt { code } => Ok(code)` path.
+        match self.exec_loop() {
+            Err(InterpError {
+                kind: InterpErrorKind::Exit(code),
+                ..
+            }) => Ok(code),
+            other => other,
+        }
     }
 
     fn find_main(&self) -> Result<FuncId, InterpError> {
@@ -1182,7 +1247,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         fn_ptr: unsafe extern "C" fn(),
         sig: &cb_ir::FnSig,
         args: &[Value],
-        _span: Span,
+        span: Span,
     ) -> Result<Value, InterpError> {
         // Intrinsic overrides — keep this set small. Each entry is a
         // deliberate decision that the interpreter needs to handle this
@@ -1196,7 +1261,23 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
 
         // General path: libffi dispatch using the catalog fn_ptr + IR sig.
-        Ok(unsafe { crate::ffi::call(fn_ptr, sig, args, self.string_api) })
+        let ret = unsafe { crate::ffi::call(fn_ptr, sig, args, self.string_api) };
+
+        // FD-015: drain any trap the runtime recorded during the call. The
+        // callback returned normally (never unwinds), so we route the request
+        // through the Result chain here, at the single FFI chokepoint.
+        if let Some(pending) = PENDING_TRAP.with(|slot| slot.take()) {
+            return match pending {
+                PendingTrap::Exit(code) => Err(self.error(InterpErrorKind::Exit(code))),
+                PendingTrap::Error(msg) => {
+                    if let Some(frame) = self.call_stack.last() {
+                        self.observer.on_runtime_error(frame, &msg, span);
+                    }
+                    Err(self.error_at(InterpErrorKind::RuntimeError(msg), span))
+                }
+            };
+        }
+        Ok(ret)
     }
 
     // ── Error helpers ──────────────────────────────────────────────────

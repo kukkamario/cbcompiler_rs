@@ -17,6 +17,7 @@ find_package(Allegro CONFIG REQUIRED)
 # handshake.)
 add_library(cb_runtime_core STATIC
     cb_string.cpp
+    cb_host.cpp
 )
 target_include_directories(cb_runtime_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

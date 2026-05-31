@@ -224,6 +224,47 @@ fn end_statement_exits_zero() {
 }
 
 #[test]
+fn runtime_request_exit_sets_exit_code() {
+    // FD-015 trap channel: a runtime function calling the host's
+    // `request_exit(code)` terminates cleanly with that code (via the
+    // Exit→Ok(code) path), and the statement after it must not run.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "req_exit.cb",
+        "Print \"before\"\nTestRequestExit(7)\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(7)
+        .stdout(contains("before"))
+        .stdout(contains("after").not());
+}
+
+#[test]
+fn runtime_raise_error_writes_stderr_and_exits_one() {
+    // FD-015 trap channel: a runtime function calling the host's
+    // `raise_error(msg)` aborts with exit 1, renders "runtime error: <msg>"
+    // to stderr, and the statement after it must not run.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "raise_err.cb",
+        "Print \"before\"\nTestRaiseError(\"boom\")\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("before"))
+        .stdout(contains("after").not())
+        .stderr(contains("runtime error: boom"));
+}
+
+#[test]
 fn runtime_abs_overload_resolves() {
     let dir = tempdir().unwrap();
     let path = write_cb(&dir, "abs.cb", "Dim x As Int\nx = Abs(-5)\n");

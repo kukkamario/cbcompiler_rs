@@ -26,6 +26,8 @@ extern "C" {
     double  cb_rt_abs_float(double x);
     CbTestHandle* cb_rt_create_test_handle(void);
     int32_t cb_rt_use_test_handle(const CbTestHandle* handle);
+    void cb_rt_test_request_exit(int32_t code);
+    void cb_rt_test_raise_error(const CbString* msg);
 }
 
 // ─── Test-handle implementations ──────────────────────────────────────
@@ -40,6 +42,25 @@ extern "C" CbTestHandle* cb_rt_create_test_handle(void) {
 
 extern "C" int32_t cb_rt_use_test_handle(const CbTestHandle* handle) {
     return static_cast<int32_t>(reinterpret_cast<uintptr_t>(handle));
+}
+
+// ─── Trap-channel test functions (FD-015) ─────────────────────────────
+//
+// Test-only, like the test-handle pair above: they give the runtime trap
+// channel automated end-to-end coverage (the only production caller of
+// request_exit is the manual window-close path, and raise_error has no
+// production caller yet since out-of-range string args still clamp). Each
+// asks the host to act through cb_host(); the callback records intent and
+// returns, so we return normally afterwards.
+
+extern "C" void cb_rt_test_request_exit(int32_t code) {
+    const CbHostApi* h = cb_host();
+    if (h) h->request_exit(code);
+}
+
+extern "C" void cb_rt_test_raise_error(const CbString* msg) {
+    const CbHostApi* h = cb_host();
+    if (h) h->raise_error(msg);
 }
 
 extern "C" void cb_rt_print(const CbString* text) {
@@ -280,6 +301,10 @@ static const CbFuncDesc catalog_funcs[] = {
     // Test handles
     CB_FN("createtesthandle", cb_rt_create_test_handle),
     CB_FN("usetesthandle",    cb_rt_use_test_handle),
+
+    // Trap-channel test functions (FD-015; test-only, see implementations)
+    CB_FN("testrequestexit",  cb_rt_test_request_exit),
+    CB_FN("testraiseerror",   cb_rt_test_raise_error),
 };
 
 // ─── Catalog struct ────────────────────────────────────────────────────

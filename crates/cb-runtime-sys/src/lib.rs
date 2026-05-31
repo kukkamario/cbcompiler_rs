@@ -73,9 +73,31 @@ pub struct CbStringApi {
     pub empty:        *const CbString,
 }
 
+/// Host API delivered to the runtime at startup via [`runtime_init`] — the
+/// Runtime Trap Channel (FD-015, catalog v5). The runtime calls these to ask
+/// the host to terminate cleanly or raise a runtime error; each callback
+/// records the intent and returns (it never unwinds the C frame). `size` /
+/// `abi_version` are caller-set ABI guards. Mirrors C `CbHostApi`.
+#[repr(C)]
+pub struct CbHostApi {
+    pub size: u32,
+    pub abi_version: u32,
+    pub request_exit: extern "C" fn(i32),
+    pub raise_error: extern "C" fn(*const CbString),
+}
+
+/// Hook table the runtime returns from [`runtime_init`] — things the host
+/// calls *on* the runtime. `about_to_exit` is reserved (null) for now.
+/// Mirrors C `CbRuntimeHooks`.
+#[repr(C)]
+pub struct CbRuntimeHooks {
+    pub size: u32,
+    pub about_to_exit: Option<extern "C" fn()>,
+}
+
 // ── Constants ──────────────────────────────────────────────────────────
 
-pub const CB_CATALOG_VERSION: u32 = 4;
+pub const CB_CATALOG_VERSION: u32 = 5;
 const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
@@ -99,6 +121,11 @@ unsafe extern "C" {
     /// or a negative value for the static-data sentinel. Used by tests to
     /// verify retain/release lifecycle; not part of `CbStringApi`.
     pub fn cb_rt_string_test_refcount(s: *const CbString) -> i32;
+
+    /// Runtime Trap Channel handshake (FD-015): hand the runtime its host API
+    /// and receive the hook table back. See [`runtime_init`] for the safe
+    /// wrapper. Each plugin DLL exports this alongside `cb_runtime_get_catalog`.
+    pub fn cb_runtime_init(host: *const CbHostApi) -> *const CbRuntimeHooks;
 }
 
 /// Get the string API exposed by the loaded runtime catalog. Panics if
@@ -119,6 +146,19 @@ pub fn string_api() -> &'static CbStringApi {
         "catalog v{CB_CATALOG_VERSION} has null string API (runtime bug)"
     );
     unsafe { &*catalog.strings }
+}
+
+/// Deliver the host API to the runtime (the Runtime Trap Channel handshake,
+/// FD-015) and return the hook table the runtime wants connected, or `None`
+/// if it declines. Call once at interpreter startup, before any runtime
+/// function runs. `host` must outlive every runtime call — pass a `&'static`.
+pub fn runtime_init(host: &'static CbHostApi) -> Option<&'static CbRuntimeHooks> {
+    let hooks = unsafe { cb_runtime_init(host) };
+    if hooks.is_null() {
+        None
+    } else {
+        Some(unsafe { &*hooks })
+    }
 }
 
 // ── Safe conversion ────────────────────────────────────────────────────
@@ -429,5 +469,23 @@ mod tests {
         }
         let empty_concat = unsafe { (api.concat)(api.empty, api.empty) };
         assert_eq!(empty_concat as *const _, api.empty);
+    }
+
+    #[test]
+    fn runtime_init_roundtrip() {
+        // FD-015: handing the runtime a host API returns a non-null hook table
+        // whose size guard matches our mirror struct; about_to_exit is
+        // reserved (null) for now.
+        extern "C" fn noop_exit(_code: i32) {}
+        extern "C" fn noop_error(_msg: *const CbString) {}
+        static HOST: CbHostApi = CbHostApi {
+            size: std::mem::size_of::<CbHostApi>() as u32,
+            abi_version: CB_CATALOG_VERSION,
+            request_exit: noop_exit,
+            raise_error: noop_error,
+        };
+        let hooks = runtime_init(&HOST).expect("runtime_init should return a hook table");
+        assert_eq!(hooks.size as usize, std::mem::size_of::<CbRuntimeHooks>());
+        assert!(hooks.about_to_exit.is_none());
     }
 }

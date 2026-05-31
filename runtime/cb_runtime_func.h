@@ -151,6 +151,11 @@ int32_t cb_rt_mouse_move_z(void);
 CbTestHandle* cb_rt_create_test_handle(void);
 int32_t cb_rt_use_test_handle(const CbTestHandle* handle);
 
+/* Trap-channel test functions (FD-015, test-only): ask the host to exit /
+   raise an error via cb_host(), exercising the channel end to end. */
+void cb_rt_test_request_exit(int32_t code);
+void cb_rt_test_raise_error(const CbString* msg);
+
 #ifdef __cplusplus
 }
 #endif

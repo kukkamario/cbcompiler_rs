@@ -11,6 +11,10 @@ pub trait Observer {
     fn on_call(&mut self, _caller: &Frame, _callee: FuncId, _args: &[Value]) {}
     fn on_return(&mut self, _frame: &Frame, _value: &Value) {}
     fn on_trap(&mut self, _frame: &Frame, _kind: &TrapKind, _span: Span) {}
+    /// A runtime function raised a cooperative error via the trap channel
+    /// (FD-015 `raise_error`). Distinct from `on_trap`, which is for
+    /// compiler-detected hard faults (`TrapKind` has no message variant).
+    fn on_runtime_error(&mut self, _frame: &Frame, _msg: &str, _span: Span) {}
 }
 
 pub struct NoopObserver;
