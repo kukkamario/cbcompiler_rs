@@ -1,6 +1,7 @@
 # FD-015: Runtime Trap Channel
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-05-31
 **Priority:** High
 **Effort:** Medium (1-4 hours) — design-heavy; touches the catalog ABI and both backends
 **Impact:** A generic, backend-agnostic mechanism for the C runtime to signal the host (interpreter today, LLVM later) — cleanly terminate, raise an error, or fire other host hooks — instead of calling `exit()` from inside an FFI call or silently clamping bad arguments. Unblocks honest error handling for the File I/O batch and removes three accumulated warts.
