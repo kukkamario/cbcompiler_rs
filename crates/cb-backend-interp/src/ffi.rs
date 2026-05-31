@@ -203,7 +203,15 @@ pub unsafe fn call(
         }
         IrType::RuntimeType(_) => {
             let p = unsafe { cif.call::<*const c_void>(code, &arg_refs) };
-            Value::OpaqueHandle(p as usize as u64)
+            // A null handle is the CB null value, not OpaqueHandle(0): runtime
+            // functions document "0 on failure" (e.g. LoadFont / LoadImage), and
+            // CB compares failed handles against `Null`. Wrapping null as a
+            // distinct OpaqueHandle(0) would make `h = Null` always false.
+            if p.is_null() {
+                Value::Null
+            } else {
+                Value::OpaqueHandle(p as usize as u64)
+            }
         }
         other => panic!("unsupported runtime return type: {other:?}"),
     }

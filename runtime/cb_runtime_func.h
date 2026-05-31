@@ -26,6 +26,10 @@ typedef struct CbTestHandle CbTestHandle;
    by DeleteImage. */
 typedef struct CbImage CbImage;
 
+/* Font handle — the CB-visible `Font` opaque type (FD-018). Wraps an Allegro
+   font; defined in cb_gfx.cpp. Created by LoadFont, freed by DeleteFont. */
+typedef struct CbFont CbFont;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -178,6 +182,25 @@ int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 int32_t cb_rt_screen_depth(void);
 int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
+
+/* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
+   the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/
+   ClearText manage a persistent on-screen text queue re-rendered each DrawScreen.
+   LoadFont resolves a system family name or a file path (name containing '.');
+   Smooth2D toggles antialiased vs monochrome glyphs. With no font loaded the
+   metric queries return 0 (a default font is loaded lazily, so this is rare). */
+void     cb_rt_text(double x, double y, const CbString* s);
+void     cb_rt_center_text(int32_t x, int32_t y, const CbString* s, int32_t style);
+void     cb_rt_vertical_text(int32_t x, int32_t y, const CbString* s);
+void     cb_rt_locate(int32_t x, int32_t y);
+void     cb_rt_add_text(const CbString* s);
+void     cb_rt_clear_text(void);
+CbFont*  cb_rt_load_font(const CbString* name, int32_t size, int32_t bold,
+                         int32_t italic, int32_t underline);
+void     cb_rt_set_font(CbFont* font);
+void     cb_rt_delete_font(CbFont* font);
+int32_t  cb_rt_text_width(const CbString* s);
+int32_t  cb_rt_text_height(const CbString* s);
 
 /* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the legacy CB
    DirectInput-style numbering (1=Esc, 16=Q, 30=A, 200=Up, …). Edge queries

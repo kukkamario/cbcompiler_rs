@@ -128,6 +128,11 @@ constexpr CbTypeTag CB_TYPE_IMAGE = 11;
 template<> struct type_tag<      CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
 template<> struct type_tag<const CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
 
+// Font — the text opaque handle (FD-018).
+constexpr CbTypeTag CB_TYPE_FONT = 12;
+template<> struct type_tag<      CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
+template<> struct type_tag<const CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -177,6 +182,7 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 static constexpr CbTypeDesc catalog_types[] = {
     { "TestHandle", ::cb_catalog::CB_TYPE_TEST_HANDLE },
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
+    { "Font",       ::cb_catalog::CB_TYPE_FONT },
 };
 
 // ─── Function catalog ─────────────────────────────────────────────────
@@ -329,6 +335,19 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("imagescollide",    cb_rt_images_collide),
     CB_FN("screenwidth",      cb_rt_screen_width),
     CB_FN("screenheight",     cb_rt_screen_height),
+
+    // Text & fonts (FD-018)
+    CB_FN("text",             cb_rt_text),
+    CB_FN("centertext",       cb_rt_center_text),
+    CB_FN("verticaltext",     cb_rt_vertical_text),
+    CB_FN("locate",           cb_rt_locate),
+    CB_FN("addtext",          cb_rt_add_text),
+    CB_FN("cleartext",        cb_rt_clear_text),
+    CB_FN("loadfont",         cb_rt_load_font),
+    CB_FN("setfont",          cb_rt_set_font),
+    CB_FN("deletefont",       cb_rt_delete_font),
+    CB_FN("textwidth",        cb_rt_text_width),
+    CB_FN("textheight",       cb_rt_text_height),
 
     // Input
     CB_FN("keydown",          cb_rt_key_down),

@@ -31,6 +31,7 @@ add_library(cb_runtime STATIC
     cb_strfuncs.cpp
     cb_system.cpp
     cb_gfx.cpp
+    cb_font.cpp
     cb_input.cpp
 )
 

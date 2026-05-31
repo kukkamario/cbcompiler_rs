@@ -140,6 +140,8 @@ fn main() {
         "cb_strfuncs.cpp",
         "cb_system.cpp",
         "cb_gfx.cpp",
+        "cb_font.cpp",
+        "cb_font.h",
         "cb_input.cpp",
         "cb_input.h",
         "cb_runtime.h",
