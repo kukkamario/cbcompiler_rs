@@ -395,6 +395,56 @@ fn observer_sees_function_calls() {
     assert_eq!(output_str, "42\n");
 }
 
+// FD-019: a user `Call`'s result is delivered to `after_inst`. When the Call
+// pushes a frame the result isn't known yet, so the hook is deferred until the
+// callee returns and fired against the call site — previously it was skipped
+// entirely, leaving a debugger watching the call site blind to the result.
+struct CallResultRecorder {
+    call_results: std::rc::Rc<std::cell::RefCell<Vec<i32>>>,
+}
+
+impl Observer for CallResultRecorder {
+    fn after_inst(
+        &mut self,
+        _frame: &Frame,
+        inst: &InstKind,
+        result: &cb_backend_interp::value::Value,
+        _span: Span,
+    ) {
+        if let InstKind::Call { .. } = inst
+            && let cb_backend_interp::value::Value::Int(v) = result
+        {
+            self.call_results.borrow_mut().push(*v);
+        }
+    }
+}
+
+#[test]
+fn observer_sees_call_result() {
+    let (ir, interner) = compile_program(
+        "Function double(x As Integer) As Integer\n\
+         Return x * 2\n\
+         EndFunction\n\
+         Print Str(double(21))"
+    );
+
+    let recorder = CallResultRecorder { call_results: Default::default() };
+    let seen = recorder.call_results.clone();
+    let mut output = Vec::new();
+    {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(recorder);
+        interp.run().expect("should succeed");
+    }
+    assert_eq!(String::from_utf8(output).unwrap(), "42\n");
+    assert_eq!(
+        *seen.borrow(),
+        vec![42],
+        "after_inst should observe the user call's result (42)"
+    );
+}
+
 // FD-015: a runtime function that raises an error via the trap channel
 // surfaces as an `Err(RuntimeError)` from `run` AND fires `on_runtime_error`.
 struct ErrorRecorder {
