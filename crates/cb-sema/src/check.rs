@@ -1397,7 +1397,37 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A valid assignment target bottoms out at a variable: a bare identifier,
+    /// or a chain of field/index projections rooted at one (`x`, `arr[i]`,
+    /// `node.field`, `o.inner.v`, `arr[i].field`). A target rooted at a
+    /// temporary — e.g. a function-call result (`getMob().hp = 0`) — is not an
+    /// lvalue (cb_syntax.md §6.1); lowering cannot address its storage, so it
+    /// must be rejected here rather than silently dropped.
+    fn is_assignable_lvalue(&self, target: NodeId) -> bool {
+        match &self.arena[target] {
+            Node::Expr(Expr::Ident { .. }) => true,
+            Node::Expr(Expr::Field { target: obj, .. }) => self.is_assignable_lvalue(*obj),
+            Node::Expr(Expr::Index { array, .. }) => self.is_assignable_lvalue(*array),
+            Node::Expr(Expr::Paren { inner }) => self.is_assignable_lvalue(*inner),
+            _ => false,
+        }
+    }
+
     fn check_assign(&mut self, target: NodeId, value: NodeId) {
+        if !self.is_assignable_lvalue(target) {
+            self.diagnostics.push(Diagnostic::error(
+                E_INVALID_ASSIGN_TARGET,
+                "invalid assignment target: the left side of `=` must be a \
+                 variable, field, or array element",
+                Label::new(self.arena.span_of(target)),
+            ));
+            // Still type-check both sides so any nested errors are reported and
+            // type info is populated for the rest of the pass.
+            self.check_expr(target);
+            self.check_expr(value);
+            return;
+        }
+
         // If the target is an undeclared identifier, create an implicit declaration.
         let target_ty = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[target] {
             let name = self.intern_ident(*name_span, *sigil);

@@ -29,6 +29,42 @@ fn lower_src(src: &str) -> String {
     cb_ir::print::print_program(&ir, &sema.interner)
 }
 
+fn sema_diags(src: &str) -> Vec<cb_diagnostics::Diagnostic> {
+    let file = FileId(0);
+    let (tokens, _) = tokenize(src, file, LexerOptions::default());
+    let parsed = parse(&tokens, src, file);
+    let sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog());
+    sema.diagnostics
+}
+
+/// FD-019: assigning to a non-variable-rooted lvalue (e.g. a function-call
+/// result's field) is rejected, not silently dropped by lowering.
+#[test]
+fn invalid_assign_target_call_field() {
+    let diags = sema_diags(
+        "Type Mob\n  Field hp As Int\nEndType\n\
+         Function getit() As Mob\n  Return Null\nEndFunction\n\
+         getit().hp = 99\n",
+    );
+    assert!(
+        diags.iter().any(|d| d.code_is("E0325")),
+        "expected E0325, got: {diags:?}"
+    );
+}
+
+/// A normal variable-rooted field assignment must NOT trip the new check.
+#[test]
+fn valid_field_assign_not_rejected() {
+    let diags = sema_diags(
+        "Type Mob\n  Field hp As Int\nEndType\n\
+         Dim m As Mob = New Mob\nm.hp = 5\n",
+    );
+    assert!(
+        !diags.iter().any(|d| d.code_is("E0325")),
+        "unexpected E0325: {diags:?}"
+    );
+}
+
 #[test]
 fn simple_assignment() {
     let ir = lower_src("Dim x As Int\nx = 42\n");
