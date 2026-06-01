@@ -9,7 +9,7 @@ use cb_diagnostics::{FileId, Interner, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Stmt};
 use cb_frontend::{Arena, BinOp, NewKind, NodeId, SpanExt, UnOp};
 
-use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator};
+use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
 use cb_ir::types::{FnSig, IrType};
 use cb_ir::{
     BasicBlock, BlockId, FuncDecl, FuncId, FuncKind, Function, Global, GlobalId, Inst, Local,
@@ -1422,31 +1422,55 @@ impl<'a> Lowerer<'a> {
                     self.emit_store_var(var, val, span);
                 }
             }
-            Node::Expr(Expr::Field { target: obj, name_span }) => {
-                let obj_reg = self.lower_expr(obj);
-                let field = self.intern_span(name_span);
-                self.emit_void(
-                    InstKind::SetField {
-                        object: obj_reg,
-                        field,
-                        value: val,
-                    },
-                    span,
-                );
-            }
-            Node::Expr(Expr::Index { array, indices }) => {
-                let arr_reg = self.lower_expr(array);
-                let idx_regs: Vec<_> = indices.iter().map(|&i| self.lower_expr(i)).collect();
-                self.emit_void(
-                    InstKind::SetElement {
-                        array: arr_reg,
-                        indices: idx_regs,
-                        value: val,
-                    },
-                    span,
-                );
+            Node::Expr(Expr::Field { .. }) | Node::Expr(Expr::Index { .. }) => {
+                // Field/index targets address an owning storage location, not a
+                // register value: a value-type struct lives inline, so mutating
+                // a `LoadLocal`/`GetField`/`GetElement` register copy would be
+                // lost. Resolve the place (root variable + projection path) and
+                // emit a single in-place store.
+                if let Some((root, path)) = self.lower_place(target) {
+                    self.emit_void(
+                        InstKind::StorePlace {
+                            root,
+                            path,
+                            value: val,
+                        },
+                        span,
+                    );
+                }
             }
             _ => {}
+        }
+    }
+
+    /// Resolve an assignment lvalue to an owning root variable plus a chain of
+    /// field/index projections (left-to-right from the root). Index
+    /// expressions are lowered to registers here, after the RHS, preserving
+    /// evaluation order. Returns `None` if the target does not bottom out at a
+    /// variable (sema rejects such non-lvalues before lowering).
+    fn lower_place(&mut self, target: NodeId) -> Option<(PlaceRoot, Vec<Projection>)> {
+        match self.arena[target].clone() {
+            Node::Expr(Expr::Ident { name_span, sigil }) => {
+                let name = self.intern_ident(name_span, sigil);
+                let root = match self.resolve_var(name)? {
+                    VarRef::Local(id) => PlaceRoot::Local(id),
+                    VarRef::Global(id) => PlaceRoot::Global(id),
+                };
+                Some((root, Vec::new()))
+            }
+            Node::Expr(Expr::Field { target: obj, name_span }) => {
+                let (root, mut path) = self.lower_place(obj)?;
+                path.push(Projection::Field(self.intern_span(name_span)));
+                Some((root, path))
+            }
+            Node::Expr(Expr::Index { array, indices }) => {
+                let (root, mut path) = self.lower_place(array)?;
+                let idx_regs: Vec<_> = indices.iter().map(|&i| self.lower_expr(i)).collect();
+                path.push(Projection::Index(idx_regs));
+                Some((root, path))
+            }
+            Node::Expr(Expr::Paren { inner }) => self.lower_place(inner),
+            _ => None,
         }
     }
 

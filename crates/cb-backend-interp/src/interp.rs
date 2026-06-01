@@ -2,10 +2,10 @@ use std::cell::{Cell, RefCell};
 use std::io::Write;
 use std::rc::Rc;
 
-use cb_diagnostics::{Interner, Span};
-use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
+use cb_diagnostics::{Interner, Span, Symbol};
+use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
 use cb_ir::types::IrType;
-use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg};
+use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg, TypeDefInfo};
 use cb_runtime_sys::{CbHostApi, CbString, CbStringApi};
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
@@ -336,7 +336,27 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             if idx >= caller.registers.len() {
                                 caller.registers.resize(idx + 1, Value::Void);
                             }
-                            caller.registers[idx] = ret_val;
+                            caller.registers[idx] = ret_val.clone();
+                        }
+
+                        // Fire the deferred `after_inst` for the call site. When
+                        // the Call pushed this frame, `exec_loop` skipped
+                        // `after_inst` because the result wasn't known yet; the
+                        // caller's pc was advanced past the call, so the call
+                        // instruction is at `pc - 1` of its current block.
+                        let caller = self.call_stack.last().unwrap();
+                        let caller_block =
+                            &self.program.functions[caller.body_index].blocks
+                                [caller.current_block.0 as usize];
+                        if let Some(call_inst) =
+                            caller.pc.checked_sub(1).and_then(|i| caller_block.insts.get(i))
+                        {
+                            self.observer.after_inst(
+                                caller,
+                                &call_inst.kind,
+                                &ret_val,
+                                call_inst.span,
+                            );
                         }
                     }
                     Some(Terminator::Halt { code }) => {
@@ -526,58 +546,45 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
-            InstKind::SetField { object, field, value } => {
+            InstKind::StorePlace { root, path, value } => {
                 let frame = self.call_stack.last().unwrap();
-                let obj_val = frame.registers[object.0 as usize].clone();
                 let new_val = frame.registers[value.0 as usize].clone();
-                match obj_val {
-                    Value::TypeInstance(id) => {
-                        let entry = match self.heap.get(id) {
-                            Some(e) => e,
-                            None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
-                        };
-                        if entry.is_sentinel {
-                            return Err(self.trap_error(TrapKind::NullDeref, span));
-                        }
-                        let def = &self.program.type_defs[entry.type_def.0 as usize];
-                        let idx = def.fields.iter().position(|(f, _)| *f == *field);
-                        match idx {
-                            Some(i) => {
-                                self.heap.get_mut(id).expect("set_field: entry must exist").fields[i] = new_val;
-                                Ok(Value::Void)
-                            }
-                            None => Err(self.error_at(
-                                InterpErrorKind::RuntimeError(format!(
-                                    "field not found: {}",
-                                    self.interner.resolve(*field)
-                                )),
-                                span,
-                            )),
+                // Resolve index registers up front: the in-place walk below
+                // holds a mutable borrow of the root slot and cannot also read
+                // registers.
+                let mut resolved: Vec<RProj> = Vec::with_capacity(path.len());
+                for proj in path {
+                    match proj {
+                        Projection::Field(f) => resolved.push(RProj::Field(*f)),
+                        Projection::Index(idxs) => {
+                            let vals = idxs
+                                .iter()
+                                .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                                .collect();
+                            resolved.push(RProj::Index(vals));
                         }
                     }
-                    Value::Struct(mut s) => {
-                        let idx = s.fields.iter().position(|(f, _)| *f == *field);
-                        match idx {
-                            Some(i) => {
-                                s.fields[i].1 = new_val;
-                                let frame = self.call_stack.last_mut().unwrap();
-                                frame.registers[object.0 as usize] = Value::Struct(s);
-                                Ok(Value::Void)
-                            }
-                            None => Err(self.error_at(
-                                InterpErrorKind::RuntimeError(format!(
-                                    "field not found: {}",
-                                    self.interner.resolve(*field)
-                                )),
-                                span,
-                            )),
+                }
+
+                // Address the owning slot directly (locals/globals are value
+                // storage), then mutate in place. Borrows of the disjoint
+                // `heap`, `call_stack`/`globals`, and `program` fields are kept
+                // out of `self`-method calls; errors are deferred until the
+                // borrows are released.
+                let result = {
+                    let heap = &mut self.heap;
+                    let type_defs = &self.program.type_defs;
+                    let slot: &mut Value = match root {
+                        PlaceRoot::Local(id) => {
+                            &mut self.call_stack.last_mut().unwrap().locals[id.0 as usize].0
                         }
-                    }
-                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
-                    _ => Err(self.error_at(
-                        InterpErrorKind::RuntimeError("set_field on non-object".into()),
-                        span,
-                    )),
+                        PlaceRoot::Global(id) => &mut self.globals[id.0 as usize].0,
+                    };
+                    store_walk(slot, &resolved, new_val, heap, type_defs)
+                };
+                match result {
+                    Ok(()) => Ok(Value::Void),
+                    Err(e) => Err(self.store_err(e, span)),
                 }
             }
             InstKind::First { type_def } => {
@@ -668,13 +675,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // ── Array operations ───────────────────────────────────
             InstKind::NewArray { elem_type, dims } => {
-                let frame = self.call_stack.last().unwrap();
-                let dim_sizes: Vec<usize> = dims
-                    .iter()
-                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
-                    .collect();
-                let arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
-                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+                let dim_sizes = self.resolve_dims(dims, span)?;
+                self.make_array(dim_sizes, elem_type.clone(), span)
             }
             InstKind::GetElement { array, indices } => {
                 let frame = self.call_stack.last().unwrap();
@@ -698,52 +700,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
-            InstKind::SetElement { array, indices, value } => {
-                let frame = self.call_stack.last().unwrap();
-                let arr_val = frame.registers[array.0 as usize].clone();
-                let new_val = frame.registers[value.0 as usize].clone();
-                let idx_vals: Vec<usize> = indices
-                    .iter()
-                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
-                    .collect();
-                match arr_val {
-                    Value::Array(rc) => {
-                        let mut arr = rc.borrow_mut();
-                        match arr.flat_index(&idx_vals) {
-                            Some(fi) => {
-                                arr.data[fi] = new_val;
-                                Ok(Value::Void)
-                            }
-                            None => Err(self.trap_error(TrapKind::IndexOutOfBounds, span)),
-                        }
-                    }
-                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
-                    _ => Err(self.error_at(
-                        InterpErrorKind::RuntimeError("set_element on non-array".into()),
-                        span,
-                    )),
-                }
-            }
             InstKind::Redim { local, elem_type, dims } => {
-                let frame = self.call_stack.last().unwrap();
-                let dim_sizes: Vec<usize> = dims
-                    .iter()
-                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
-                    .collect();
-                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
-                let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
+                let dim_sizes = self.resolve_dims(dims, span)?;
+                let new_val = self.make_array(dim_sizes, elem_type.clone(), span)?;
                 let frame = self.call_stack.last_mut().unwrap();
                 frame.locals[local.0 as usize] = (new_val, false);
                 Ok(Value::Void)
             }
             InstKind::RedimGlobal { global, elem_type, dims } => {
-                let frame = self.call_stack.last().unwrap();
-                let dim_sizes: Vec<usize> = dims
-                    .iter()
-                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
-                    .collect();
-                let new_arr = ArrayObj::new(dim_sizes, elem_type.clone(), self.string_api);
-                let new_val = Value::Array(Rc::new(RefCell::new(new_arr)));
+                let dim_sizes = self.resolve_dims(dims, span)?;
+                let new_val = self.make_array(dim_sizes, elem_type.clone(), span)?;
                 self.globals[global.0 as usize] = (new_val, false);
                 Ok(Value::Void)
             }
@@ -831,6 +797,68 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
+        }
+    }
+
+    /// Resolve dimension registers to concrete sizes, rejecting negative
+    /// dimensions with a clean error. Without this a negative size (`New
+    /// Int[-1]`) would wrap to a huge `usize` and abort the process on
+    /// allocation.
+    fn resolve_dims(&self, dims: &[Reg], span: Span) -> Result<Vec<usize>, InterpError> {
+        let frame = self.call_stack.last().unwrap();
+        let mut sizes = Vec::with_capacity(dims.len());
+        for r in dims {
+            let n = self.value_to_i64(&frame.registers[r.0 as usize]);
+            if n < 0 {
+                return Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("negative array dimension: {n}")),
+                    span,
+                ));
+            }
+            sizes.push(n as usize);
+        }
+        Ok(sizes)
+    }
+
+    /// Map a deferred place-walk error to a concrete interpreter error/trap,
+    /// matching the diagnostics the old `SetField`/`SetElement` produced.
+    fn store_err(&self, e: StoreErr, span: Span) -> InterpError {
+        match e {
+            StoreErr::NoField(f) => self.error_at(
+                InterpErrorKind::RuntimeError(format!(
+                    "field not found: {}",
+                    self.interner.resolve(f)
+                )),
+                span,
+            ),
+            StoreErr::Null => self.trap_error(TrapKind::NullDeref, span),
+            StoreErr::Deleted => self.trap_error(TrapKind::DeletedAccess, span),
+            StoreErr::OutOfBounds => self.trap_error(TrapKind::IndexOutOfBounds, span),
+            StoreErr::NotStruct => self.error_at(
+                InterpErrorKind::RuntimeError("set_field on non-object".into()),
+                span,
+            ),
+            StoreErr::NotArray => self.error_at(
+                InterpErrorKind::RuntimeError("index on non-array".into()),
+                span,
+            ),
+        }
+    }
+
+    /// Allocate an array, turning an over-large request into a clean
+    /// `RuntimeError` instead of an allocation abort.
+    fn make_array(
+        &self,
+        dims: Vec<usize>,
+        elem_type: IrType,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        match ArrayObj::new(dims, elem_type, &self.program.struct_defs, self.string_api) {
+            Ok(arr) => Ok(Value::Array(Rc::new(RefCell::new(arr)))),
+            Err(_) => Err(self.error_at(
+                InterpErrorKind::RuntimeError("array too large to allocate".into()),
+                span,
+            )),
         }
     }
 
@@ -953,9 +981,31 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::BinAnd => Ok(wrap(a & b)),
             IrBinOp::BinOr => Ok(wrap(a | b)),
             IrBinOp::BinXor => Ok(wrap(a ^ b)),
-            IrBinOp::Shl => Ok(wrap(a.wrapping_shl(b as u32))),
-            IrBinOp::Shr => Ok(wrap((a as u64).wrapping_shr(b as u32) as i64)),
-            IrBinOp::Sar => Ok(wrap(a.wrapping_shr(b as u32))),
+            // Shifts operate at the operand's actual bit width (32 unless
+            // `wide`), and the count is reduced modulo that width (x86-style).
+            // `Shr` is logical (zero-extend), `Sar` is arithmetic (sign-extend)
+            // — see cb_syntax.md §`Shr`.
+            IrBinOp::Shl => {
+                if wide {
+                    Ok(wrap(a.wrapping_shl((b as u32) & 63)))
+                } else {
+                    Ok(wrap((a as i32).wrapping_shl((b as u32) & 31) as i64))
+                }
+            }
+            IrBinOp::Shr => {
+                if wide {
+                    Ok(wrap((a as u64).wrapping_shr((b as u32) & 63) as i64))
+                } else {
+                    Ok(wrap((a as u32).wrapping_shr((b as u32) & 31) as i32 as i64))
+                }
+            }
+            IrBinOp::Sar => {
+                if wide {
+                    Ok(wrap(a.wrapping_shr((b as u32) & 63)))
+                } else {
+                    Ok(wrap((a as i32).wrapping_shr((b as u32) & 31) as i64))
+                }
+            }
 
             IrBinOp::Eq => Ok(Value::Bool(a == b)),
             IrBinOp::NotEq => Ok(Value::Bool(a != b)),
@@ -1004,8 +1054,22 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::BinAnd => Ok(wrap(a & b)),
             IrBinOp::BinOr => Ok(wrap(a | b)),
             IrBinOp::BinXor => Ok(wrap(a ^ b)),
-            IrBinOp::Shl => Ok(wrap(a.wrapping_shl(b as u32))),
-            IrBinOp::Shr | IrBinOp::Sar => Ok(wrap(a.wrapping_shr(b as u32))),
+            // Width-correct, count reduced modulo the operand width. For an
+            // unsigned operand `Sar` is identical to the logical `Shr`.
+            IrBinOp::Shl => {
+                if wide {
+                    Ok(wrap(a.wrapping_shl((b as u32) & 63)))
+                } else {
+                    Ok(wrap((a as u32).wrapping_shl((b as u32) & 31) as u64))
+                }
+            }
+            IrBinOp::Shr | IrBinOp::Sar => {
+                if wide {
+                    Ok(wrap(a.wrapping_shr((b as u32) & 63)))
+                } else {
+                    Ok(wrap((a as u32).wrapping_shr((b as u32) & 31) as u64))
+                }
+            }
 
             IrBinOp::Eq => Ok(Value::Bool(a == b)),
             IrBinOp::NotEq => Ok(Value::Bool(a != b)),
@@ -1073,11 +1137,24 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (IrUnOp::Neg, Value::Long(x)) => Ok(Value::Long(x.wrapping_neg())),
             (IrUnOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
             (IrUnOp::Neg, Value::Short(x)) => Ok(Value::Short(x.wrapping_neg())),
+            (IrUnOp::Neg, Value::Byte(x)) => Ok(Value::Byte(x.wrapping_neg())),
+            (IrUnOp::Neg, Value::UInt(x)) => Ok(Value::UInt(x.wrapping_neg())),
+            (IrUnOp::Neg, Value::ULong(x)) => Ok(Value::ULong(x.wrapping_neg())),
 
             (IrUnOp::Plus, _) => Ok(v.clone()),
 
-            (IrUnOp::Not, Value::Bool(x)) => Ok(Value::Bool(!x)),
-            (IrUnOp::Not, Value::Int(x)) => Ok(Value::Bool(*x == 0)),
+            // Logical NOT is defined for booleans and every integer width via
+            // truthiness, so we don't rely on sema always pre-converting.
+            (
+                IrUnOp::Not,
+                Value::Bool(_)
+                | Value::Int(_)
+                | Value::Long(_)
+                | Value::Byte(_)
+                | Value::Short(_)
+                | Value::UInt(_)
+                | Value::ULong(_),
+            ) => Ok(Value::Bool(!v.is_truthy())),
 
             (IrUnOp::BinNot, Value::Int(x)) => Ok(Value::Int(!x)),
             (IrUnOp::BinNot, Value::Long(x)) => Ok(Value::Long(!x)),
@@ -1149,10 +1226,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Float(x) => *x as i64,
             Value::Bool(true) => 1,
             Value::Bool(false) => 0,
-            Value::String(s) => std::str::from_utf8(s.as_bytes())
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
+            // Same leading-integer policy as CoolBasic `toInt`
+            // (`value_to_int_cb`): `"3x"` → 3, not 0. Keeps the one
+            // string→int rule used everywhere (array indices/dims included).
+            Value::String(s) => parse_leading_int(s.as_bytes()),
             _ => 0,
         }
     }
@@ -1168,6 +1245,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Float(x) => *x,
             Value::Bool(true) => 1.0,
             Value::Bool(false) => 0.0,
+            // Floats keep the strict full-parse policy (a partial parse of a
+            // float prefix has no documented CB semantics); a non-numeric
+            // string yields 0.0.
             Value::String(s) => std::str::from_utf8(s.as_bytes())
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -1367,4 +1447,99 @@ fn parse_leading_int(bytes: &[u8]) -> i64 {
         return 0; // no leading digits
     }
     if neg { -val } else { val }
+}
+
+// ── StorePlace path walking ─────────────────────────────────────────────
+
+/// A [`Projection`] with its index registers already resolved to concrete
+/// sizes, so the in-place store walk needs no register access.
+enum RProj {
+    Field(Symbol),
+    Index(Vec<usize>),
+}
+
+/// Failure encountered while walking a [`InstKind::StorePlace`] path. Mapped
+/// to a concrete interpreter error by [`Interpreter::store_err`] once the
+/// borrows held during the walk are released.
+enum StoreErr {
+    NoField(Symbol),
+    Null,
+    Deleted,
+    OutOfBounds,
+    NotStruct,
+    NotArray,
+}
+
+/// Walk `projs` from `slot` toward the target location and write `value`
+/// there, mutating in place. Value-type structs are mutated through the slot;
+/// arrays and type-instances are reference types mutated through their shared
+/// handles (so the change persists regardless of the owning slot).
+fn store_walk(
+    slot: &mut Value,
+    projs: &[RProj],
+    value: Value,
+    heap: &mut Slab,
+    type_defs: &[TypeDefInfo],
+) -> Result<(), StoreErr> {
+    let (proj, rest) = match projs.split_first() {
+        Some(split) => split,
+        None => {
+            *slot = value;
+            return Ok(());
+        }
+    };
+
+    match proj {
+        RProj::Field(f) => match slot {
+            Value::Struct(s) => {
+                let i = s
+                    .fields
+                    .iter()
+                    .position(|(fld, _)| fld == f)
+                    .ok_or(StoreErr::NoField(*f))?;
+                store_walk(&mut s.fields[i].1, rest, value, heap, type_defs)
+            }
+            Value::TypeInstance(id) => {
+                let id = *id;
+                let entry = heap.get(id).ok_or(StoreErr::Deleted)?;
+                if entry.is_sentinel {
+                    return Err(StoreErr::Null);
+                }
+                let def = &type_defs[entry.type_def.0 as usize];
+                let i = def
+                    .fields
+                    .iter()
+                    .position(|(fld, _)| fld == f)
+                    .ok_or(StoreErr::NoField(*f))?;
+                if rest.is_empty() {
+                    heap.get_mut(id).ok_or(StoreErr::Deleted)?.fields[i] = value;
+                    Ok(())
+                } else {
+                    // Take the field out so the recursion can borrow `heap`
+                    // freely for deeper reference steps, then put it back.
+                    let mut taken = std::mem::replace(
+                        &mut heap.get_mut(id).ok_or(StoreErr::Deleted)?.fields[i],
+                        Value::Void,
+                    );
+                    let r = store_walk(&mut taken, rest, value, heap, type_defs);
+                    heap.get_mut(id).ok_or(StoreErr::Deleted)?.fields[i] = taken;
+                    r
+                }
+            }
+            Value::Null => Err(StoreErr::Null),
+            _ => Err(StoreErr::NotStruct),
+        },
+        RProj::Index(idxs) => match slot {
+            Value::Array(rc) => {
+                // Arrays are reference types: clone the handle (refcount bump)
+                // to release the slot borrow, then mutate the shared backing.
+                let rc = rc.clone();
+                let mut arr = rc.borrow_mut();
+                let fi = arr.flat_index(idxs).ok_or(StoreErr::OutOfBounds)?;
+                store_walk(&mut arr.data[fi], rest, value, heap, type_defs)
+            }
+            Value::Null => Err(StoreErr::Null),
+            _ => Err(StoreErr::NotArray),
+        },
+    }
 }

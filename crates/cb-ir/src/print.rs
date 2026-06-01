@@ -2,7 +2,7 @@
 
 use cb_diagnostics::Interner;
 
-use crate::inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
+use crate::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
 use crate::types::IrType;
 use crate::{FuncDecl, Function, Global, Program, TypeDefInfo};
 
@@ -132,32 +132,33 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
             )
             .unwrap();
         }
-        InstKind::SetField {
-            object,
-            field,
-            value,
-        } => {
-            write!(
-                out,
-                "set_field {object}, {}, {value}",
-                interner.resolve(*field)
-            )
-            .unwrap();
-        }
         InstKind::GetElement { array, indices } => {
             write!(out, "get_element {array}").unwrap();
             for idx in indices {
                 write!(out, ", {idx}").unwrap();
             }
         }
-        InstKind::SetElement {
-            array,
-            indices,
-            value,
-        } => {
-            write!(out, "set_element {array}").unwrap();
-            for idx in indices {
-                write!(out, ", {idx}").unwrap();
+        InstKind::StorePlace { root, path, value } => {
+            match root {
+                PlaceRoot::Local(l) => write!(out, "store_place {l}").unwrap(),
+                PlaceRoot::Global(g) => write!(out, "store_place {g}").unwrap(),
+            }
+            for proj in path {
+                match proj {
+                    Projection::Field(f) => {
+                        write!(out, ".{}", interner.resolve(*f)).unwrap();
+                    }
+                    Projection::Index(idxs) => {
+                        write!(out, "[").unwrap();
+                        for (i, idx) in idxs.iter().enumerate() {
+                            if i > 0 {
+                                write!(out, ", ").unwrap();
+                            }
+                            write!(out, "{idx}").unwrap();
+                        }
+                        write!(out, "]").unwrap();
+                    }
+                }
             }
             write!(out, ", {value}").unwrap();
         }

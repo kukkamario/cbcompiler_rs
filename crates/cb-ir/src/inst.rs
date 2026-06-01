@@ -22,10 +22,20 @@ pub enum InstKind {
     NewArray { elem_type: IrType, dims: Vec<Reg> },
 
     GetField { object: Reg, field: Symbol, field_type: IrType },
-    SetField { object: Reg, field: Symbol, value: Reg },
 
     GetElement { array: Reg, indices: Vec<Reg> },
-    SetElement { array: Reg, indices: Vec<Reg>, value: Reg },
+
+    /// Store `value` into the place rooted at a local/global variable,
+    /// following a chain of field/index projections and mutating in place.
+    ///
+    /// This is the single write path for any assignment target more complex
+    /// than a bare variable (`s.x = v`, `s.a.b = v`, `arr[i] = v`,
+    /// `arr[i].field = v`, `obj.field = v`). Because value-type structs are
+    /// stored inline, a register-based `SetField`/`SetElement` could only
+    /// mutate a throwaway copy; addressing the owning slot is what makes
+    /// value-struct field writes persist. Array and type-instance steps along
+    /// the path are reference types and are mutated through their handles.
+    StorePlace { root: PlaceRoot, path: Vec<Projection>, value: Reg },
 
     // ── Type-Linked-List Operations ─────────────────────────────────
     First { type_def: TypeDefId },
@@ -60,6 +70,24 @@ pub enum InstKind {
     // ── Array ───────────────────────────────────────────────────────
     Redim { local: LocalId, elem_type: IrType, dims: Vec<Reg> },
     RedimGlobal { global: GlobalId, elem_type: IrType, dims: Vec<Reg> },
+}
+
+/// The owning storage a [`InstKind::StorePlace`] path is rooted at. Every
+/// CoolBasic lvalue bottoms out at a local or global variable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlaceRoot {
+    Local(LocalId),
+    Global(GlobalId),
+}
+
+/// One step of a [`InstKind::StorePlace`] access path, applied left-to-right
+/// from the root toward the value being written.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Projection {
+    /// `.field` — into a struct value or a type-instance's field.
+    Field(Symbol),
+    /// `[i, j, ...]` — into an array element (multi-dimensional index).
+    Index(Vec<Reg>),
 }
 
 /// Binary operators in the IR.
