@@ -6,9 +6,18 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
+Opened from the post-FD-018 codebase review (code quality + test coverage). Bundled by subsystem — each FD maps to one crate/area and one logical PR.
+
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-019](FD-019_INTERPRETER_CORRECTNESS_FIXES.md) | Interpreter Correctness & Memory-Safety Fixes | Open | Medium | High |
+| [FD-020](FD-020_SEMA_NUMERIC_AND_FOR_LOOP_SEMANTICS.md) | Sema Numeric & For-Loop Semantics | Open | Medium | High |
+| [FD-021](FD-021_PARSER_AND_SPAN_PANIC_SAFETY.md) | Parser & Span Panic-Safety | Open | Low-Medium | High |
+| [FD-022](FD-022_RUNTIME_ALLEGRO_LAYER_FIXES.md) | C++ Runtime Allegro-Layer Fixes | Open | Medium-High | High |
+| [FD-023](FD-023_IR_VERIFIER_HARDENING.md) | IR Verifier Hardening | Open | Low-Medium | Medium |
+| [FD-024](FD-024_RUNTIME_FFI_ABI_HARDENING.md) | Runtime FFI ABI-Handshake & Catalog-Decode Hardening | Open | Medium | Medium |
+| [FD-025](FD-025_DRIVER_BACKEND_SELECTION_AND_EXIT_CODES.md) | Driver Backend-Selection & Exit-Code Correctness | Open | Low | Medium |
+| [FD-026](FD-026_INTERNER_SPEC_COMPLIANCE.md) | Identifier Interner Spec Compliance | Open | Low-Medium | Medium |
 
 ## Completed
 
