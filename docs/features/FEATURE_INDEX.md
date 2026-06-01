@@ -17,6 +17,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 | [FD-024](FD-024_RUNTIME_FFI_ABI_HARDENING.md) | Runtime FFI ABI-Handshake & Catalog-Decode Hardening | Open | Medium | Medium |
 | [FD-025](FD-025_DRIVER_BACKEND_SELECTION_AND_EXIT_CODES.md) | Driver Backend-Selection & Exit-Code Correctness | Open | Low | Medium |
 | [FD-026](FD-026_INTERNER_SPEC_COMPLIANCE.md) | Identifier Interner Spec Compliance | Open | Low-Medium | Medium |
+| [FD-027](FD-027_RUNTIME_COMMAND_NAME_COLLISION_DIAGNOSTIC.md) | Runtime-Command Name Collisions Produce an Unrenderable Diagnostic | Open | Low-Medium | Medium |
 
 ## Completed
 
