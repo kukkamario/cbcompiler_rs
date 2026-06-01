@@ -505,3 +505,138 @@ fn trap_double_delete() {
     );
     assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DoubleDelete)));
 }
+
+// ── FD-019: interpreter correctness & memory-safety regressions ─────────
+
+#[test]
+fn shift_right_logical_on_negative() {
+    // `Shr` is a logical right shift: the sign bit must NOT be replicated.
+    // (-1) Shr 1 == 0x7FFFFFFF, not -1.
+    let out = run("Dim r As Int = -1\nPrint Str(r Shr 1)");
+    assert_eq!(out, "2147483647\n");
+}
+
+#[test]
+fn shift_arithmetic_preserves_sign() {
+    let out = run("Dim r As Int = -8\nPrint Str(r Sar 1)");
+    assert_eq!(out, "-4\n");
+}
+
+#[test]
+fn shift_left_count_reduced_to_width() {
+    // A shift count >= the operand width is reduced modulo it (33 -> 1).
+    let out = run("Dim r As Int = 1\nPrint Str(r Shl 33)");
+    assert_eq!(out, "2\n");
+}
+
+#[test]
+fn shift_right_basic() {
+    let out = run("Dim r As Int = 8\nPrint Str(r Shr 2)");
+    assert_eq!(out, "2\n");
+}
+
+#[test]
+fn value_struct_field_write_then_read() {
+    // The defining FD-019 bug #2 case: a write to a value-struct field must
+    // persist (it previously updated a throwaway register copy).
+    let out = run(
+        "Struct Vec2\n\
+           Field x As Int\n\
+           Field y As Int\n\
+         EndStruct\n\
+         Dim p As Vec2\n\
+         p.x = 7\n\
+         p.y = 9\n\
+         Print Str(p.x + p.y)"
+    );
+    assert_eq!(out, "16\n");
+}
+
+#[test]
+fn value_struct_nested_field_write() {
+    let out = run(
+        "Struct Inner\n\
+           Field v As Int\n\
+         EndStruct\n\
+         Struct Outer\n\
+           Field inner As Inner\n\
+           Field w As Int\n\
+         EndStruct\n\
+         Dim o As Outer\n\
+         o.inner.v = 5\n\
+         o.w = 3\n\
+         Print Str(o.inner.v + o.w)"
+    );
+    assert_eq!(out, "8\n");
+}
+
+#[test]
+fn value_struct_copy_semantics() {
+    // Assigning a struct copies it; mutating the copy must not affect the
+    // original.
+    let out = run(
+        "Struct Vec2\n\
+           Field x As Int\n\
+         EndStruct\n\
+         Dim p As Vec2\n\
+         p.x = 1\n\
+         Dim q As Vec2 = p\n\
+         q.x = 99\n\
+         Print Str(p.x)"
+    );
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn array_of_structs_field_write_read() {
+    let out = run(
+        "Struct P\n\
+           Field x As Int\n\
+         EndStruct\n\
+         Dim arr As P[] = New P[3]\n\
+         arr[1].x = 42\n\
+         Print Str(arr[1].x)"
+    );
+    assert_eq!(out, "42\n");
+}
+
+#[test]
+fn array_of_structs_defaults_to_zero_struct() {
+    // FD-019 bug #4: array-of-struct elements default to a zero-initialised
+    // struct, not Null — field access must not trap.
+    let out = run(
+        "Struct P\n\
+           Field x As Int\n\
+         EndStruct\n\
+         Dim arr As P[] = New P[2]\n\
+         Print Str(arr[0].x)"
+    );
+    assert_eq!(out, "0\n");
+}
+
+#[test]
+fn array_negative_dimension_is_clean_error() {
+    // FD-019 bug #3: a negative dimension must be a clean RuntimeError, not a
+    // multi-exabyte allocation that aborts the process.
+    let err = run_err(
+        "Dim n As Int = -1\n\
+         Dim arr As Int[] = New Int[n]"
+    );
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array dimension")),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn redim_negative_dimension_is_clean_error() {
+    let err = run_err(
+        "Dim arr As Int[] = New Int[2]\n\
+         Dim n As Int = -5\n\
+         Redim arr As Int[n]"
+    );
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array dimension")),
+        "unexpected error: {err:?}"
+    );
+}

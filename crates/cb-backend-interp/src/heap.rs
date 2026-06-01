@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use cb_diagnostics::Symbol;
 use cb_ir::types::IrType;
-use cb_ir::TypeDefId;
+use cb_ir::{StructDefInfo, TypeDefId};
 use cb_runtime_sys::CbStringApi;
 
 use crate::value::{Value, default_value};
@@ -143,16 +143,36 @@ pub struct ArrayObj {
     pub elem_type: IrType,
 }
 
+/// Failure constructing an array: the requested element count overflows
+/// `usize` or cannot be allocated. The interpreter turns this into a clean
+/// `RuntimeError` rather than aborting the process on a hostile size.
+#[derive(Debug)]
+pub struct ArrayAllocError;
+
 impl ArrayObj {
-    pub fn new(dims: Vec<usize>, elem_type: IrType, string_api: &'static CbStringApi) -> Self {
-        let total: usize = dims.iter().product();
-        let default = default_value(&elem_type, &[], string_api);
-        let data = vec![default; total];
-        ArrayObj {
+    pub fn new(
+        dims: Vec<usize>,
+        elem_type: IrType,
+        struct_defs: &[StructDefInfo],
+        string_api: &'static CbStringApi,
+    ) -> Result<Self, ArrayAllocError> {
+        // Use checked multiplication so an overflowing product (e.g. from a
+        // dimension that wrapped a negative value) is caught instead of
+        // silently wrapping, and `try_reserve` so an over-large but
+        // non-overflowing length fails cleanly instead of aborting.
+        let mut total: usize = 1;
+        for &d in &dims {
+            total = total.checked_mul(d).ok_or(ArrayAllocError)?;
+        }
+        let default = default_value(&elem_type, struct_defs, string_api);
+        let mut data: Vec<Value> = Vec::new();
+        data.try_reserve_exact(total).map_err(|_| ArrayAllocError)?;
+        data.resize(total, default);
+        Ok(ArrayObj {
             dims,
             data,
             elem_type,
-        }
+        })
     }
 
     pub fn flat_index(&self, indices: &[usize]) -> Option<usize> {

@@ -12,7 +12,7 @@ pub mod print;
 pub mod types;
 pub mod verify;
 
-pub use inst::{InstKind, IrBinOp, IrUnOp, Terminator, TrapKind};
+pub use inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
 pub use types::{FnSig, IrType};
 
 // ── Function identity ──────────────────────────────────────────────────

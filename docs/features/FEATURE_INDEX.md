@@ -10,7 +10,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-019](FD-019_INTERPRETER_CORRECTNESS_FIXES.md) | Interpreter Correctness & Memory-Safety Fixes | Open | Medium | High |
+| [FD-019](FD-019_INTERPRETER_CORRECTNESS_FIXES.md) | Interpreter Correctness & Memory-Safety Fixes | Pending Verification | Medium | High |
 | [FD-020](FD-020_SEMA_NUMERIC_AND_FOR_LOOP_SEMANTICS.md) | Sema Numeric & For-Loop Semantics | Open | Medium | High |
 | [FD-021](FD-021_PARSER_AND_SPAN_PANIC_SAFETY.md) | Parser & Span Panic-Safety | Open | Low-Medium | High |
 | [FD-022](FD-022_RUNTIME_ALLEGRO_LAYER_FIXES.md) | C++ Runtime Allegro-Layer Fixes | Open | Medium-High | High |

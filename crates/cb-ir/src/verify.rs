@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::inst::{InstKind, Terminator};
+use crate::inst::{InstKind, PlaceRoot, Projection, Terminator};
 use crate::{BlockId, Program, Reg};
 
 /// Verify structural invariants of the IR program. Panics on violations.
@@ -58,6 +58,7 @@ fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
         InstKind::LoadLocal { local } | InstKind::StoreLocal { local, .. } => check(*local),
         InstKind::DeleteLvalue { local } => check(*local),
         InstKind::Redim { local, .. } => check(*local),
+        InstKind::StorePlace { root: PlaceRoot::Local(local), .. } => check(*local),
         _ => {}
     }
 }
@@ -103,6 +104,7 @@ fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
         | InstKind::StoreGlobal { global, .. }
         | InstKind::DeleteLvalueGlobal { global }
         | InstKind::RedimGlobal { global, .. } => check(*global),
+        InstKind::StorePlace { root: PlaceRoot::Global(global), .. } => check(*global),
         _ => {}
     }
 }
@@ -120,24 +122,19 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
         InstKind::UnOp { operand, .. } => check(*operand),
         InstKind::StoreLocal { value, .. } | InstKind::StoreGlobal { value, .. } => check(*value),
         InstKind::GetField { object, .. } => check(*object),
-        InstKind::SetField { object, value, .. } => {
-            check(*object);
-            check(*value);
-        }
         InstKind::GetElement { array, indices } => {
             check(*array);
             for idx in indices {
                 check(*idx);
             }
         }
-        InstKind::SetElement {
-            array,
-            indices,
-            value,
-        } => {
-            check(*array);
-            for idx in indices {
-                check(*idx);
+        InstKind::StorePlace { path, value, .. } => {
+            for proj in path {
+                if let Projection::Index(idxs) = proj {
+                    for idx in idxs {
+                        check(*idx);
+                    }
+                }
             }
             check(*value);
         }

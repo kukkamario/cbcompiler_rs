@@ -107,11 +107,17 @@ impl<'a> Checker<'a> {
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
         let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
+        // The base resolver returns `TypeRef` for every user-defined name; it
+        // cannot tell apart a heap `Type`, a runtime type, and a value
+        // `Struct`. Refine it here using the declaration kind.
         if let Type::TypeRef { name } = &ty
             && let Some(decl) = self.symbols.lookup(self.current_scope, *name)
-            && matches!(decl.kind, DeclKind::RuntimeTypeDef)
         {
-            return Type::RuntimeType { name: *name };
+            match decl.kind {
+                DeclKind::RuntimeTypeDef => return Type::RuntimeType { name: *name },
+                DeclKind::StructDef { .. } => return Type::StructVal { name: *name },
+                _ => {}
+            }
         }
         ty
     }
