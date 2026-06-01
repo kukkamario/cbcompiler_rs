@@ -1,6 +1,7 @@
 # FD-019: Interpreter Correctness & Memory-Safety Fixes
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-01
 **Priority:** High
 **Effort:** Medium (grew during implementation — see note below)
 **Impact:** Fixes four real correctness bugs in `cb-backend-interp` — the reference implementation — three of which produce silently-wrong results and one of which aborts the process on hostile input. Closes the test gaps (bitwise, structs, arrays) that let them ship.
@@ -71,6 +72,13 @@ In `cb-backend-interp`:
   - `New Int[n]` with `n = -1` and `Redim arr As Int[n]` with `n = -5` produce a clean `RuntimeError` ("negative array dimension"), not an abort.
 - ✅ `cargo test --workspace` green (no snapshot churn); ✅ `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - Cross-backend note: these become reference behaviors the future LLVM backend must match (interp is the reference per CLAUDE.md). `StorePlace` is now the single lvalue-store opcode the LLVM backend will lower.
+
+### Verification outcome (2026-06-01)
+
+- **Proofread finding (fixed):** the `StorePlace` lowering silently dropped assignments to a non-variable-rooted lvalue (e.g. `getMob().hp = 0`) because `lower_place` returns `None` for a temporary root, and `check_assign` never validated lvalue shape — a silent-miscompile regression, the exact class FD-019 set out to remove. Fixed by validating lvalue shape in `check_assign` and emitting **E0325** ("invalid assignment target") per cb_syntax.md §6.1; added sema regression tests. Commit `4e26367`.
+- **Observer coverage added:** `observer_sees_call_result` confirms the deferred call-result `after_inst` hook fires with the return value. Commit `5d5e056`.
+- Final: 42 interp tests + full workspace (26 suites) green; clippy `-D warnings` clean.
+- **Spun off:** a variable named after a runtime command (`Dim box As Int`, colliding with the runtime `Box` draw command) produces an unrenderable diagnostic (`Span references unknown FileId`), because runtime-catalog decls carry a `FileId::SYNTHETIC` span (`check.rs:172`) that the renderer can't resolve. Pre-existing and orthogonal — tracked as a separate FD.
 
 ## Related
 
