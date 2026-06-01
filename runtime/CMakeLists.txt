@@ -63,6 +63,17 @@ if(VCPKG_TARGET_TRIPLET MATCHES "static")
     endif()
 endif()
 
+# openal-soft (Allegro's audio backend, pulled in via allegro_audio) de-vendors
+# its bundled {fmt} to the standalone `fmt` package. Allegro records openal as
+# an absolute library path rather than an imported target, so the transitive
+# walk below never reaches openal's own `fmt` dependency. Add it to the seeds
+# explicitly so libfmt lands on the final link line — after openal, which
+# references it (GNU ld resolves left-to-right).
+find_package(fmt CONFIG QUIET)
+if(TARGET fmt::fmt)
+    list(APPEND CB_LINK_SEEDS fmt::fmt)
+endif()
+
 target_link_libraries(cb_runtime PRIVATE ${CB_LINK_SEEDS})
 
 # With static linking, Rust must be told about every transitive dependency

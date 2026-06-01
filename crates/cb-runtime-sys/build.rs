@@ -115,9 +115,25 @@ fn main() {
                 }
             }
             if let Some(stem) = path.file_stem() {
-                let name = stem.to_string_lossy().to_string();
-                if seen_libs.insert(name.clone()) {
-                    println!("cargo:rustc-link-lib=static={name}");
+                let stem = stem.to_string_lossy();
+                // Determine link kind + the bare name rustc expects.
+                // MSVC: `name.lib` → static, the stem IS the name.
+                // Unix: `lib<name>.a` → static, `lib<name>.so` → dylib; in both
+                // cases the leading `lib` prefix must be stripped (the linker
+                // re-adds it when resolving `-l<name>`).
+                let ext = path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_ascii_lowercase());
+                let (kind, name) = match ext.as_deref() {
+                    Some("a") => ("static", stem.strip_prefix("lib").unwrap_or(&stem)),
+                    Some("so") | Some("dylib") => {
+                        ("dylib", stem.strip_prefix("lib").unwrap_or(&stem))
+                    }
+                    // MSVC `.lib` (and anything else): use the stem verbatim.
+                    _ => ("static", stem.as_ref()),
+                };
+                if seen_libs.insert(name.to_string()) {
+                    println!("cargo:rustc-link-lib={kind}={name}");
                 }
             }
         } else {
@@ -129,6 +145,18 @@ fn main() {
                 println!("cargo:rustc-link-lib={name}");
             }
         }
+    }
+
+    // The runtime is C++, and the Allegro/openal static archives reference
+    // C++ standard-library symbols (std::runtime_error typeinfo, throw
+    // helpers, …). rustc links the final binary through the C compiler
+    // driver, which does NOT pull in the C++ runtime — so name it explicitly,
+    // last, after the C++ archives that need it. MSVC links its CRT
+    // automatically and needs nothing here.
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-lib=dylib=c++");
+    } else if cfg!(not(target_os = "windows")) {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
     // Rebuild if runtime sources change
