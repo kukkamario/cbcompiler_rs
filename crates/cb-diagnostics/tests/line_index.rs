@@ -143,6 +143,26 @@ fn multi_byte_utf8_byte_col_vs_char_col() {
     assert_eq!(src.offset_to_line_char_col(7), (1, 3));
 }
 
+/// FD-021 #3: a mid-codepoint byte offset must not panic. Before the fix,
+/// `offset_to_line_char_col` clamped to `text_len` but did not snap to a
+/// `char` boundary, so slicing `text[..mid_codepoint]` panicked with
+/// "byte index N is not a char boundary". The boundary floor now makes a
+/// bad offset return a clamped position instead.
+#[test]
+fn offset_to_line_char_col_mid_codepoint_does_not_panic() {
+    // `λ` (U+03BB) is 2 bytes; offset 1 is mid-codepoint.
+    let src = Source::new("synthetic.cb".into(), "λx".into());
+    // Offset 1 floors back to the λ start (boundary 0): 0 chars precede it.
+    assert_eq!(src.offset_to_line_char_col(1), (1, 0));
+    // A 4-byte rocket on the next line; offsets 1..4 within it are all
+    // mid-codepoint and must each floor to the rocket's start (char col 0).
+    let src2 = Source::new("synthetic2.cb".into(), "a\n🚀".into());
+    for bad in [3u32, 4, 5] {
+        // Line 2 starts at byte 2; the rocket occupies bytes 2..6.
+        assert_eq!(src2.offset_to_line_char_col(bad), (2, 0));
+    }
+}
+
 #[test]
 fn offset_to_line_char_col_ascii_matches_byte_col() {
     let src = Source::new("ascii.cb".into(), "hello\nworld".into());
