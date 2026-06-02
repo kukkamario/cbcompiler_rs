@@ -71,7 +71,7 @@ radians internally).
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `Int` | `value: Float` | `Integer` | Float→int: adds `0.5` then truncates (round-half-up for non-negatives), **not** a straight truncation toward zero |
+| `Int` | `value: Float` | `Integer` | Float→int: rounds to the nearest integer, ties **away from zero** (`10.5 → 11`, `-1.5 → -2`), **not** a straight truncation toward zero |
 | `Int` | `value: String` | `Integer` | Parses a string to an integer (trims whitespace, `stoi`) |
 | `Float` | `value: Integer` | `Float` | Converts a value to a float |
 | `RoundUp` | `value: Float` | `Integer` | Ceiling (`ceil`) |
@@ -726,9 +726,10 @@ intentionally. Known status and divergences as of the latest runtime work
   `BoxOverlap`). `Rand(low,high)` is **inclusive** `[low,high]` and `Rnd(low,high)`
   is `[low,high)` (cbEnchanted parity); the `high < low` branch is the documented
   special case (Rnd → `randf()*low`, Rand → `rand(low)`), not a swap. `Int(Float)`
-  rounds **half-up** (`(int)(x+0.5)`), and `Int(String)` trims then parses a
-  leading integer — both via the interpreter's `convert_value` (so explicit
-  `Int()` and implicit Float→Int coercion agree).
+  rounds to the **nearest integer, ties away from zero** (`f64::round`, so
+  `10.5 → 11` and `-1.5 → -2`), and `Int(String)` trims then parses a leading
+  integer — both via the interpreter's `convert_value` (so explicit `Int()` and
+  implicit Float→Int coercion agree).
 - **System / Time.** `Timer` returns monotonic ms since first call
   (`std::chrono::steady_clock`; the legacy used CPU-time `clock()`). `Wait(ms)`
   sleeps (`ms <= 0` is a no-op). `End` is a language statement lowered to an IR

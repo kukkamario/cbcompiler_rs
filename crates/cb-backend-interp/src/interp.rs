@@ -1186,10 +1186,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         to: &IrType,
     ) -> Result<Value, InterpError> {
         // Language-level conversion to an integer type uses CoolBasic's
-        // `toInt` semantics (cb_runtime.md §Math): a Float is rounded half-up
-        // (`(int)(x + 0.5)`), not truncated toward zero, and a String is
-        // parsed as a leading integer after trimming. The raw `value_to_i64`
-        // helper (truncating) stays for internal, non-language uses.
+        // `toInt` semantics (cb_runtime.md §Math): a Float is rounded to the
+        // nearest integer with ties going **away from zero** (`10.5 → 11`,
+        // `-1.5 → -2`), not truncated toward zero, and a String is parsed as a
+        // leading integer after trimming. The raw `value_to_i64` helper
+        // (truncating) stays for internal, non-language uses.
         let i = self.value_to_int_cb(v);
         let f = self.value_to_f64(v);
 
@@ -1213,12 +1214,13 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
-    /// CoolBasic `toInt` conversion: Float rounds half-up (`(int)(x + 0.5)`,
-    /// truncating toward zero afterward), String trims then parses a leading
-    /// integer (0 on no leading digits), everything else matches `value_to_i64`.
+    /// CoolBasic `toInt` conversion: Float rounds to the nearest integer with
+    /// ties **away from zero** (`f64::round`, so `2.5 → 3` and `-1.5 → -2`),
+    /// String trims then parses a leading integer (0 on no leading digits),
+    /// everything else matches `value_to_i64`.
     fn value_to_int_cb(&self, v: &Value) -> i64 {
         match v {
-            Value::Float(x) => (*x + 0.5) as i64,
+            Value::Float(x) => x.round() as i64,
             Value::String(s) => parse_leading_int(s.as_bytes()),
             _ => self.value_to_i64(v),
         }
