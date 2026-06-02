@@ -1,0 +1,46 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 135
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: i (Int)
+    local1: @for_to_0 (Int)
+    local2: @for_step_1 (Int)
+
+  bb0:
+    r0 = const_int 1
+    store_local local0, r0
+    r1 = const_float 10.5
+    r2 = convert r1: Float -> Int
+    store_local local1, r2
+    r3 = const_int 1
+    store_local local2, r3
+    goto bb3
+  bb1:
+    r7 = load_local local0
+    r8 = load_local local1
+    r9 = lt_eq r7, r8
+    branch_if r9, bb4, bb6
+  bb2:
+    r10 = load_local local0
+    r11 = load_local local1
+    r12 = gt_eq r10, r11
+    branch_if r12, bb4, bb6
+  bb3:
+    r4 = load_local local2
+    r5 = const_int 0
+    r6 = gt r4, r5
+    branch_if r6, bb1, bb2
+  bb4:
+    goto bb5
+  bb5:
+    r13 = load_local local0
+    r14 = load_local local2
+    r15 = add r13, r14
+    store_local local0, r15
+    goto bb3
+  bb6:
+    return
+}

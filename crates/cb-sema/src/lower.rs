@@ -1673,12 +1673,18 @@ impl<'a> Lowerer<'a> {
             VarRef::Local(id) => self.locals[id.0 as usize].ty.clone(),
             VarRef::Global(id) => self.globals[id.0 as usize].ty.clone(),
         };
+        // Direction-test constants (default step, the `0` compared against) must
+        // be emitted in the loop-variable type so all `For` IR operands agree —
+        // `check_for` coerces from/to/step to this type, so the loaded regs match.
+        let var_is_float = var_ty == IrType::Float;
         let to_local = self.alloc_temp("@for_to", var_ty.clone());
         self.emit_void(InstKind::StoreLocal { local: to_local, value: to_reg }, span);
 
         // Cache "step" value (default 1) in a unique temp local.
         let step_reg = if let Some(step_id) = step {
             self.lower_expr(step_id)
+        } else if var_is_float {
+            self.emit(InstKind::ConstFloat(1.0), span)
         } else {
             self.emit(InstKind::ConstInt(1), span)
         };
@@ -1703,7 +1709,11 @@ impl<'a> Lowerer<'a> {
         // Direction check block: if step > 0, use <=; else use >=.
         self.switch_to(cond_check_block);
         let step_val = self.emit(InstKind::LoadLocal { local: step_local }, span);
-        let zero = self.emit(InstKind::ConstInt(0), span);
+        let zero = if var_is_float {
+            self.emit(InstKind::ConstFloat(0.0), span)
+        } else {
+            self.emit(InstKind::ConstInt(0), span)
+        };
         let step_positive = self.emit(
             InstKind::BinOp {
                 op: IrBinOp::Gt,

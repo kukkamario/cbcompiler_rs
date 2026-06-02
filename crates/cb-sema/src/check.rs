@@ -1331,6 +1331,26 @@ impl<'a> Checker<'a> {
         if let Some(conv) = convert::find_implicit_conversion(from, to) {
             self.conversions.insert(value_node, conv, to.clone());
             if convert::is_narrowing(conv, from, to) {
+                // For an integer literal narrowed to a smaller integer target, the
+                // value is known at compile time: out of range is a hard error,
+                // in range is silent (a literal is a known-safe constant,
+                // cb_syntax.md §1.6/§3.4). Runtime/variable values still warn.
+                if from.is_integer()
+                    && to.is_integer()
+                    && let Some(val) = self.literal_int_value(value_node)
+                {
+                    if let Some((min, max)) = convert::int_range(to)
+                        && (val < min || val > max)
+                    {
+                        self.diagnostics.push(Diagnostic::error(
+                            E_LITERAL_OVERFLOW,
+                            format!("integer literal {val} is out of range for type `{to:?}`"),
+                            Label::new(self.arena.span_of(value_node)),
+                        ));
+                        return false;
+                    }
+                    return true;
+                }
                 self.diagnostics.push(Diagnostic::warning(
                     E_NARROWING_CONVERSION,
                     format!("implicit narrowing conversion from `{from:?}` to `{to:?}`"),
@@ -1345,6 +1365,23 @@ impl<'a> Checker<'a> {
                 Label::new(self.arena.span_of(value_node)),
             ));
             false
+        }
+    }
+
+    /// The compile-time value of an integer-literal expression, if `node` is one
+    /// (a bare `IntLit`, optionally parenthesised, negated, or `+`-abs'd). Used to
+    /// range-check literals against a narrower integer target in `coerce`.
+    fn literal_int_value(&self, node: NodeId) -> Option<i128> {
+        match &self.arena[node] {
+            Node::Expr(Expr::IntLit(v)) => Some(*v as i128),
+            Node::Expr(Expr::Paren { inner }) => self.literal_int_value(*inner),
+            Node::Expr(Expr::Unary { op: UnOp::Neg, operand }) => {
+                self.literal_int_value(*operand).map(|v| -v)
+            }
+            Node::Expr(Expr::Unary { op: UnOp::Plus, operand }) => {
+                self.literal_int_value(*operand).map(|v| v.abs())
+            }
+            _ => None,
         }
     }
 
@@ -1380,6 +1417,15 @@ impl<'a> Checker<'a> {
                     self.diagnostics.push(Diagnostic::error(
                         E_CONST_EVAL_ERROR,
                         "division by zero in constant expression",
+                        Label::new(self.arena.span_of(rhs)),
+                    ));
+                }
+                // Float `/0` is well-defined in IEEE (inf/nan) but almost always a
+                // bug — warn while still folding to the IEEE result (§3.4).
+                if op == BinOp::Div && matches!(&r, ConstValue::Float(f) if *f == 0.0) {
+                    self.diagnostics.push(Diagnostic::warning(
+                        E_CONST_FLOAT_DIV_ZERO,
+                        "floating-point division by zero in constant expression",
                         Label::new(self.arena.span_of(rhs)),
                     ));
                 }
@@ -1554,7 +1600,7 @@ impl<'a> Checker<'a> {
                 Label::new(self.arena.span_of(to)),
             ));
         }
-        if let Some(step_id) = step {
+        let step_ty = step.map(|step_id| {
             let step_ty = self.check_expr(step_id);
             if !step_ty.is_numeric() && !step_ty.is_error() {
                 self.diagnostics.push(Diagnostic::error(
@@ -1562,6 +1608,18 @@ impl<'a> Checker<'a> {
                     "For `step` value must be numeric",
                     Label::new(self.arena.span_of(step_id)),
                 ));
+            }
+            step_ty
+        });
+
+        // Coerce the bounds and step to the loop-variable type so conversions are
+        // recorded (and narrowing warnings fire) — matching `check_assign`. With
+        // these recorded, lowering emits type-consistent `For` IR (cb_syntax.md §3.4).
+        if var_ty.is_numeric() {
+            self.coerce(from, &from_ty, &var_ty);
+            self.coerce(to, &to_ty, &var_ty);
+            if let (Some(step_id), Some(step_ty)) = (step, step_ty) {
+                self.coerce(step_id, &step_ty, &var_ty);
             }
         }
 
@@ -1802,6 +1860,16 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Numeric constant as `f64`, for operators that compute in floating point
+/// (e.g. `^`). Returns `None` for non-numeric constants.
+fn const_as_f64(v: &ConstValue) -> Option<f64> {
+    match v {
+        ConstValue::Int(n) => Some(*n as f64),
+        ConstValue::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
 fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstValue> {
     match (op, l, r) {
         // Integer arithmetic
@@ -1816,6 +1884,13 @@ fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstV
         (BinOp::Sub, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a - b)),
         (BinOp::Mul, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a * b)),
         (BinOp::Div, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a / b)),
+
+        // Exponentiation — always Float (cb_syntax.md §3.4).
+        (BinOp::Pow, l, r) => {
+            let base = const_as_f64(l)?;
+            let exp = const_as_f64(r)?;
+            Some(ConstValue::Float(base.powf(exp)))
+        }
 
         // String concatenation
         (BinOp::Add, ConstValue::String(a), ConstValue::String(b)) => {
@@ -1851,10 +1926,12 @@ fn sigil_char(s: Sigil) -> char {
 #[cfg(test)]
 mod tests {
     use cb_diagnostics::FileId;
-    use cb_frontend::{parse, tokenize, LexerOptions};
+    use cb_frontend::{parse, tokenize, BinOp, LexerOptions};
     use cb_ir::types::IrType;
 
+    use super::eval_const_binary;
     use crate::analyze;
+    use crate::scope::ConstValue;
 
     fn empty_catalog() -> crate::RuntimeCatalog {
         crate::RuntimeCatalog {
@@ -2364,6 +2441,86 @@ mod tests {
     fn const_eval_string_concat() {
         let result = analyze_src("Const x$ = \"hello\" + \" world\"\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── FD-020: numeric & For-loop semantics ────────────────────────────
+
+    #[test]
+    fn literal_overflow_narrow_int_e0326() {
+        // 300 does not fit a Byte → hard error (cb_syntax.md §1.6/§3.4).
+        let result = analyze_src("Dim b As Byte\nb = 300\n");
+        assert!(
+            error_codes(&result).contains(&"E0326"),
+            "expected E0326, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn literal_in_range_narrow_int_silent() {
+        // A literal that fits the narrower target is a known-safe constant — no
+        // narrowing warning, no error.
+        let result = analyze_src("Dim b As Byte\nb = 5\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn negative_literal_to_unsigned_e0326() {
+        let result = analyze_src("Dim b As Byte\nb = -1\n");
+        assert!(
+            error_codes(&result).contains(&"E0326"),
+            "expected E0326, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn for_to_float_narrowing_warns_e0318() {
+        // `i%` is Int; `To 10.5` narrows Float→Int → warning, not error.
+        let result = analyze_src("For i% = 1 To 10.5\nNext\n");
+        assert_eq!(warning_codes(&result), vec!["E0318"]);
+    }
+
+    #[test]
+    fn pow_const_folds_to_float() {
+        // `^` folds in floating point regardless of operand const kinds.
+        assert_eq!(
+            eval_const_binary(BinOp::Pow, &ConstValue::Int(2), &ConstValue::Int(10)),
+            Some(ConstValue::Float(1024.0))
+        );
+        assert_eq!(
+            eval_const_binary(BinOp::Pow, &ConstValue::Float(9.0), &ConstValue::Float(0.5)),
+            Some(ConstValue::Float(3.0))
+        );
+    }
+
+    #[test]
+    fn const_pow_expr_compiles() {
+        let result = analyze_src("Const x# = 2 ^ 10\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn const_int_div_zero_e0322() {
+        let result = analyze_src("Const x = 1 / 0\n");
+        assert!(
+            error_codes(&result).contains(&"E0322"),
+            "expected E0322, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn const_float_div_zero_warns_e0327() {
+        // Float `/0` is legal IEEE — warn but still compile.
+        let result = analyze_src("Const x# = 1.0 / 0.0\n");
+        assert_eq!(warning_codes(&result), vec!["E0327"]);
+        let errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     // ── M5 tests: Delete classification ─────────────────────────────────
