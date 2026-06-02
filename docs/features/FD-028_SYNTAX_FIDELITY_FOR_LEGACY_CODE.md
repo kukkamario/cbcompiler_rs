@@ -3,7 +3,7 @@
 **Status:** Open
 **Priority:** High
 **Effort:** Medium (1-4 hours)
-**Impact:** Brings the lexer/parser back in line with real CoolBasic so legacy `.cb` programs parse correctly. Corrects four syntax divergences that currently make us reject or misinterpret valid CoolBasic source.
+**Impact:** Brings the lexer/parser back in line with real CoolBasic so legacy `.cb` programs parse correctly. Corrects five divergences that currently make us reject or misinterpret valid CoolBasic source.
 
 ## Problem
 
@@ -13,6 +13,7 @@ Our frontend diverges from the original CoolBasic language in several places. Th
 2. **`.` is not the field accessor in real CoolBasic — but we want to support it anyway.** The original uses only `\`. We currently use `.` (`Punct::Dot` → `Expr::Field`). We want to support **both** `\` and `.` as field accessors so both legacy (`player\x`) and dotted (`player.x`) styles work.
 3. **The exponent operator is `^`, not `**`.** We currently lex `**` (`Op::StarStar`) → `BinOp::Pow`. CoolBasic uses `^`. (`^` is otherwise unused in our lexer; bitwise XOR is the `Xor` keyword, so there is no clash.)
 4. **`'` (apostrophe) starts an inline comment.** Classic BASIC/CoolBasic uses `'` to begin a line comment. We currently only recognise `Rem`, `//`, and block `/* */`. `'` is currently unhandled by the lexer.
+5. **Unary `+` computes absolute value (same as the `Abs` function).** In CoolBasic, `+x` is `Abs(x)`, not a no-op. We currently treat unary `+` as identity (sema `types.rs:300`, const-fold `check.rs:1365`, interp `interp.rs:1143` returns the value unchanged).
 
 ## Solution
 
@@ -36,11 +37,20 @@ All changes are in `cb-frontend` (lexer/parser/AST), with downstream cleanup in 
 
 - **Lexer:** add `'` to the dispatch (near `lexer.rs:166`) to scan a line comment to end-of-line, emitting `TokenKind::Comment(CommentKind::Line)` (same as `//` / `Rem`).
 
+### Item 5 — unary `+` is absolute value
+
+- **Dedicated inline abs op (D4).** Rename `IrUnOp::Plus` → `IrUnOp::Abs` (`inst.rs`, printer `print.rs:345`); lower `UnOp::Plus → IrUnOp::Abs` (`lower.rs:762`).
+- **Interpreter** (`interp.rs:1143`): replace the identity arm with width-aware abs. Sema preserves the operand type for unary `+` (`types.rs:300`), so abs is computed per width: **signed** (`Int`/`Short`/`Long`) via `wrapping_abs()` — matching the runtime `Abs` (`x < 0 ? -x : x`, which wraps at `MIN`); **unsigned** (`Byte`/`UInt`/`ULong`) is identity (already non-negative); **`Float`** via `f64::abs()`. Non-numeric operands fall through to the existing "invalid unop" error (sema rejects them first).
+- **Const folding** (`check.rs:1365`): `+` folds to the absolute value — `(UnOp::Plus, ConstValue::Int(v)) → Int(v.wrapping_abs())` (`ConstValue::Int` is `i64`) and `(UnOp::Plus, ConstValue::Float(v)) → Float(v.abs())`.
+- **Typing** (`types.rs:300`) is unchanged: `+` preserves the numeric operand type (abs does not change the type), and is still rejected on non-numeric operands.
+- Behaviorally equals the existing `Abs` runtime function (`catalog.cpp:76`); implemented inline rather than lowering to a call, keeping the IR a single unary op and the interpreter self-contained (per the "keep the interpreter simple/observable" rule).
+
 ## Resolved decisions
 
 - **D1 (Item 3):** **Replace** `**` outright with `^`. `**` is removed from the lexer; only `^` produces `BinOp::Pow`.
 - **D2 (Item 4):** **Keep all** existing comment forms — `//`, block `/* */`, and `Rem` stay — and **add** `'` as an additional inline-comment introducer.
 - **D3 (Item 1):** `\` and `.` are **fully interchangeable** — same postfix binding power, both produce `Expr::Field`, freely mixable in chains like `a\b.c\d`.
+- **D4 (Item 5):** Implement unary `+` as a **dedicated inline abs op** (`IrUnOp::Abs`) computed by the interpreter per operand width, rather than lowering to the `Abs` runtime call. The `i32::MIN` edge uses `wrapping_abs`, matching the runtime `Abs`.
 
 ## Files to Create/Modify
 
@@ -50,15 +60,15 @@ All changes are in `cb-frontend` (lexer/parser/AST), with downstream cleanup in 
 | `crates/cb-frontend/src/lexer.rs` | MODIFY | `'` → line comment; `^` → `Op::Caret`; drop `**`; `\` token role |
 | `crates/cb-frontend/src/parser.rs` | MODIFY | `\` & `.` as postfix field access; `^` → `Pow`; remove `**` and `\`-as-IntDiv |
 | `crates/cb-frontend/src/ast.rs` | MODIFY | Remove `BinOp::IntDiv` |
-| `crates/cb-ir/src/inst.rs` | MODIFY | Remove `IrBinOp::IntDiv` |
-| `crates/cb-ir/src/print.rs` | MODIFY | Remove `int_div` printer arm |
-| `crates/cb-sema/src/types.rs` | MODIFY | Remove `IntDiv` typing + tests |
-| `crates/cb-sema/src/lower.rs` | MODIFY | Remove `IntDiv` → IR mapping |
-| `crates/cb-sema/src/check.rs` | MODIFY | Reword `E0322` const div-by-zero (drop `\`) |
-| `crates/cb-backend-interp/src/interp.rs` | MODIFY | Remove `IntDiv` eval arms |
+| `crates/cb-ir/src/inst.rs` | MODIFY | Remove `IrBinOp::IntDiv`; rename `IrUnOp::Plus` → `IrUnOp::Abs` |
+| `crates/cb-ir/src/print.rs` | MODIFY | Remove `int_div` printer arm; `plus` → `abs` |
+| `crates/cb-sema/src/types.rs` | MODIFY | Remove `IntDiv` typing + tests (unary `+` typing unchanged) |
+| `crates/cb-sema/src/lower.rs` | MODIFY | Remove `IntDiv` → IR mapping; `UnOp::Plus` → `IrUnOp::Abs` |
+| `crates/cb-sema/src/check.rs` | MODIFY | Const-fold unary `+` to abs (drop identity arms) |
+| `crates/cb-backend-interp/src/interp.rs` | MODIFY | Remove `IntDiv` eval arms; replace unary `+` identity with width-aware abs |
 | `crates/cb-frontend/tests/lexer_units.rs` | MODIFY | Update `\` tests; add `'` comment + `^` tests |
 | `crates/cb-frontend/tests/parser_snapshots.rs` | MODIFY | Remove `IntDiv` arm; add `\` field-access + `^` snapshots |
-| `docs/cb_syntax.md` | MODIFY | §1.2 comments (`'`), §1.7 operators (`^` not `**`, drop `\` arithmetic), §5 precedence, field-access via `\` and `.`, trap list |
+| `docs/cb_syntax.md` | MODIFY | §1.2 comments (`'`), §1.7 operators (`^` not `**`, drop `\` arithmetic, unary `+` = abs), §3.3 field access, §5.1 precedence, trap list |
 
 ## Verification
 
@@ -66,6 +76,7 @@ All changes are in `cb-frontend` (lexer/parser/AST), with downstream cleanup in 
 - `cargo test -p cb-sema` — typing/lowering snapshots no longer reference `IntDiv`.
 - `cargo build --workspace` — confirms no dangling `IntDiv` match arms.
 - Smoke test a legacy snippet: `player\x = player.x + 2 ^ 3   ' comment` parses with field access on both sides, exponent, and trailing comment.
+- Unary `+` abs: `Print +(-5)` → `5`, `Print +(-3.14)` → `3.14`; `Const c = +(-7)` folds to `7`. Cross-check `+x` equals `Abs(x)`.
 
 ## Related
 

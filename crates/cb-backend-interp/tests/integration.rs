@@ -148,6 +148,40 @@ fn abs_float() {
 }
 
 #[test]
+fn unary_plus_is_abs_int() {
+    // FD-028: unary `+` is absolute value, identical to Abs.
+    let out = run("Print Str(+(-5))");
+    assert_eq!(out, "5\n");
+}
+
+#[test]
+fn unary_plus_is_abs_float() {
+    let out = run("Print Str(+(-3.14))");
+    assert_eq!(out, "3.14\n");
+}
+
+#[test]
+fn unary_plus_const_folds_to_abs() {
+    // FD-028: `+` in a constant expression folds to the absolute value.
+    let out = run(
+        "Const c = +(-7)\n\
+         Print Str(c)"
+    );
+    assert_eq!(out, "7\n");
+}
+
+#[test]
+fn unary_plus_matches_abs() {
+    // `+x` and `Abs(x)` must agree; their difference is 0.
+    let out = run(
+        "Dim x As Int\n\
+         x = -42\n\
+         Print Str(+x - Abs(x))"
+    );
+    assert_eq!(out, "0\n");
+}
+
+#[test]
 fn string_concatenation() {
     let out = run("Dim a As String = \"Hello, \"\nDim b As String = \"World!\"\nPrint a + b");
     assert_eq!(out, "Hello, World!\n");

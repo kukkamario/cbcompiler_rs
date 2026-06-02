@@ -342,7 +342,7 @@ fn format_binop(op: IrBinOp) -> &'static str {
 fn format_unop(op: IrUnOp) -> &'static str {
     match op {
         IrUnOp::Neg => "neg",
-        IrUnOp::Plus => "plus",
+        IrUnOp::Abs => "abs",
         IrUnOp::Not => "not",
         IrUnOp::BinNot => "bin_not",
     }

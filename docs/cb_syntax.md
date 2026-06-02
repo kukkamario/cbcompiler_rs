@@ -194,6 +194,7 @@ Logical: `And`, `Or`, `Xor`, `Not`
 - `And` and `Or` short-circuit (§5.2). `Xor` evaluates both operands.
 
 Unary: `+`, `-`, `Not`, `BinNot`
+- Unary `+` is **absolute value**, identical to the `Abs` function: `+x` ≡ `Abs(x)` (e.g. `+(-5)` is `5`). It is **not** a no-op. The result keeps the operand's numeric type.
 
 String concatenation uses `+`. Numeric operands on either side of a string `+` are implicitly converted to String (§3.4).
 

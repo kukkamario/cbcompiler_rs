@@ -131,7 +131,8 @@ pub enum IrBinOp {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IrUnOp {
     Neg,
-    Plus,
+    /// Unary `+` — absolute value (CoolBasic `+x` ≡ `Abs(x)`), not identity.
+    Abs,
     Not,
     BinNot,
 }

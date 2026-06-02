@@ -759,7 +759,8 @@ impl<'a> Lowerer<'a> {
                 let val = self.lower_expr(operand);
                 let ir_op = match op {
                     UnOp::Neg => IrUnOp::Neg,
-                    UnOp::Plus => IrUnOp::Plus,
+                    // CoolBasic unary `+` is absolute value, not identity (FD-028).
+                    UnOp::Plus => IrUnOp::Abs,
                     UnOp::Not => IrUnOp::Not,
                     UnOp::BinNot => IrUnOp::BinNot,
                 };

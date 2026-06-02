@@ -1140,7 +1140,17 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (IrUnOp::Neg, Value::UInt(x)) => Ok(Value::UInt(x.wrapping_neg())),
             (IrUnOp::Neg, Value::ULong(x)) => Ok(Value::ULong(x.wrapping_neg())),
 
-            (IrUnOp::Plus, _) => Ok(v.clone()),
+            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028),
+            // type-preserving per sema. Signed widths use `wrapping_abs` to
+            // match the runtime `Abs` at `MIN`; unsigned widths are already
+            // non-negative, so abs is identity.
+            (IrUnOp::Abs, Value::Int(x)) => Ok(Value::Int(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Short(x)) => Ok(Value::Short(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Long(x)) => Ok(Value::Long(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Byte(x)) => Ok(Value::Byte(*x)),
+            (IrUnOp::Abs, Value::UInt(x)) => Ok(Value::UInt(*x)),
+            (IrUnOp::Abs, Value::ULong(x)) => Ok(Value::ULong(*x)),
+            (IrUnOp::Abs, Value::Float(x)) => Ok(Value::Float(x.abs())),
 
             // Logical NOT is defined for booleans and every integer width via
             // truthiness, so we don't rely on sema always pre-converting.
