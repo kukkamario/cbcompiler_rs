@@ -1,6 +1,7 @@
 # FD-028: Syntax Fidelity for Legacy Code
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-02
 **Priority:** High
 **Effort:** Medium (1-4 hours)
 **Impact:** Brings the lexer/parser back in line with real CoolBasic so legacy `.cb` programs parse correctly. Corrects five divergences that currently make us reject or misinterpret valid CoolBasic source.
