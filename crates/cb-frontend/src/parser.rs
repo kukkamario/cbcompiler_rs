@@ -3066,7 +3066,7 @@ mod expr_tests {
     fn precedence_unary_neg_then_pow() {
         // -2 ^ 2 → Neg(Pow(2, 2)) per §5.1 (unary tighter than every infix
         // except ^; pow "extracts" its right operand around the unary).
-        // This is why prefix_bp = 30, one below pow's right-bp.
+        // This is why the prefix bp (`prefix_op`) is 30, one below pow's right-bp.
         let src = "-2 ^ 2";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
