@@ -21,6 +21,15 @@ pub fn debug_print(out: &mut dyn fmt::Write, arena: &Arena, root: NodeId) -> fmt
     print_node(out, arena, root, 1)
 }
 
+/// Maximum traversal depth before the printer stops recursing and emits an
+/// elision marker. `print_node` is reachable on untrusted ASTs via
+/// `--dump-ast`, so — like the parser's own recursion guard (FD-021) — it
+/// must not overflow the stack on a pathologically deep tree. Set above the
+/// parser's `MAX_RECURSION_DEPTH` (256) so every AST the parser can actually
+/// produce still prints in full; the cap only trips on a tree built by some
+/// other means.
+const MAX_PRINT_DEPTH: usize = 512;
+
 fn print_node(out: &mut dyn fmt::Write, arena: &Arena, id: NodeId, depth: usize) -> fmt::Result {
     let span = arena.span_of(id);
     let pad = "  ".repeat(depth);
@@ -33,7 +42,16 @@ fn print_node(out: &mut dyn fmt::Write, arena: &Arena, id: NodeId, depth: usize)
         Node::CaseArm(c) => format!("CaseArm::{}", case_arm_variant_name(c)),
     };
     writeln!(out, "{pad}{header} @ {}..{}", span.start, span.end)?;
-    for child in children_of(node) {
+    let children = children_of(node);
+    if !children.is_empty() && depth >= MAX_PRINT_DEPTH {
+        writeln!(
+            out,
+            "{}<… nesting too deep, output elided …>",
+            "  ".repeat(depth + 1)
+        )?;
+        return Ok(());
+    }
+    for child in children {
         print_node(out, arena, child, depth + 1)?;
     }
     Ok(())

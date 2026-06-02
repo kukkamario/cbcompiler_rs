@@ -1,6 +1,6 @@
 # FD-021: Parser & Span Panic-Safety
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** High
 **Effort:** Low-Medium (1-3 hours)
 **Impact:** Restores the frontend's "never abort on untrusted input" contract. Today a single small input file can crash the compiler via unbounded recursion; two latent panic vectors in span-slicing share the same risk.
@@ -43,6 +43,17 @@ Folded in (same theme):
 - New `cb-diagnostics` test: a mid-codepoint offset returns a clamped position rather than panicking.
 - `cargo test --workspace` + `clippy -- -D warnings` green; existing 266 frontend tests unaffected.
 - Manual: `printf 'x = %.0s(' {1..6000} > deep.cb; cargo run -p cb-driver -- deep.cb` exits with a diagnostic, not a stack-overflow abort.
+
+## Implementation Notes
+
+Implemented on branch `fd-021-parser-span-panic-safety`.
+
+- **Recursion guard.** Added a shared `recursion_depth: u32` counter on `Parser` with `MAX_RECURSION_DEPTH = 256`, guarded in the two true recursion gateways: `parse_expr_bp` and `parse_type_atom` (each split into a thin guard wrapper + `_inner` so inc/dec is balanced on *every* path, including `?` early returns). Field/`\` chains and left-assoc operator chains are iterative (handled in the Pratt `loop`), so they need no guard. The counter is reset to 0 at each statement boundary in `parse_stmt`, so a `?`-aborted sub-parse can't inflate a later statement's depth. New diagnostic **`E0218` (`E_NESTING_TOO_DEEP`)**; the guard returns `Expr::Error` / `TypeExpr::Error` for recovery.
+- **Pratt panics — folded (chosen over demote-to-E0299).** `infix_bp`+`binop_from` → `infix_op` returning `(u8, u8, BinOp)`; `prefix_bp`+`unop_from` → `prefix_op` returning `(u8, UnOp)`; `postfix_bp` → `postfix_op` returning `(u8, PostfixKind)`. `parse_postfix` now takes a `PostfixKind` and matches it exhaustively, eliminating the `unreachable!`. The two `.expect()`s are gone — the tables can no longer drift.
+- **`SpanExt::slice`** now bounds- **and** char-boundary-checks, returning `""` on bad input (stronger than the existing `span_slice`/`string_value::slice`, which only bounds-check).
+- **`offset_to_line_char_col`** floors `slice_end` down to the nearest char boundary before slicing.
+- **`ast_print::print_node`** gains `MAX_PRINT_DEPTH = 512` (above the parser cap so all real ASTs print fully) with an elision marker.
+- **Tests:** new `crates/cb-frontend/tests/deep_nesting.rs` (12 cases: deep parens/prefix/calls/types yield E0218 not abort; `--dump-ast` safe; depth resets between statements; moderate nesting unaffected; `SpanExt::slice` defensive cases). New `offset_to_line_char_col_mid_codepoint_does_not_panic` in `cb-diagnostics`. Full workspace `cargo test` + `clippy -D warnings` green; manual `deep.cb` repro now exits 1 with a diagnostic (was 134 / stack-overflow abort).
 
 ## Related
 

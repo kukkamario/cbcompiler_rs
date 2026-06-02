@@ -36,6 +36,10 @@ pub const E_LABEL_HAS_SIGIL: DiagnosticCode = DiagnosticCode::new("E0214");
 pub const E_EMPTY_SINGLE_LINE_IF_BODY: DiagnosticCode = DiagnosticCode::new("E0215");
 pub const E_DUPLICATE_DEFAULT: DiagnosticCode = DiagnosticCode::new("E0216");
 pub const E_NEXT_SIGIL_MISMATCH: DiagnosticCode = DiagnosticCode::new("E0217");
+/// Expression or type nesting exceeded [`MAX_RECURSION_DEPTH`]. Emitted
+/// instead of letting unbounded parser recursion overflow the stack and
+/// abort the process. FD-021.
+pub const E_NESTING_TOO_DEEP: DiagnosticCode = DiagnosticCode::new("E0218");
 /// Internal compiler error — emitted only from defensive branches that
 /// should be unreachable by the parser invariants. Surfaced (rather than
 /// `panic!`) so a future change that violates the invariants produces a
@@ -366,6 +370,14 @@ pub(crate) struct Parser<'t> {
     /// `Stmt::Error` node can span from the original error to the bumped
     /// token, instead of pinning the Error to just the bumped token's span.
     last_error: Option<(usize, Span)>,
+    /// Current expression/type recursion depth. Incremented at the two
+    /// recursion gateways (`parse_expr_bp`, `parse_type_atom`) and checked
+    /// against [`MAX_RECURSION_DEPTH`] so a pathologically nested input
+    /// (e.g. thousands of `(`) yields an `E0218` diagnostic instead of a
+    /// stack-overflow abort. Reset to 0 at each statement boundary in
+    /// `parse_stmt`, so a `?`-aborted sub-parse never inflates the next
+    /// statement's depth. FD-021.
+    recursion_depth: u32,
 }
 
 impl<'t> Parser<'t> {
@@ -376,6 +388,7 @@ impl<'t> Parser<'t> {
             diagnostics: Vec::new(),
             last_term: LastTerm::None,
             last_error: None,
+            recursion_depth: 0,
         }
     }
 
@@ -403,10 +416,25 @@ impl<'t> Parser<'t> {
     /// the loop will accept for the next operator; recurse with a higher
     /// `min_bp` to enforce that operators bind tighter.
     pub(crate) fn parse_expr_bp(&mut self, min_bp: u8) -> Result<NodeId, ParseError> {
+        // Recursion guard: parenthesised expressions, prefix/right-assoc
+        // operator chains, and nested calls all recurse through here, so a
+        // pathological input (`((((…))))`, `----…x`, `f(g(h(…)))`) would
+        // otherwise overflow the stack and abort. Inc/dec is balanced on
+        // every path by splitting the work into `_inner`. FD-021.
+        self.recursion_depth += 1;
+        if self.recursion_depth > MAX_RECURSION_DEPTH {
+            self.recursion_depth -= 1;
+            return Ok(self.nesting_too_deep_expr());
+        }
+        let result = self.parse_expr_bp_inner(min_bp);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn parse_expr_bp_inner(&mut self, min_bp: u8) -> Result<NodeId, ParseError> {
         let lhs_tok = self.cursor.peek_tok();
-        let mut lhs = if let Some(bp) = prefix_bp(&lhs_tok.kind) {
+        let mut lhs = if let Some((bp, op)) = prefix_op(&lhs_tok.kind) {
             let op_tok = self.cursor.bump();
-            let op = unop_from(&op_tok.kind).expect("prefix_bp matched but unop_from didn't");
             let rhs = self.parse_expr_bp(bp)?;
             let span = op_tok.span.merge(self.arena.span_of(rhs));
             self.alloc(Node::Expr(Expr::Unary { op, operand: rhs }), span)
@@ -416,19 +444,18 @@ impl<'t> Parser<'t> {
 
         loop {
             let tok = self.cursor.peek_tok();
-            if let Some(pbp) = postfix_bp(&tok.kind) {
+            if let Some((pbp, postfix)) = postfix_op(&tok.kind) {
                 if pbp < min_bp {
                     break;
                 }
-                lhs = self.parse_postfix(lhs)?;
+                lhs = self.parse_postfix(lhs, postfix)?;
                 continue;
             }
-            if let Some((lbp, rbp)) = infix_bp(&tok.kind) {
+            if let Some((lbp, rbp, op)) = infix_op(&tok.kind) {
                 if lbp < min_bp {
                     break;
                 }
-                let op_tok = self.cursor.bump();
-                let op = binop_from(&op_tok.kind).expect("infix_bp matched but binop_from didn't");
+                self.cursor.bump();
                 let rhs = self.parse_expr_bp(rbp)?;
                 let span = self.arena.span_of(lhs).merge(self.arena.span_of(rhs));
                 lhs = self.alloc(Node::Expr(Expr::Binary { op, lhs, rhs }), span);
@@ -438,6 +465,30 @@ impl<'t> Parser<'t> {
         }
 
         Ok(lhs)
+    }
+
+    /// Emit the `E0218` "nesting too deep" diagnostic at the current token
+    /// and return an `Expr::Error` recovery node. Used by the recursion
+    /// guard in [`Parser::parse_expr_bp`]. FD-021.
+    fn nesting_too_deep_expr(&mut self) -> NodeId {
+        let span = self.cursor.peek_tok().span;
+        self.diagnostics.push(Diagnostic::error(
+            E_NESTING_TOO_DEEP,
+            "expression nesting is too deep",
+            Label::new(span),
+        ));
+        self.alloc(Node::Expr(Expr::Error), span)
+    }
+
+    /// Type-expression counterpart of [`Parser::nesting_too_deep_expr`].
+    fn nesting_too_deep_type(&mut self) -> NodeId {
+        let span = self.cursor.peek_tok().span;
+        self.diagnostics.push(Diagnostic::error(
+            E_NESTING_TOO_DEEP,
+            "type nesting is too deep",
+            Label::new(span),
+        ));
+        self.alloc(Node::TypeExpr(TypeExpr::Error), span)
     }
 
     /// Atomic / prefix expressions: literals, identifiers, parenthesized
@@ -537,12 +588,15 @@ impl<'t> Parser<'t> {
 
     /// Handle a single postfix operator (`(`, `[`, `.`, or `\`). Multiple postfix
     /// operations chain via the outer loop in [`Parser::parse_expr_bp`].
-    fn parse_postfix(&mut self, lhs: NodeId) -> Result<NodeId, ParseError> {
+    fn parse_postfix(&mut self, lhs: NodeId, kind: PostfixKind) -> Result<NodeId, ParseError> {
         let lhs_span = self.arena.span_of(lhs);
-        let tok = self.cursor.peek_tok();
-        match tok.kind {
-            TokenKind::Punct(Punct::LParen) => {
-                self.cursor.bump();
+        // `kind` is supplied by [`postfix_op`], which is the single source of
+        // truth for "this token starts a postfix": the exhaustive match below
+        // cannot drift out of sync with the binding-power table the way the
+        // former peek-and-re-match + `unreachable!` arm could. FD-021.
+        match kind {
+            PostfixKind::Call => {
+                self.cursor.bump(); // `(`
                 let args = self.parse_arg_list(Punct::RParen)?;
                 let close = self
                     .cursor
@@ -550,8 +604,8 @@ impl<'t> Parser<'t> {
                 let span = lhs_span.merge(close.span);
                 Ok(self.alloc(Node::Expr(Expr::Call { callee: lhs, args }), span))
             }
-            TokenKind::Punct(Punct::LBracket) => {
-                self.cursor.bump();
+            PostfixKind::Index => {
+                self.cursor.bump(); // `[`
                 let indices = self.parse_arg_list(Punct::RBracket)?;
                 let close = self
                     .cursor
@@ -582,7 +636,7 @@ impl<'t> Parser<'t> {
             // `\` and `.` are interchangeable `Type` field accessors (FD-028):
             // `player\x` is the legacy CoolBasic form, `player.x` the dotted
             // alias. Both produce `Expr::Field`.
-            TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => {
+            PostfixKind::Field => {
                 let accessor = self.cursor.bump();
                 let accessor_str = match accessor.kind {
                     TokenKind::Op(Op::BackSlash) => "\\",
@@ -615,7 +669,6 @@ impl<'t> Parser<'t> {
                     }),
                 }
             }
-            _ => unreachable!("parse_postfix called on non-postfix token"),
         }
     }
 
@@ -698,6 +751,22 @@ impl<'t> Parser<'t> {
     /// `New` (which consumes the `[…]` itself as a dim-list) and `Redim`
     /// (which uses `[expr, …]` as a sizing list, not a type-rank marker).
     pub(crate) fn parse_type_atom(&mut self) -> Result<NodeId, ParseError> {
+        // Type recursion (parenthesised types `(((T)))`, function-pointer
+        // return/param chains) always funnels through here, so the same
+        // recursion guard as `parse_expr_bp` applies. The depth counter is
+        // shared between expression and type recursion, which is the
+        // conservative choice for a mixed nest like `New (((T)))`. FD-021.
+        self.recursion_depth += 1;
+        if self.recursion_depth > MAX_RECURSION_DEPTH {
+            self.recursion_depth -= 1;
+            return Ok(self.nesting_too_deep_type());
+        }
+        let result = self.parse_type_atom_inner();
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn parse_type_atom_inner(&mut self) -> Result<NodeId, ParseError> {
         let tok = self.cursor.peek_tok();
         match tok.kind {
             TokenKind::Keyword(kw) if is_primitive_type_kw(kw) => {
@@ -882,6 +951,12 @@ impl<'t> Parser<'t> {
         if matches!(self.cursor.peek(), TokenKind::Eof) {
             return None;
         }
+        // Start each statement with a fresh recursion budget. Inc/dec in the
+        // recursion gateways is balanced on success, but a `?`-aborted
+        // sub-parse unwinds straight to here without running the matching
+        // decrements; resetting prevents that leftover depth from causing a
+        // spurious `E0218` in a later statement. FD-021.
+        self.recursion_depth = 0;
         // Forced-progress guard: if the previous call errored, ran sync, and
         // left us at exactly this position, retrying `parse_stmt_inner` here
         // would produce the same error and the same no-progress sync — an
@@ -2744,9 +2819,16 @@ fn is_primitive_type_kw(kw: Kw) -> bool {
 
 /// Left-binding-power of comparison operators (`=`, `<>`, `<`, `>`, `<=`,
 /// `>=`). Pinned here as a named constant so [`STMT_LHS_MIN_BP`] derives
-/// from it. If the comparison level shifts in [`infix_bp`], update this
+/// from it. If the comparison level shifts in [`infix_op`], update this
 /// constant — the derived statement-LHS gate moves with it.
 const CMP_LBP: u8 = 16;
+
+/// Maximum expression/type recursion depth before the parser emits
+/// [`E_NESTING_TOO_DEEP`] and recovers instead of recursing further.
+/// Generous for any real CoolBasic source (legitimate nesting runs to the
+/// low tens) yet far below the ~thousands of frames that overflow the
+/// process stack. FD-021.
+const MAX_RECURSION_DEPTH: u32 = 256;
 
 /// Minimum binding power for the LHS of a statement-level expression /
 /// assignment. Set one above [`CMP_LBP`] so the Pratt loop refuses to
@@ -2756,106 +2838,99 @@ const CMP_LBP: u8 = 16;
 /// FD-004 #15: derived from `CMP_LBP` (was a hand-written `17`).
 const STMT_LHS_MIN_BP: u8 = CMP_LBP + 1;
 
-/// Binding powers for infix operators. Returns `(left_bp, right_bp)`; when
-/// `right > left` the operator is right-associative.
+/// Infix operator lookup: binding power **and** the [`BinOp`] it maps to,
+/// in one table. Returns `(left_bp, right_bp, op)`; when `right > left` the
+/// operator is right-associative. Folding the binding-power and the op
+/// mapping into a single function means the two can never drift out of
+/// sync — the former `infix_bp`/`binop_from` split required an `.expect()`
+/// in the Pratt loop to bridge them, which was a latent panic on any future
+/// table edit. FD-021.
 ///
 /// The levels follow `docs/cb_syntax.md` §5.1; numeric values are chosen so
 /// every level is strictly above the one below it and unary / postfix slot
-/// in cleanly (see `prefix_bp` and `postfix_bp`).
-fn infix_bp(kind: &TokenKind) -> Option<(u8, u8)> {
+/// in cleanly (see [`prefix_op`] and [`postfix_op`]).
+fn infix_op(kind: &TokenKind) -> Option<(u8, u8, BinOp)> {
     Some(match kind {
-        TokenKind::Keyword(Kw::Or) => (10, 11),
-        TokenKind::Keyword(Kw::Xor) => (12, 13),
-        TokenKind::Keyword(Kw::And) => (14, 15),
-        TokenKind::Op(Op::Eq | Op::NotEq | Op::Lt | Op::Gt | Op::LtEq | Op::GtEq) => {
-            (CMP_LBP, CMP_LBP + 1)
-        }
-        TokenKind::Keyword(Kw::BinOr) => (18, 19),
-        TokenKind::Keyword(Kw::BinXor) => (20, 21),
-        TokenKind::Keyword(Kw::BinAnd) => (22, 23),
-        TokenKind::Keyword(Kw::Shl | Kw::Shr | Kw::Sar) => (24, 25),
-        TokenKind::Op(Op::Plus | Op::Minus) => (26, 27),
-        TokenKind::Op(Op::Star | Op::Slash) => (28, 29),
-        TokenKind::Keyword(Kw::Mod) => (28, 29),
+        TokenKind::Keyword(Kw::Or) => (10, 11, BinOp::Or),
+        TokenKind::Keyword(Kw::Xor) => (12, 13, BinOp::Xor),
+        TokenKind::Keyword(Kw::And) => (14, 15, BinOp::And),
+        TokenKind::Op(Op::Eq) => (CMP_LBP, CMP_LBP + 1, BinOp::Eq),
+        TokenKind::Op(Op::NotEq) => (CMP_LBP, CMP_LBP + 1, BinOp::NotEq),
+        TokenKind::Op(Op::Lt) => (CMP_LBP, CMP_LBP + 1, BinOp::Lt),
+        TokenKind::Op(Op::Gt) => (CMP_LBP, CMP_LBP + 1, BinOp::Gt),
+        TokenKind::Op(Op::LtEq) => (CMP_LBP, CMP_LBP + 1, BinOp::LtEq),
+        TokenKind::Op(Op::GtEq) => (CMP_LBP, CMP_LBP + 1, BinOp::GtEq),
+        TokenKind::Keyword(Kw::BinOr) => (18, 19, BinOp::BinOr),
+        TokenKind::Keyword(Kw::BinXor) => (20, 21, BinOp::BinXor),
+        TokenKind::Keyword(Kw::BinAnd) => (22, 23, BinOp::BinAnd),
+        TokenKind::Keyword(Kw::Shl) => (24, 25, BinOp::Shl),
+        TokenKind::Keyword(Kw::Shr) => (24, 25, BinOp::Shr),
+        TokenKind::Keyword(Kw::Sar) => (24, 25, BinOp::Sar),
+        TokenKind::Op(Op::Plus) => (26, 27, BinOp::Add),
+        TokenKind::Op(Op::Minus) => (26, 27, BinOp::Sub),
+        TokenKind::Op(Op::Star) => (28, 29, BinOp::Mul),
+        TokenKind::Op(Op::Slash) => (28, 29, BinOp::Div),
+        TokenKind::Keyword(Kw::Mod) => (28, 29, BinOp::Mod),
         // `^` is right-associative: right_bp < left_bp.
-        TokenKind::Op(Op::Caret) => (31, 30),
+        TokenKind::Op(Op::Caret) => (31, 30, BinOp::Pow),
         _ => return None,
     })
 }
 
-/// Binding power for a prefix unary operator.
+/// Prefix unary operator lookup: binding power and the [`UnOp`] it maps to,
+/// folded into one table (see [`infix_op`] for why).
 ///
-/// Set to 30, **one below** `^`'s right-bp (also 30) so that `-2 ^ 2`
-/// parses as `-(2 ^ 2)`, matching §5.1 (unary tighter than every infix
-/// except `^`, which extracts its right operand "around" the unary). The
-/// original FD-002 table had this at 32 — that produced `(-2) ^ 2`, which
-/// contradicts the spec. See the FD-002 plan §B.4 for the trace; recap:
+/// The binding power is 30, **one below** `^`'s right-bp (also 30) so that
+/// `-2 ^ 2` parses as `-(2 ^ 2)`, matching §5.1 (unary tighter than every
+/// infix except `^`, which extracts its right operand "around" the unary).
+/// The original FD-002 table had this at 32 — that produced `(-2) ^ 2`,
+/// which contradicts the spec. See the FD-002 plan §B.4 for the trace;
+/// recap:
 ///
 ///   `-2 ^ 2`:
 ///     outer `parse_expr_bp(0)` sees `-`, recurses with min_bp = 30.
-///     inner sees `2`, then `^` with infix_bp = (31, 30). `31 >= 30`, so
+///     inner sees `2`, then `^` with infix bp = (31, 30). `31 >= 30`, so
 ///     pow is consumed inside the unary; result = `Pow(2, 2)`.
 ///     outer wraps: `Neg(Pow(2, 2))`.  ✓ matches §5.1
-fn prefix_bp(kind: &TokenKind) -> Option<u8> {
+fn prefix_op(kind: &TokenKind) -> Option<(u8, UnOp)> {
     Some(match kind {
-        TokenKind::Op(Op::Plus | Op::Minus) => 30,
-        TokenKind::Keyword(Kw::Not | Kw::BinNot) => 30,
+        TokenKind::Op(Op::Plus) => (30, UnOp::Plus),
+        TokenKind::Op(Op::Minus) => (30, UnOp::Neg),
+        TokenKind::Keyword(Kw::Not) => (30, UnOp::Not),
+        TokenKind::Keyword(Kw::BinNot) => (30, UnOp::BinNot),
         _ => return None,
     })
 }
 
-/// Binding power for postfix operators (`(`, `[`, `.`, `\`). Set above every
-/// infix and the prefix unary so `f(x)`, `arr[i]`, and `obj.field` / `obj\field`
-/// always bind their callee/array/target before any surrounding operator.
-fn postfix_bp(kind: &TokenKind) -> Option<u8> {
+/// Postfix operator lookup: binding power and which postfix form the token
+/// introduces. Set above every infix and the prefix unary so `f(x)`,
+/// `arr[i]`, and `obj.field` / `obj\field` always bind their
+/// callee/array/target before any surrounding operator. The [`PostfixKind`]
+/// is what [`Parser::parse_postfix`] dispatches on, so this table is the
+/// single source of truth for "is this a postfix token" — no `unreachable!`
+/// re-match. FD-021.
+fn postfix_op(kind: &TokenKind) -> Option<(u8, PostfixKind)> {
     Some(match kind {
-        TokenKind::Punct(Punct::LParen) => 34,
-        TokenKind::Punct(Punct::LBracket) => 34,
+        TokenKind::Punct(Punct::LParen) => (34, PostfixKind::Call),
+        TokenKind::Punct(Punct::LBracket) => (34, PostfixKind::Index),
         // Field access: `.` and its `\` alias (FD-028).
-        TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => 34,
+        TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => (34, PostfixKind::Field),
         _ => return None,
     })
 }
 
-/// Map an operator/keyword token to its [`BinOp`] variant. Returns `None`
-/// for tokens that aren't binary operators.
-fn binop_from(kind: &TokenKind) -> Option<BinOp> {
-    Some(match kind {
-        TokenKind::Op(Op::Plus) => BinOp::Add,
-        TokenKind::Op(Op::Minus) => BinOp::Sub,
-        TokenKind::Op(Op::Star) => BinOp::Mul,
-        TokenKind::Op(Op::Slash) => BinOp::Div,
-        TokenKind::Op(Op::Caret) => BinOp::Pow,
-        TokenKind::Op(Op::Eq) => BinOp::Eq,
-        TokenKind::Op(Op::NotEq) => BinOp::NotEq,
-        TokenKind::Op(Op::Lt) => BinOp::Lt,
-        TokenKind::Op(Op::Gt) => BinOp::Gt,
-        TokenKind::Op(Op::LtEq) => BinOp::LtEq,
-        TokenKind::Op(Op::GtEq) => BinOp::GtEq,
-        TokenKind::Keyword(Kw::And) => BinOp::And,
-        TokenKind::Keyword(Kw::Or) => BinOp::Or,
-        TokenKind::Keyword(Kw::Xor) => BinOp::Xor,
-        TokenKind::Keyword(Kw::Mod) => BinOp::Mod,
-        TokenKind::Keyword(Kw::BinAnd) => BinOp::BinAnd,
-        TokenKind::Keyword(Kw::BinOr) => BinOp::BinOr,
-        TokenKind::Keyword(Kw::BinXor) => BinOp::BinXor,
-        TokenKind::Keyword(Kw::Shl) => BinOp::Shl,
-        TokenKind::Keyword(Kw::Shr) => BinOp::Shr,
-        TokenKind::Keyword(Kw::Sar) => BinOp::Sar,
-        _ => return None,
-    })
-}
-
-/// Map an operator/keyword token to its [`UnOp`] variant. Returns `None`
-/// for tokens that aren't unary operators.
-fn unop_from(kind: &TokenKind) -> Option<UnOp> {
-    Some(match kind {
-        TokenKind::Op(Op::Plus) => UnOp::Plus,
-        TokenKind::Op(Op::Minus) => UnOp::Neg,
-        TokenKind::Keyword(Kw::Not) => UnOp::Not,
-        TokenKind::Keyword(Kw::BinNot) => UnOp::BinNot,
-        _ => return None,
-    })
+/// Which postfix form a token introduces. Produced by [`postfix_op`] and
+/// consumed by [`Parser::parse_postfix`] via an exhaustive match, so the
+/// binding-power table and the postfix dispatch share one source of truth.
+/// FD-021.
+#[derive(Debug, Clone, Copy)]
+enum PostfixKind {
+    /// `(args…)` — a call.
+    Call,
+    /// `[indices…]` — an index expression.
+    Index,
+    /// `.field` or `\field` — a field access.
+    Field,
 }
 
 /// Parse a token stream into a [`ParseResult`].

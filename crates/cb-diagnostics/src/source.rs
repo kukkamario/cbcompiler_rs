@@ -58,7 +58,16 @@ impl Source {
             .line_byte_range((line1 as usize) - 1)
             .expect("line index from offset_to_line_byte_col must exist");
         let slice_start = line_start as usize;
-        let slice_end = slice_start + byte_col as usize;
+        // `offset_to_line_byte_col` clamps to `text_len` but does *not* snap
+        // to a `char` boundary, so a caller passing a mid-codepoint `offset`
+        // would otherwise make `slice_end` land mid-codepoint and panic the
+        // slice below. Floor `slice_end` down to the nearest boundary; since
+        // `slice_start` is always a line start (a boundary), this terminates.
+        // FD-021.
+        let mut slice_end = slice_start + byte_col as usize;
+        while slice_end > slice_start && !self.text.is_char_boundary(slice_end) {
+            slice_end -= 1;
+        }
         let char_col = self.text[slice_start..slice_end].chars().count() as u32;
         (line1, char_col)
     }
