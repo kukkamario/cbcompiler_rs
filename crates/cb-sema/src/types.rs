@@ -206,7 +206,22 @@ pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
             _ => 0,
         }
     }
-    if rank(a) >= rank(b) { a.clone() } else { b.clone() }
+    // Signed types are preferred on a same-width tie (cb_syntax.md §3.4). The
+    // only ties are Int/UInt and Long/ULong, so this yields the signed sibling
+    // regardless of operand order (Int + UInt == UInt + Int == Int).
+    fn is_signed(t: &Type) -> bool {
+        matches!(t, Type::Int | Type::Long)
+    }
+    let (ra, rb) = (rank(a), rank(b));
+    if ra > rb {
+        a.clone()
+    } else if rb > ra {
+        b.clone()
+    } else if is_signed(a) {
+        a.clone()
+    } else {
+        b.clone()
+    }
 }
 
 /// Determine the result type of a binary operation, or `None` if the types
@@ -223,9 +238,18 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
                 None
             }
         }
-        BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow | BinOp::Mod => {
+        BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
             if lhs.is_numeric() && rhs.is_numeric() {
                 Some(numeric_promote(lhs, rhs))
+            } else {
+                None
+            }
+        }
+        // Exponentiation always yields Float (cb_syntax.md §3.4); operands are
+        // coerced to Float by `check_binary` so the IR `Pow` runs on floats.
+        BinOp::Pow => {
+            if lhs.is_numeric() && rhs.is_numeric() {
+                Some(Type::Float)
             } else {
                 None
             }
@@ -338,6 +362,24 @@ mod tests {
     fn numeric_promote_same_type() {
         assert_eq!(numeric_promote(&Type::Int, &Type::Int), Type::Int);
         assert_eq!(numeric_promote(&Type::Float, &Type::Float), Type::Float);
+    }
+
+    #[test]
+    fn numeric_promote_same_width_prefers_signed() {
+        // Mixed same-width signed/unsigned: result is the signed type, regardless
+        // of operand order (cb_syntax.md §3.4).
+        assert_eq!(numeric_promote(&Type::Int, &Type::UInt), Type::Int);
+        assert_eq!(numeric_promote(&Type::UInt, &Type::Int), Type::Int);
+        assert_eq!(numeric_promote(&Type::Long, &Type::ULong), Type::Long);
+        assert_eq!(numeric_promote(&Type::ULong, &Type::Long), Type::Long);
+    }
+
+    #[test]
+    fn binary_pow_is_float() {
+        // `^` always yields Float (cb_syntax.md §3.4).
+        assert_eq!(binary_result_type(BinOp::Pow, &Type::Int, &Type::Int), Some(Type::Float));
+        assert_eq!(binary_result_type(BinOp::Pow, &Type::Float, &Type::Int), Some(Type::Float));
+        assert_eq!(binary_result_type(BinOp::Pow, &Type::Int, &Type::String), None);
     }
 
     #[test]

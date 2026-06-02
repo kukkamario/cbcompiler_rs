@@ -111,6 +111,30 @@ fn nested_for_loops() {
     insta::assert_snapshot!(ir);
 }
 
+// FD-020: descending integer loop — direction-test constants are integer-typed
+// and the negative step drives the `>=` (descending) branch.
+#[test]
+fn for_loop_descending() {
+    let ir = lower_src("Dim i As Int\nFor i = 10 To 0 Step -1\nNext\n");
+    insta::assert_snapshot!(ir);
+}
+
+// FD-020: float loop — default/zero direction constants and all compare/step
+// operands are Float, matching the loop variable (no Int/Float operand mismatch).
+#[test]
+fn for_loop_float_step() {
+    let ir = lower_src("Dim x As Float\nFor x = 10.0 To 0.0 Step -0.5\nNext\n");
+    insta::assert_snapshot!(ir);
+}
+
+// FD-020: mixed loop — `To 10.5` (Float) is coerced to the Int loop variable,
+// so the lowered `to` register is Int (a narrowing E0318 warning also fires).
+#[test]
+fn for_loop_mixed_narrowing() {
+    let ir = lower_src("Dim i As Int\nFor i = 1 To 10.5\nNext\n");
+    insta::assert_snapshot!(ir);
+}
+
 #[test]
 fn select_case() {
     let ir = lower_src(

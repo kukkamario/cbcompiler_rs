@@ -1,6 +1,7 @@
 # FD-020: Sema Numeric & For-Loop Semantics
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-02
 **Priority:** High
 **Effort:** Medium (1-4 hours)
 **Impact:** Fixes type-coercion correctness in `cb-sema` for `For` loops (currently miscompiles Float/mixed-type loops) and tightens three documented numeric rules the checker does not enforce. All are in untested paths.

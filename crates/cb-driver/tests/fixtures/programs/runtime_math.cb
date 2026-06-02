@@ -38,7 +38,7 @@ Print Str(CurveAngle(0.0, 90.0, 2.0))
 Print Str(BoxOverlap(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))
 Print Str(BoxOverlap(0.0, 0.0, 10.0, 10.0, 50.0, 50.0, 10.0, 10.0))
 
-// Int(Float) rounds half-up (+0.5 then truncate), not toward zero.
+// Int(Float) rounds to nearest, ties away from zero (-2.5 -> -3), not toward zero.
 Print Str(Int(2.4))
 Print Str(Int(2.5))
 Print Str(Int(-2.5))

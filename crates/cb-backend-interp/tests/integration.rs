@@ -88,6 +88,28 @@ fn float_arithmetic() {
     assert_eq!(out, "4\n");
 }
 
+// FD-020: Int(Float) rounds to nearest, ties away from zero (cb_runtime.md
+// §Math). Positive ties round up, negative ties round down (away from zero),
+// and non-tie values round to the nearest — not truncation toward zero.
+#[test]
+fn int_conversion_rounds_half_away_from_zero() {
+    let cases = [
+        ("10.5", "11"),
+        ("1.5", "2"),
+        ("2.5", "3"),
+        ("0.5", "1"),
+        ("-0.5", "-1"),
+        ("-1.5", "-2"),
+        ("-2.5", "-3"),
+        ("-1.4", "-1"),
+        ("-1.6", "-2"),
+    ];
+    for (input, expected) in cases {
+        let out = run(&format!("Dim i As Int = Int({input})\nPrint Str(i)"));
+        assert_eq!(out, format!("{expected}\n"), "Int({input})");
+    }
+}
+
 #[test]
 fn if_else_true() {
     let out = run("Dim x As Int = 1\nIf x = 1 Then\nPrint \"yes\"\nElse\nPrint \"no\"\nEndIf");

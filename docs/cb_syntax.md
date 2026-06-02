@@ -181,7 +181,7 @@ Null      // valid value for any reference-typed variable (arrays, Type, Functio
 
 Arithmetic (binary): `+`, `-`, `*`, `/`, `^`, `Mod`
 - `/` is division: **integer division when both operands are integers**, and floating-point division when either operand is `Float` (which promotes both to `Float`). There is no separate integer-division operator — `\` is the `Type` field accessor (see the postfix/access list below and §3.3), not arithmetic.
-- `^` is exponentiation, right-associative.
+- `^` is exponentiation, right-associative. It **always yields `Float`** (operands are promoted to `Float` and the result type is `Float`), so `2 ^ 10` is `1024.0`, not an `Integer`. Wrap with `Int(...)` if an integer result is wanted.
 - `Mod` is signed remainder; the sign of the result matches the dividend.
 
 Bitwise (binary): `BinAnd`, `BinOr`, `BinXor`, `Shl`, `Shr`, `Sar`
@@ -469,8 +469,10 @@ Structs may contain other Structs by value, arrays by reference, and Type refere
 
 - Numeric widening between integer types: always implicit (`Byte` → `Short` → `Int` → `Long`, and the unsigned chain `Byte` → `Short` → `UInt` → `ULong`).
 - Same-width signed↔unsigned: implicit, reinterprets the bit pattern.
+- **Mixed same-width signed/unsigned arithmetic yields the signed type.** When the two operands of an arithmetic operator are the same width but differ in signedness (`Int`+`UInt`, `Long`+`ULong`), the result is the *signed* type, independent of operand order (`Int + UInt` and `UInt + Int` both produce `Int`). `Int` is the language's default numeric type, so this is the least-surprising default; force unsigned arithmetic with an explicit conversion if needed.
+- **An integer literal assigned/coerced to a narrower integer type is range-checked at compile time.** If the literal value does not fit the target type's range it is a hard error (e.g. `Dim b As Byte : b = 300`, or `b = -1`). An in-range literal converts silently — because the value is a known-safe constant, it does *not* produce the narrowing warning that a runtime value would.
 - Integer → Float: implicit.
-- Float → Integer: implicit, truncates toward zero. The compiler emits a **narrowing-conversion warning** at the implicit conversion site; suppress by writing `Int(x)` explicitly.
+- Float → Integer: implicit, **rounds to the nearest integer with ties away from zero** — matching the `Int()` runtime function, **not** a straight truncation toward zero (so `10.5 → 11`, `-1.5 → -2`, `-2.5 → -3`; see `cb_runtime.md` §Math). Both implicit conversions and explicit `Int(x)` use this same rule. The compiler emits a **narrowing-conversion warning** at the implicit conversion site; suppress by writing `Int(x)` explicitly.
 - Long → Int, Int → Byte/Short, etc.: implicit but **warned** as a narrowing conversion.
 - Any numeric → String: implicit when used as a `+` operand on a String. Float → String uses the shortest decimal representation that round-trips, switching to scientific notation outside a sensible range. Integer → String uses decimal.
 - `Bool` → numeric: implicit, False = 0, True = 1.

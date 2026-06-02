@@ -96,6 +96,23 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
     }
 }
 
+/// Inclusive value range `[min, max]` of an integer `Type`, in `i128` so every
+/// bound (including `ULong`'s `u64::MAX`) is representable. Returns `None` for
+/// non-integer types. Used to range-check integer literals against a narrower
+/// target type (cb_syntax.md §1.6/§3.4).
+pub fn int_range(ty: &Type) -> Option<(i128, i128)> {
+    let (min, max): (i128, i128) = match ty {
+        Type::Byte => (0, u8::MAX as i128),
+        Type::Short => (0, u16::MAX as i128),
+        Type::Int => (i32::MIN as i128, i32::MAX as i128),
+        Type::UInt => (0, u32::MAX as i128),
+        Type::Long => (i64::MIN as i128, i64::MAX as i128),
+        Type::ULong => (0, u64::MAX as i128),
+        _ => return None,
+    };
+    Some((min, max))
+}
+
 /// Whether a conversion is narrowing (loses precision) and should emit a warning.
 pub fn is_narrowing(conv: Conversion, from: &Type, to: &Type) -> bool {
     match conv {
@@ -181,6 +198,18 @@ mod tests {
     #[test]
     fn no_path_string_to_int() {
         assert!(find_implicit_conversion(&Type::String, &Type::Int).is_none());
+    }
+
+    #[test]
+    fn int_range_bounds() {
+        assert_eq!(int_range(&Type::Byte), Some((0, 255)));
+        assert_eq!(int_range(&Type::Short), Some((0, 65535)));
+        assert_eq!(int_range(&Type::Int), Some((i32::MIN as i128, i32::MAX as i128)));
+        assert_eq!(int_range(&Type::UInt), Some((0, u32::MAX as i128)));
+        assert_eq!(int_range(&Type::Long), Some((i64::MIN as i128, i64::MAX as i128)));
+        assert_eq!(int_range(&Type::ULong), Some((0, u64::MAX as i128)));
+        assert_eq!(int_range(&Type::Float), None);
+        assert_eq!(int_range(&Type::String), None);
     }
 
     #[test]
