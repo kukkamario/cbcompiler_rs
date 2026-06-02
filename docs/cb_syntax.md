@@ -22,10 +22,11 @@ A line that contains only whitespace and/or a comment does not terminate a state
 
 Space and tab characters are whitespace.
 
-**Inline comments** start with `REM` or `//` and run to end of line:
+**Inline comments** start with `'`, `REM`, or `//` and run to end of line:
 
 ```cb
 x = 1 // assign one
+y = 2 ' assign two
 REM this is a comment
 ```
 
@@ -178,9 +179,9 @@ Null      // valid value for any reference-typed variable (arrays, Type, Functio
 
 ### 1.7 Operators and punctuation
 
-Arithmetic (binary): `+`, `-`, `*`, `/`, `\`, `**`, `Mod`
-- `/` is division. If either operand is Float, the both are promoted to Float type.
-- `**` is exponentiation, right-associative.
+Arithmetic (binary): `+`, `-`, `*`, `/`, `^`, `Mod`
+- `/` is division: **integer division when both operands are integers**, and floating-point division when either operand is `Float` (which promotes both to `Float`). There is no separate integer-division operator — `\` is the `Type` field accessor (see the postfix/access list below and §3.3), not arithmetic.
+- `^` is exponentiation, right-associative.
 - `Mod` is signed remainder; the sign of the result matches the dividend.
 
 Bitwise (binary): `BinAnd`, `BinOr`, `BinXor`, `Shl`, `Shr`, `Sar`
@@ -196,7 +197,7 @@ Unary: `+`, `-`, `Not`, `BinNot`
 
 String concatenation uses `+`. Numeric operands on either side of a string `+` are implicitly converted to String (§3.4).
 
-Postfix/access: `()` (call), `[]` (index), `.` (member access).
+Postfix/access: `()` (call), `[]` (index), `\` and `.` (`Type` field access — interchangeable; `\` is the legacy CoolBasic form, `.` the dotted alias). See §3.3.
 
 Assignment is `=` (§6.1). Statements are separated by the line ending (§1.1) or by `:`; a single line may chain multiple statements with `:`:
 
@@ -323,6 +324,8 @@ var.asd = "hello"
 
 Dim second As MyType = New MyType  // also appended; comes after var
 ```
+
+**Field access uses `\` or `.`**, which are fully interchangeable: `\` is the original CoolBasic accessor (`var\field1`) and `.` is an accepted alias (`var.field1`). Both bind as left-associative postfix operators (§5.1) and may be mixed freely in a chain — `a\b.c\d` and `a.b.c.d` parse identically. The examples in this document use `.` for readability.
 
 Each `Field` declares exactly one name; comma-separated forms like `Field x, y As Integer` are not accepted — write one `Field` line per name. The same rule applies to `Field` declarations inside `Struct` (below).
 
@@ -612,12 +615,12 @@ The value must be set at the declaration and cannot be reassigned. Constant expr
 
 Listed highest precedence (binds tightest) at the top.
 
-| Level | Operators                          | Associativity |
-| ----- | ---------------------------------- | ------------- |
-|  1    | `()` `[]` `.` (call, index, field) | left          |
-|  2    | unary `+` `-` `Not` `BinNot`       | right         |
-|  3    | `**`                               | **right**     |
-|  4    | `*` `/` `\` `Mod`                  | left          |
+| Level | Operators                              | Associativity |
+| ----- | -------------------------------------- | ------------- |
+|  1    | `()` `[]` `\` `.` (call, index, field) | left          |
+|  2    | unary `+` `-` `Not` `BinNot`           | right         |
+|  3    | `^`                                    | **right**     |
+|  4    | `*` `/` `Mod`                          | left          |
 |  5    | `+` `-`                            | left          |
 |  6    | `Shl` `Shr` `Sar`                  | left          |
 |  7    | `BinAnd`                           | left          |
@@ -631,8 +634,8 @@ Listed highest precedence (binds tightest) at the top.
 Examples:
 
 ```cb
-2 ** 3 ** 2          // = 2 ** (3 ** 2) = 512        (** is right-assoc)
--2 ** 2              // = -(2 ** 2) = -4             (unary tighter than **)
+2 ^ 3 ^ 2            // = 2 ^ (3 ^ 2) = 512          (^ is right-assoc)
+-2 ^ 2               // = -(2 ^ 2) = -4              (unary tighter than ^)
 a + b BinAnd mask    // = (a + b) BinAnd mask        (bitwise below arithmetic)
 a = b And c = d      // = (a = b) And (c = d)        (comparison tighter than And)
 ```
@@ -1031,7 +1034,7 @@ Warnings use `warning(Wxxxx)` instead of `error(Exxxx)`. Narrowing implicit conv
 
 The interpreter traps and clearly reports all of the following with `file:line:col`:
 
-- Integer division by zero (`/` between integer types, `\`, or `Mod` with a zero divisor).
+- Integer division by zero (`/` between integer types, or `Mod` with a zero divisor).
 - Float division by zero produces ±∞ / NaN per IEEE 754; not a trap.
 - Null `Type` dereference: field access or method call on a `Null` Type reference.
 - Field access through a variable in the deleted state — the variable was the operand of a `Delete` and has not been reassigned since (§3.3).

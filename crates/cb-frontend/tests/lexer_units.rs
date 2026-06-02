@@ -637,6 +637,38 @@ mod comments {
     }
 
     #[test]
+    fn tick_comment_trivia() {
+        // FD-028: `'` starts a line comment (classic BASIC / CoolBasic style).
+        let toks = lex_trivia("' to end of line\nfoo");
+        assert_eq!(
+            kinds(&toks),
+            vec![
+                TokenKind::Comment(CommentKind::Line),
+                TokenKind::Newline,
+                TokenKind::Ident { sigil: None },
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tick_comment_discarded_without_trivia() {
+        let toks = lex("x = 1 ' trailing comment\nfoo");
+        // The `'` comment is dropped in non-trivia mode; statement tokens remain.
+        assert_eq!(
+            kinds(&toks),
+            vec![
+                TokenKind::Ident { sigil: None },
+                TokenKind::Op(cb_frontend::Op::Eq),
+                TokenKind::IntLit(1),
+                TokenKind::Newline,
+                TokenKind::Ident { sigil: None },
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
     fn rem_comment_uppercase() {
         let toks = lex_trivia("REM stuff\nfoo");
         assert_eq!(toks[0].kind, TokenKind::Comment(CommentKind::Line));
@@ -725,11 +757,15 @@ mod operators {
         expect_kinds("-", &[TokenKind::Op(Op::Minus)]);
         expect_kinds("*", &[TokenKind::Op(Op::Star)]);
         expect_kinds("/", &[TokenKind::Op(Op::Slash)]);
+        // FD-028: `^` is exponentiation (replacing `**`).
+        expect_kinds("^", &[TokenKind::Op(Op::Caret)]);
     }
 
     #[test]
-    fn star_star_is_one_token() {
-        expect_kinds("**", &[TokenKind::Op(Op::StarStar)]);
+    fn double_star_is_two_stars() {
+        // FD-028: `**` is no longer a single exponent token; the exponent
+        // operator is `^`. `**` now lexes as two separate `*` tokens.
+        expect_kinds("**", &[TokenKind::Op(Op::Star), TokenKind::Op(Op::Star)]);
     }
 
     #[test]
@@ -756,8 +792,8 @@ mod operators {
 
     #[test]
     fn lone_backslash_in_expression_context() {
-        // `a \ b` — the `\` is not followed by a line terminator, so it should
-        // be Op::BackSlash, not a continuation.
+        // `a \ b` — the `\` is not followed by a line terminator, so it lexes as
+        // Op::BackSlash (the `Type` field accessor, FD-028), not a continuation.
         let toks = lex("a \\ b");
         assert_eq!(
             kinds(&toks),

@@ -163,6 +163,7 @@ impl<'src> Lexer<'src> {
             b' ' | b'\t' => self.scan_whitespace(start),
             b'\n' | b'\r' => self.scan_newline(start),
             b'\\' => self.scan_continuation_or_backslash(start),
+            b'\'' => self.scan_line_comment_tick(start),
             b'/' => self.scan_slash_or_comment(start),
             b'"' => {
                 if self.peek_byte_at(1) == Some(b'"') && self.peek_byte_at(2) == Some(b'"') {
@@ -175,8 +176,8 @@ impl<'src> Lexer<'src> {
             b'%' => self.scan_number_binary(start),
             b'0'..=b'9' => self.scan_number_decimal_or_float(start),
             // Operators and punctuation handled in a dedicated path.
-            b'+' | b'-' | b'*' | b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b',' | b':'
-            | b';' | b'.' => self.scan_operator_or_punct(start),
+            b'+' | b'-' | b'*' | b'^' | b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b','
+            | b':' | b';' | b'.' => self.scan_operator_or_punct(start),
             _ => {
                 // Possibly an identifier (XID_Start or `_`), otherwise invalid.
                 if b == b'_' || (b.is_ascii_alphabetic()) {
@@ -300,6 +301,19 @@ impl<'src> Lexer<'src> {
         self.bump_byte();
         self.bump_byte();
         // Consume up to (but not including) the line terminator.
+        self.eat_while_byte(|b| b != b'\n' && b != b'\r');
+        if self.opts.preserve_trivia {
+            let span = self.current_span(start);
+            self.push_token(TokenKind::Comment(CommentKind::Line), span);
+        }
+    }
+
+    /// Scan a `'`-introduced line comment (classic BASIC / CoolBasic style).
+    /// Consumes the apostrophe and everything up to (not including) the line
+    /// terminator, mirroring `//` and `Rem`.
+    fn scan_line_comment_tick(&mut self, start: u32) {
+        debug_assert_eq!(self.peek_byte(), Some(b'\''));
+        self.bump_byte(); // consume the `'`
         self.eat_while_byte(|b| b != b'\n' && b != b'\r');
         if self.opts.preserve_trivia {
             let span = self.current_span(start);
@@ -992,17 +1006,8 @@ impl<'src> Lexer<'src> {
                 let span = self.current_span(start);
                 self.push_token(TokenKind::Op(Op::Minus), span);
             }
-            b'*' => {
-                self.bump_byte();
-                if self.peek_byte() == Some(b'*') {
-                    self.bump_byte();
-                    let span = self.current_span(start);
-                    self.push_token(TokenKind::Op(Op::StarStar), span);
-                } else {
-                    let span = self.current_span(start);
-                    self.push_token(TokenKind::Op(Op::Star), span);
-                }
-            }
+            b'*' => self.emit_single(start, TokenKind::Op(Op::Star)),
+            b'^' => self.emit_single(start, TokenKind::Op(Op::Caret)),
             b'=' => {
                 self.bump_byte();
                 let span = self.current_span(start);

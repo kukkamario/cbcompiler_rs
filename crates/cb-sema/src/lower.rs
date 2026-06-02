@@ -932,7 +932,6 @@ impl<'a> Lowerer<'a> {
             BinOp::Sub => IrBinOp::Sub,
             BinOp::Mul => IrBinOp::Mul,
             BinOp::Div => IrBinOp::Div,
-            BinOp::IntDiv => IrBinOp::IntDiv,
             BinOp::Pow => IrBinOp::Pow,
             BinOp::Mod => IrBinOp::Mod,
             BinOp::BinAnd => IrBinOp::BinAnd,

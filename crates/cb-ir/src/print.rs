@@ -315,7 +315,6 @@ fn format_binop(op: IrBinOp) -> &'static str {
         IrBinOp::Sub => "sub",
         IrBinOp::Mul => "mul",
         IrBinOp::Div => "div",
-        IrBinOp::IntDiv => "int_div",
         IrBinOp::Mod => "mod",
         IrBinOp::Pow => "pow",
         IrBinOp::BinAnd => "bin_and",

@@ -953,7 +953,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Add => Ok(wrap(a.wrapping_add(b))),
             IrBinOp::Sub => Ok(wrap(a.wrapping_sub(b))),
             IrBinOp::Mul => Ok(wrap(a.wrapping_mul(b))),
-            IrBinOp::Div | IrBinOp::IntDiv => {
+            IrBinOp::Div => {
                 if b == 0 {
                     return Err(self.trap_error(TrapKind::DivisionByZero, span));
                 }
@@ -1037,7 +1037,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Add => Ok(wrap(a.wrapping_add(b))),
             IrBinOp::Sub => Ok(wrap(a.wrapping_sub(b))),
             IrBinOp::Mul => Ok(wrap(a.wrapping_mul(b))),
-            IrBinOp::Div | IrBinOp::IntDiv => {
+            IrBinOp::Div => {
                 if b == 0 {
                     return Err(self.trap_error(TrapKind::DivisionByZero, span));
                 }
@@ -1091,7 +1091,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Sub => Ok(Value::Float(a - b)),
             IrBinOp::Mul => Ok(Value::Float(a * b)),
             IrBinOp::Div => Ok(Value::Float(a / b)),
-            IrBinOp::IntDiv => Ok(Value::Float((a / b).trunc())),
             IrBinOp::Mod => Ok(Value::Float(a % b)),
             IrBinOp::Pow => Ok(Value::Float(a.powf(b))),
 

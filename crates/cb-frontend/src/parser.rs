@@ -535,7 +535,7 @@ impl<'t> Parser<'t> {
         }
     }
 
-    /// Handle a single postfix operator (`(`, `[`, or `.`). Multiple postfix
+    /// Handle a single postfix operator (`(`, `[`, `.`, or `\`). Multiple postfix
     /// operations chain via the outer loop in [`Parser::parse_expr_bp`].
     fn parse_postfix(&mut self, lhs: NodeId) -> Result<NodeId, ParseError> {
         let lhs_span = self.arena.span_of(lhs);
@@ -579,8 +579,15 @@ impl<'t> Parser<'t> {
                     span,
                 ))
             }
-            TokenKind::Punct(Punct::Dot) => {
-                self.cursor.bump();
+            // `\` and `.` are interchangeable `Type` field accessors (FD-028):
+            // `player\x` is the legacy CoolBasic form, `player.x` the dotted
+            // alias. Both produce `Expr::Field`.
+            TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => {
+                let accessor = self.cursor.bump();
+                let accessor_str = match accessor.kind {
+                    TokenKind::Op(Op::BackSlash) => "\\",
+                    _ => ".",
+                };
                 let name_tok = self.cursor.peek_tok();
                 match name_tok.kind {
                     TokenKind::Ident { sigil } => {
@@ -599,7 +606,7 @@ impl<'t> Parser<'t> {
                         diag: Box::new(Diagnostic::error(
                             E_EXPECTED_TOKEN,
                             format!(
-                                "expected identifier after `.`, found {}",
+                                "expected identifier after `{accessor_str}`, found {}",
                                 describe_token(name_tok.kind, self.src(), name_tok.span)
                             ),
                             Label::new(name_tok.span),
@@ -2768,25 +2775,25 @@ fn infix_bp(kind: &TokenKind) -> Option<(u8, u8)> {
         TokenKind::Keyword(Kw::BinAnd) => (22, 23),
         TokenKind::Keyword(Kw::Shl | Kw::Shr | Kw::Sar) => (24, 25),
         TokenKind::Op(Op::Plus | Op::Minus) => (26, 27),
-        TokenKind::Op(Op::Star | Op::Slash | Op::BackSlash) => (28, 29),
+        TokenKind::Op(Op::Star | Op::Slash) => (28, 29),
         TokenKind::Keyword(Kw::Mod) => (28, 29),
-        // `**` is right-associative: right_bp < left_bp.
-        TokenKind::Op(Op::StarStar) => (31, 30),
+        // `^` is right-associative: right_bp < left_bp.
+        TokenKind::Op(Op::Caret) => (31, 30),
         _ => return None,
     })
 }
 
 /// Binding power for a prefix unary operator.
 ///
-/// Set to 30, **one below** `**`'s right-bp (also 30) so that `-2 ** 2`
-/// parses as `-(2 ** 2)`, matching §5.1 (unary tighter than every infix
-/// except `**`, which extracts its right operand "around" the unary). The
-/// original FD-002 table had this at 32 — that produced `(-2) ** 2`, which
+/// Set to 30, **one below** `^`'s right-bp (also 30) so that `-2 ^ 2`
+/// parses as `-(2 ^ 2)`, matching §5.1 (unary tighter than every infix
+/// except `^`, which extracts its right operand "around" the unary). The
+/// original FD-002 table had this at 32 — that produced `(-2) ^ 2`, which
 /// contradicts the spec. See the FD-002 plan §B.4 for the trace; recap:
 ///
-///   `-2 ** 2`:
+///   `-2 ^ 2`:
 ///     outer `parse_expr_bp(0)` sees `-`, recurses with min_bp = 30.
-///     inner sees `2`, then `**` with infix_bp = (31, 30). `31 >= 30`, so
+///     inner sees `2`, then `^` with infix_bp = (31, 30). `31 >= 30`, so
 ///     pow is consumed inside the unary; result = `Pow(2, 2)`.
 ///     outer wraps: `Neg(Pow(2, 2))`.  ✓ matches §5.1
 fn prefix_bp(kind: &TokenKind) -> Option<u8> {
@@ -2797,14 +2804,15 @@ fn prefix_bp(kind: &TokenKind) -> Option<u8> {
     })
 }
 
-/// Binding power for postfix operators (`(`, `[`, `.`). Set above every
-/// infix and the prefix unary so `f(x)`, `arr[i]`, and `obj.field` always
-/// bind their callee/array/target before any surrounding operator.
+/// Binding power for postfix operators (`(`, `[`, `.`, `\`). Set above every
+/// infix and the prefix unary so `f(x)`, `arr[i]`, and `obj.field` / `obj\field`
+/// always bind their callee/array/target before any surrounding operator.
 fn postfix_bp(kind: &TokenKind) -> Option<u8> {
     Some(match kind {
         TokenKind::Punct(Punct::LParen) => 34,
         TokenKind::Punct(Punct::LBracket) => 34,
-        TokenKind::Punct(Punct::Dot) => 34,
+        // Field access: `.` and its `\` alias (FD-028).
+        TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => 34,
         _ => return None,
     })
 }
@@ -2817,8 +2825,7 @@ fn binop_from(kind: &TokenKind) -> Option<BinOp> {
         TokenKind::Op(Op::Minus) => BinOp::Sub,
         TokenKind::Op(Op::Star) => BinOp::Mul,
         TokenKind::Op(Op::Slash) => BinOp::Div,
-        TokenKind::Op(Op::BackSlash) => BinOp::IntDiv,
-        TokenKind::Op(Op::StarStar) => BinOp::Pow,
+        TokenKind::Op(Op::Caret) => BinOp::Pow,
         TokenKind::Op(Op::Eq) => BinOp::Eq,
         TokenKind::Op(Op::NotEq) => BinOp::NotEq,
         TokenKind::Op(Op::Lt) => BinOp::Lt,
@@ -2967,8 +2974,8 @@ mod expr_tests {
 
     #[test]
     fn precedence_pow_right_assoc() {
-        // 2 ** 3 ** 2 → Pow(2, Pow(3, 2))
-        let src = "2 ** 3 ** 2";
+        // 2 ^ 3 ^ 2 → Pow(2, Pow(3, 2))
+        let src = "2 ^ 3 ^ 2";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
         let (op, lhs, rhs) = binary(&arena, root);
@@ -2982,10 +2989,10 @@ mod expr_tests {
 
     #[test]
     fn precedence_unary_neg_then_pow() {
-        // -2 ** 2 → Neg(Pow(2, 2)) per §5.1 (unary tighter than every infix
-        // except **; pow "extracts" its right operand around the unary).
+        // -2 ^ 2 → Neg(Pow(2, 2)) per §5.1 (unary tighter than every infix
+        // except ^; pow "extracts" its right operand around the unary).
         // This is why prefix_bp = 30, one below pow's right-bp.
-        let src = "-2 ** 2";
+        let src = "-2 ^ 2";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
         let (uop, operand) = unary(&arena, root);
@@ -3149,6 +3156,26 @@ mod expr_tests {
         };
         assert_ident(&arena, inner_target, src, "a");
         assert_eq!(inner_name_span.slice(src), "b");
+    }
+
+    #[test]
+    fn backslash_field_chain_mixed_with_dot() {
+        // FD-028: `\` and `.` are interchangeable field accessors and chain
+        // freely. a\b.c\d → Field(Field(Field(a, b), c), d)
+        let src = "a\\b.c\\d";
+        let (arena, root, diags) = parse_expr(src);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let names = ["b", "c", "d"];
+        let mut cur = root;
+        for name in names.iter().rev() {
+            let (target, name_span) = match expr_of(&arena, cur) {
+                Expr::Field { target, name_span } => (*target, *name_span),
+                other => panic!("expected Field, got {other:?}"),
+            };
+            assert_eq!(name_span.slice(src), *name);
+            cur = target;
+        }
+        assert_ident(&arena, cur, src, "a");
     }
 
     #[test]

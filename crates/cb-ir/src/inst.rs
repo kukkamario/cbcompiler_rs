@@ -101,7 +101,6 @@ pub enum IrBinOp {
     Sub,
     Mul,
     Div,
-    IntDiv,
     Mod,
     Pow,
     // Bitwise
