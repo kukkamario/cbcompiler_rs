@@ -953,7 +953,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Add => Ok(wrap(a.wrapping_add(b))),
             IrBinOp::Sub => Ok(wrap(a.wrapping_sub(b))),
             IrBinOp::Mul => Ok(wrap(a.wrapping_mul(b))),
-            IrBinOp::Div | IrBinOp::IntDiv => {
+            IrBinOp::Div => {
                 if b == 0 {
                     return Err(self.trap_error(TrapKind::DivisionByZero, span));
                 }
@@ -1037,7 +1037,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Add => Ok(wrap(a.wrapping_add(b))),
             IrBinOp::Sub => Ok(wrap(a.wrapping_sub(b))),
             IrBinOp::Mul => Ok(wrap(a.wrapping_mul(b))),
-            IrBinOp::Div | IrBinOp::IntDiv => {
+            IrBinOp::Div => {
                 if b == 0 {
                     return Err(self.trap_error(TrapKind::DivisionByZero, span));
                 }
@@ -1091,7 +1091,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Sub => Ok(Value::Float(a - b)),
             IrBinOp::Mul => Ok(Value::Float(a * b)),
             IrBinOp::Div => Ok(Value::Float(a / b)),
-            IrBinOp::IntDiv => Ok(Value::Float((a / b).trunc())),
             IrBinOp::Mod => Ok(Value::Float(a % b)),
             IrBinOp::Pow => Ok(Value::Float(a.powf(b))),
 
@@ -1141,7 +1140,17 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (IrUnOp::Neg, Value::UInt(x)) => Ok(Value::UInt(x.wrapping_neg())),
             (IrUnOp::Neg, Value::ULong(x)) => Ok(Value::ULong(x.wrapping_neg())),
 
-            (IrUnOp::Plus, _) => Ok(v.clone()),
+            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028),
+            // type-preserving per sema. Signed widths use `wrapping_abs` to
+            // match the runtime `Abs` at `MIN`; unsigned widths are already
+            // non-negative, so abs is identity.
+            (IrUnOp::Abs, Value::Int(x)) => Ok(Value::Int(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Short(x)) => Ok(Value::Short(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Long(x)) => Ok(Value::Long(x.wrapping_abs())),
+            (IrUnOp::Abs, Value::Byte(x)) => Ok(Value::Byte(*x)),
+            (IrUnOp::Abs, Value::UInt(x)) => Ok(Value::UInt(*x)),
+            (IrUnOp::Abs, Value::ULong(x)) => Ok(Value::ULong(*x)),
+            (IrUnOp::Abs, Value::Float(x)) => Ok(Value::Float(x.abs())),
 
             // Logical NOT is defined for booleans and every integer width via
             // truthiness, so we don't rely on sema always pre-converting.

@@ -325,7 +325,6 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
-    IntDiv,
     Pow,
     Mod,
     BinAnd,

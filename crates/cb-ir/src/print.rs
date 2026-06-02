@@ -315,7 +315,6 @@ fn format_binop(op: IrBinOp) -> &'static str {
         IrBinOp::Sub => "sub",
         IrBinOp::Mul => "mul",
         IrBinOp::Div => "div",
-        IrBinOp::IntDiv => "int_div",
         IrBinOp::Mod => "mod",
         IrBinOp::Pow => "pow",
         IrBinOp::BinAnd => "bin_and",
@@ -343,7 +342,7 @@ fn format_binop(op: IrBinOp) -> &'static str {
 fn format_unop(op: IrUnOp) -> &'static str {
     match op {
         IrUnOp::Neg => "neg",
-        IrUnOp::Plus => "plus",
+        IrUnOp::Abs => "abs",
         IrUnOp::Not => "not",
         IrUnOp::BinNot => "bin_not",
     }

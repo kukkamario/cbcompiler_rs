@@ -266,8 +266,13 @@ pub enum Op {
     Minus,
     Star,
     Slash,
+    /// `\` — `Type` field accessor (postfix), interchangeable with `.`
+    /// ([`Punct::Dot`]). When followed by a line ending it is instead the
+    /// line-continuation marker; that case is resolved in the lexer and never
+    /// reaches this token.
     BackSlash,
-    StarStar,
+    /// `^` — exponentiation (right-associative).
+    Caret,
     Eq,
     NotEq,
     Lt,

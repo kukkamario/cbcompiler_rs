@@ -230,13 +230,6 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
                 None
             }
         }
-        BinOp::IntDiv => {
-            if lhs.is_numeric() && rhs.is_numeric() {
-                Some(Type::Int)
-            } else {
-                None
-            }
-        }
 
         // Bitwise
         BinOp::BinAnd | BinOp::BinOr | BinOp::BinXor => {
@@ -368,9 +361,13 @@ mod tests {
     }
 
     #[test]
-    fn binary_intdiv_always_int() {
-        assert_eq!(binary_result_type(BinOp::IntDiv, &Type::Int, &Type::Int), Some(Type::Int));
-        assert_eq!(binary_result_type(BinOp::IntDiv, &Type::Float, &Type::Float), Some(Type::Int));
+    fn binary_div_promotes_int_vs_float() {
+        // FD-028: `/` is integer division when both operands are integers, and
+        // floating-point division when either operand is a Float (which
+        // promotes both). There is no separate `\` integer-division operator.
+        assert_eq!(binary_result_type(BinOp::Div, &Type::Int, &Type::Int), Some(Type::Int));
+        assert_eq!(binary_result_type(BinOp::Div, &Type::Int, &Type::Float), Some(Type::Float));
+        assert_eq!(binary_result_type(BinOp::Div, &Type::Float, &Type::Float), Some(Type::Float));
     }
 
     #[test]

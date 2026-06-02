@@ -1362,8 +1362,9 @@ impl<'a> Checker<'a> {
                 match (op, val) {
                     (UnOp::Neg, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_neg())),
                     (UnOp::Neg, ConstValue::Float(v)) => Some(ConstValue::Float(-v)),
-                    (UnOp::Plus, v @ ConstValue::Int(_)) => Some(v),
-                    (UnOp::Plus, v @ ConstValue::Float(_)) => Some(v),
+                    // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028).
+                    (UnOp::Plus, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_abs())),
+                    (UnOp::Plus, ConstValue::Float(v)) => Some(ConstValue::Float(v.abs())),
                     (UnOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
                     _ => None,
                 }
