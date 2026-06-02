@@ -19,8 +19,8 @@ The post-FD-018 review found `cb-sema` is well-structured with good error-code c
 
 Lower-severity items folded in:
 
-- **`Pow` (`**`) has no const folding and an unclear result type.** `eval_const_binary` (`check.rs:1768`) handles `Add`/`Sub`/`Mul`/`Div`/`Mod` but not `Pow`, so `Const x = 2 ** 10` keeps its placeholder `0`; `binary_result_type` treats `Pow` like `Mul` (so `Int ** Int` → `Int`) even though exponentiation generally wants Float semantics. The doc pins neither.
-- **`E0322` const division-by-zero has no test, and const *float* div-by-zero is silently allowed** (`check.rs:1369`), returning the IEEE result.
+- **`Pow` (`^`) has no const folding and an unclear result type.** `eval_const_binary` (`check.rs:1768`) handles `Add`/`Sub`/`Mul`/`Div`/`Mod` but not `Pow`, so `Const x = 2 ^ 10` keeps its placeholder `0`; `binary_result_type` treats `Pow` like `Mul` (so `Int ^ Int` → `Int`) even though exponentiation generally wants Float semantics. The doc pins neither.
+- **`E0322` const division-by-zero has no test, and const *float* div-by-zero is silently allowed** (`check.rs:1369`), returning the IEEE result. (Integer div-by-zero now comes from `/` between integers or `Mod` — there is no `\` integer-division operator; FD-028 made `\` the `Type` field accessor.)
 
 ## Solution
 
@@ -30,7 +30,7 @@ In `cb-sema`:
 - **`lower_for`:** emit the zero/one direction-test constants in the loop variable's IR type (or insert explicit `Convert`), and ensure both compare operands share a type. With #1 recording the conversions, the lowered registers will already be the right type.
 - **Literal overflow:** when a literal is assigned/coerced to a narrower integer type, validate the value fits the target and emit a diagnostic (new E03xx) when it does not.
 - **Signed/unsigned promotion:** decide and document a deterministic rule for mixed same-width arithmetic (e.g. prefer unsigned, or require explicit conversion), update `numeric_promote`, and amend `cb_syntax.md` §3.4.
-- **`Pow`:** add `Pow` to const folding (producing `Float`) and pin/document the static result type of `**` so checker and interpreter agree.
+- **`Pow`:** add `Pow` to const folding (producing `Float`) and pin/document the static result type of `^` so checker and interpreter agree.
 - **Const div-by-zero:** route folding through one checked helper; decide whether const float div-by-zero warns; add the missing `E0322` test.
 
 ## Files to Create/Modify
@@ -42,7 +42,7 @@ In `cb-sema`:
 | `crates/cb-sema/src/types.rs` | MODIFY | Deterministic signed/unsigned same-width promotion rule |
 | `crates/cb-sema/src/convert.rs` | MODIFY (if needed) | Literal-fits-target check support |
 | `crates/cb-sema/tests/lower_snapshots.rs` | MODIFY | Snapshots for descending `For`, `Step`, and Float/mixed `For` loops |
-| `docs/cb_syntax.md` | MODIFY | Document the chosen mixed signed/unsigned arithmetic rule and `**` result type |
+| `docs/cb_syntax.md` | MODIFY | Document the chosen mixed signed/unsigned arithmetic rule and `^` result type |
 
 ## Verification
 
@@ -51,7 +51,7 @@ In `cb-sema`:
   - `For i% = 1 To 10.5` records a Float→Int narrowing and warns.
   - Over-range literal to a narrow type (`Dim b As Byte : b = 300`) is the documented error.
   - `Int + UInt` and `UInt + Int` (both orders) produce the documented result type.
-  - `Const x = 2 ** 10` folds; `Const x = 1 \ 0` emits `E0322`.
+  - `Const x = 2 ^ 10` folds; `Const x = 1 / 0` (integer div-by-zero) emits `E0322`.
 - `cargo test --workspace` + `clippy -- -D warnings` green.
 - Cross-check the lowered Float-`For` IR by running it on the interpreter (interp is the reference per CLAUDE.md).
 
