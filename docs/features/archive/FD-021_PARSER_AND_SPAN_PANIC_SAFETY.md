@@ -1,6 +1,7 @@
 # FD-021: Parser & Span Panic-Safety
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-02
 **Priority:** High
 **Effort:** Low-Medium (1-3 hours)
 **Impact:** Restores the frontend's "never abort on untrusted input" contract. Today a single small input file can crash the compiler via unbounded recursion; two latent panic vectors in span-slicing share the same risk.
