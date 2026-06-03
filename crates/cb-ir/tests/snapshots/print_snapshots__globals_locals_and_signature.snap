@@ -1,0 +1,16 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+globals:
+  global0: score (Int)
+  global1: hiscore (Long)
+
+fn update(Float, Int) -> Int {
+  locals:
+    local0: dt (Float, param)
+    local1: tmp (Int)
+
+  bb0:
+    return
+}

@@ -1,0 +1,33 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+fn binops() -> Void {
+  bb0:
+    r0 = add r100, r101
+    r1 = sub r100, r101
+    r2 = mul r100, r101
+    r3 = div r100, r101
+    r4 = mod r100, r101
+    r5 = pow r100, r101
+    r6 = bin_and r100, r101
+    r7 = bin_or r100, r101
+    r8 = bin_xor r100, r101
+    r9 = shl r100, r101
+    r10 = shr r100, r101
+    r11 = sar r100, r101
+    r12 = eq r100, r101
+    r13 = not_eq r100, r101
+    r14 = lt r100, r101
+    r15 = gt r100, r101
+    r16 = lt_eq r100, r101
+    r17 = gt_eq r100, r101
+    r18 = str_concat r100, r101
+    r19 = str_eq r100, r101
+    r20 = str_not_eq r100, r101
+    r21 = str_lt r100, r101
+    r22 = str_gt r100, r101
+    r23 = str_lt_eq r100, r101
+    r24 = str_gt_eq r100, r101
+    return
+}

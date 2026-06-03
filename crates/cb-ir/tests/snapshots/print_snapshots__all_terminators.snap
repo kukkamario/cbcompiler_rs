@@ -1,0 +1,18 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+fn terms() -> Int {
+  bb0:
+    r0 = const_bool true
+    goto bb1
+  bb1:
+    branch_if r0, bb2, bb3
+  bb2:
+    r1 = const_int 0
+    return r1
+  bb3:
+    return
+  bb4:
+    halt 1
+}

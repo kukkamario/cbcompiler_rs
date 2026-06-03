@@ -1,0 +1,21 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+globals:
+  global0: g (TypeRef(enemy))
+
+fn lists() -> Void {
+  locals:
+    local0: x (TypeRef(enemy))
+
+  bb0:
+    r0 = first enemy
+    r1 = last enemy
+    r2 = next r0
+    r3 = previous r1
+    delete_lvalue local0
+    delete_lvalue global0
+    delete_rvalue r0
+    return
+}

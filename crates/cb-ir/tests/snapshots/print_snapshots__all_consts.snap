@@ -1,0 +1,14 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+fn consts() -> Void {
+  bb0:
+    r0 = const_int 42
+    r1 = const_long 9000000000
+    r2 = const_float 2.5
+    r3 = const_bool true
+    r4 = const_string "hi\n\"there\""
+    r5 = const_null
+    return
+}
