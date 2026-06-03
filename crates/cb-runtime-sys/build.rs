@@ -172,6 +172,7 @@ fn main() {
         "cb_font.h",
         "cb_input.cpp",
         "cb_input.h",
+        "cb_keys.def",
         "cb_runtime.h",
         "cb_runtime_core.h",
         "cb_runtime_func.h",

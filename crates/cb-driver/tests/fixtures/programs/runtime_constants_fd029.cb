@@ -1,0 +1,25 @@
+// FD-029: runtime-defined constants. On/Off (Int), PI (Float), and the cbKey*
+// scancode family. Headless: KeyDown returns 0 with no window open, but the
+// constant still resolves to its scancode (asserted via arithmetic below).
+
+// Boolean-ish conveniences.
+Print Str(On)
+Print Str(Off)
+
+// PI folds as a Float constant.
+If PI > 3.14 And PI < 3.1416 Then Print "pi_ok"
+
+// Key scancode constants evaluate to their DirectInput numbers.
+Print Str(cbKeyEsc)      // 1
+Print Str(cbKeyA)        // 30
+Print Str(cbKeyNumlock)  // 69  (fixed: was Pause)
+Print Str(cbKeyPause)    // 197 (fixed: was NumLock)
+
+// Used as an argument to a runtime function (headless => 0).
+Print Str(KeyDown(cbKeyEsc))
+
+// Constants fold in expressions and are usable inside functions.
+glob = On + cbKeyA
+Print Str(glob)
+
+Print "done"

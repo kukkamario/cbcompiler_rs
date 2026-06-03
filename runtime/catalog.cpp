@@ -185,6 +185,32 @@ static constexpr CbTypeDesc catalog_types[] = {
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
 };
 
+// ─── Constant catalog (FD-029) ────────────────────────────────────────
+//
+// Runtime-defined global constants. The compiler seeds these into its
+// global scope and folds them like a user `Const`, so they never reach the
+// backend at runtime. Only CB_TYPE_INT and CB_TYPE_FLOAT are supported.
+
+#define CB_CONST_INT(n, val)   CbConstDesc{ n, CB_TYPE_INT,   { .i = static_cast<int64_t>(val) } }
+#define CB_CONST_FLOAT(n, val) CbConstDesc{ n, CB_TYPE_FLOAT, { .f = static_cast<double>(val) } }
+
+static const CbConstDesc catalog_consts[] = {
+    CB_CONST_INT("On", 1),
+    CB_CONST_INT("Off", 0),
+    CB_CONST_FLOAT("PI", 3.14159265358979323846),
+    // cbKey* scancode constants — generated from the shared cb_keys.def table
+    // (the same source of truth that builds sCBKeyMap in cb_input.cpp).
+    // CB_KEY_RAW rows are scancode-only and emit no constant here.
+#define CB_KEY(name, scan, al) CB_CONST_INT(#name, scan),
+#define CB_KEY_RAW(scan, al)
+#include "cb_keys.def"
+#undef CB_KEY
+#undef CB_KEY_RAW
+};
+
+#undef CB_CONST_INT
+#undef CB_CONST_FLOAT
+
 // ─── Function catalog ─────────────────────────────────────────────────
 //
 // Adding a new runtime function: declare its prototype in cb_runtime.h
@@ -393,6 +419,8 @@ static const CbCatalog catalog = {
     catalog_types,
     static_cast<uint32_t>(sizeof(catalog_funcs) / sizeof(catalog_funcs[0])),
     catalog_funcs,
+    static_cast<uint32_t>(sizeof(catalog_consts) / sizeof(catalog_consts[0])),
+    catalog_consts,
     &cb_runtime_string_api,
 };
 

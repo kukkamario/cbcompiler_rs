@@ -177,3 +177,8 @@ fn runtime_text_fd018() {
 fn runtime_input() {
     run("runtime_input");
 }
+
+#[test]
+fn runtime_constants_fd029() {
+    run("runtime_constants_fd029");
+}

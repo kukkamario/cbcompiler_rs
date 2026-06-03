@@ -76,10 +76,28 @@ pub struct RuntimeTypeDesc {
     pub tag: u32,
 }
 
-/// The full runtime catalog: type declarations and function descriptors.
+/// Value of a runtime-defined constant (FD-029). Only Int and Float are
+/// supported for now; this lives in `cb-ir` (rather than reusing `cb-sema`'s
+/// `ConstValue`) because `cb-sema` depends on `cb-ir`, not the reverse.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RuntimeConstValue {
+    Int(i64),
+    Float(f64),
+}
+
+/// A global constant predeclared by the runtime catalog (FD-029). Seeded into
+/// the compiler's global scope and folded like a user `Const`.
+pub struct RuntimeConstDesc {
+    pub name: String,
+    pub ty: IrType,
+    pub value: RuntimeConstValue,
+}
+
+/// The full runtime catalog: type, function, and constant declarations.
 pub struct RuntimeCatalog {
     pub types: Vec<RuntimeTypeDesc>,
     pub functions: Vec<FuncDesc>,
+    pub constants: Vec<RuntimeConstDesc>,
 }
 
 // ── ID newtypes ─────────────────────────────────────────────────────────

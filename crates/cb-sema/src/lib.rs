@@ -23,7 +23,9 @@ pub use scope::{
 };
 pub use types::Type;
 
-pub use cb_ir::{FuncDesc, FuncParamDesc, RuntimeCatalog, RuntimeTypeDesc};
+pub use cb_ir::{
+    FuncDesc, FuncParamDesc, RuntimeCatalog, RuntimeConstDesc, RuntimeConstValue, RuntimeTypeDesc,
+};
 
 /// How a call expression was resolved during type checking.
 #[derive(Clone, Debug)]
