@@ -6,6 +6,7 @@ Cargo.lock.bak
 *.pdb
 .claude/
 /runtime/build/
+/runtime/build-tests/
 /runtime/vcpkg_installed/
 
 # Allegro writes a debug log into the working directory at runtime
