@@ -3,7 +3,7 @@
 **Status:** Open
 **Priority:** High
 **Effort:** Medium-High (3-6 hours)
-**Impact:** Fixes a use-after-free and a collision-detection coordinate bug in the C++ runtime's Allegro layer, makes Linux font resolution actually work, and stands up the first native C++ test target so this 3.7k-LOC memory-sensitive layer stops being tested only indirectly.
+**Impact:** Fixes a use-after-free in the C++ runtime's Allegro layer, makes Linux font resolution actually work, clears up a confusing-but-correct collision-coordinate convention (with a regression fixture), folds in three lower-severity cleanups, and stands up the first native C++ test target so this 3.7k-LOC memory-sensitive layer stops being tested only indirectly.
 
 ## Problem
 
@@ -11,7 +11,7 @@ The post-FD-018 review found the C++ runtime clean overall (the refcounted `CbSt
 
 1. **Use-after-free: `DeleteFont` leaves a dangling `ALLEGRO_FONT*` in the text queue.** `cb_rt_add_text` snapshots `t.font = current_font` as a raw pointer into a persistent `QueuedText` (`cb_gfx.cpp:987`), re-rendered every `DrawScreen` by `render_queued_texts` (`:912-920`). `cb_rt_delete_font` calls `al_destroy_font(f->font)` (`:1043`) and only repairs the `current_font` global (`:1039-1041`) — it never scans `queued_texts`. The sequence `AddText(font) → DeleteFont(font) → DrawScreen` dereferences freed memory inside `al_draw_text` (the `if (t.font)` guard doesn't help: the pointer is non-null but dangling). The single-frame headless fixture misses it because it `ClearText`s before `DeleteFont`.
 
-2. **`ImagesCollide` mixes world-space and screen-space Y conventions.** The broad-phase AABB runs in cbEnchanted world-space with Y negated (`rect_overlap(x1, -y1, w1, h1, …)`, `cb_gfx.cpp:817`, where `rect_overlap` defines `top=y-h, bottom=y`), but the per-pixel narrow phase computes its scan box in raw screen-space top-left coords (`:819-822`) and samples `al_get_pixel(bmp, x - x1, y - y1)` (`:826-827`). The two phases use inconsistent coordinate systems, so collisions are computed against a region that doesn't match what the AABB gated. `cb_rt_images_overlap` (`:799-805`) uses the world-space convention consistently, making `collide` the outlier.
+2. **`ImagesCollide` mixes world-space and screen-space Y conventions (cosmetic, not a miscompile).** The broad-phase AABB runs in cbEnchanted world-space with Y negated (`rect_overlap(x1, -y1, w1, h1, …)`, `cb_gfx.cpp:817`, where `rect_overlap` defines `top=y-h, bottom=y`), while the per-pixel narrow phase computes its scan box in raw screen-space top-left coords (`:819-822`) and samples `al_get_pixel(bmp, x - x1, y - y1)` (`:826-827`). **On analysis these two conventions are equivalent:** negating both rectangles' Y is symmetric, so the broad-phase boolean is identical to a direct screen-space AABB, and the narrow phase is correct screen-space (bitmap row 0 = top). The result was always correct — the mix is just hard to read. Resolution: document the equivalence in-place (no logic change) and add a regression fixture + a unit test asserting the negated form matches a direct screen-space test, rather than refactor working code.
 
 3. **Fontconfig font resolution is dead code on Linux.** `cb_findfont` has Windows-table / fontconfig (`#ifdef FONTCONFIG_FOUND`) / stub branches, but `FONTCONFIG_FOUND` is **never defined** by `runtime/CMakeLists.txt` (no `find_package(Fontconfig)`). So on every non-Windows build the fontconfig branch (`cb_font.cpp:214-241`) is compiled out and `cb_findfont` always returns `""`; the default-font lookup in `ensure_init` (`cb_gfx.cpp:140-146`) always fails the Courier New resolution and falls back to Allegro's 8×8 builtin. The carefully-ported fontconfig code is unreachable and silently untested.
 
@@ -26,7 +26,7 @@ Lower-severity items folded in:
 In `runtime/`:
 
 - **Font UAF:** on `DeleteFont`, also drop or rebind any `queued_texts` entries whose `font == f->font` (remove them, or repoint to `default_font`); or store an owning/refcounted font reference in `QueuedText` instead of a borrowed raw pointer.
-- **`ImagesCollide`:** pick one convention. Since the pixel loop is screen-space top-left, run the AABB in the same screen-space (drop the Y negation for `collide`); or reconcile both phases to world-space. Document the choice.
+- **`ImagesCollide`:** the logic is correct (see Problem #2). Leave it untouched; add an in-place comment explaining why the negated AABB and screen-space narrow phase agree, a `rect_overlap` unit test asserting the negated form equals a direct screen-space AABB, and a CB golden fixture covering a true and a false case.
 - **Fontconfig:** add `find_package(Fontconfig)` to `CMakeLists.txt`, define `FONTCONFIG_FOUND` and link the lib when found; otherwise explicitly document that Linux uses the builtin fallback. Either way, end the misleading ported-but-uncompiled state.
 - **Image target restore:** capture `al_get_target_bitmap()` at entry and restore at exit, updating `current_target` only when the resized/rotated image *was* the current target.
 - **`GetWord`:** guard `n <= 0` to return `make_empty()` up front.

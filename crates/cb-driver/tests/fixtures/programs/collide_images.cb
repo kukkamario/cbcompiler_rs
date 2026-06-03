@@ -1,0 +1,18 @@
+// FD-022: ImagesCollide true/false coverage, headless. MakeImage clears to
+// opaque black, so every pixel is solid (non-zero alpha) and placement alone
+// decides the pixel-precise result. Memory bitmaps make this CI-safe.
+Dim a As Image
+Dim b As Image
+a = MakeImage(8, 8)
+b = MakeImage(8, 8)
+
+// Overlapping placement: the two 8x8 boxes share the region x[4,8) y[4,8),
+// all solid pixels -> collision.
+Print Str(ImagesCollide(a, 0, 0, 0, b, 4, 4, 0))
+
+// Disjoint placement: far apart -> no collision.
+Print Str(ImagesCollide(a, 0, 0, 0, b, 40, 40, 0))
+
+DeleteImage(a)
+DeleteImage(b)
+Print "done"
