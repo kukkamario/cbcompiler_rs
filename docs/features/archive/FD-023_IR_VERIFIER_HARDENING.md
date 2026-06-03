@@ -1,6 +1,7 @@
 # FD-023: IR Verifier Hardening
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-03
 **Priority:** Medium
 **Effort:** Low-Medium (1-3 hours)
 **Impact:** Makes `cb-ir`'s structural verifier actually guard the CFG invariants both backends depend on, and backfills the missing in-crate tests for the verifier and the IR text printer.
