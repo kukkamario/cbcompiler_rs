@@ -154,6 +154,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Declare an explicit user variable that is allowed to *shadow* a runtime
+    /// command of the same name (FD-027).
+    ///
+    /// If `name` is currently bound in `scope` to a runtime command
+    /// (`RuntimeFn`/`OverloadSet`), the catalog entry is replaced so the name
+    /// now refers to the user's variable. Otherwise this behaves exactly like
+    /// [`try_declare`](Self::try_declare): a clash with a user declaration is a
+    /// duplicate-declaration error, and a clash with a reserved runtime
+    /// constant or type still reports "reserved runtime name". A `Dim` inside a
+    /// function declares into the function scope, so it never hits this path —
+    /// it shadows the top-level command through normal lookup.
+    fn declare_var_shadowing(
+        &mut self,
+        scope: ScopeId,
+        name: Symbol,
+        decl: Declaration,
+        error_code: cb_diagnostics::DiagnosticCode,
+    ) {
+        if self.symbols.local_is_runtime_command(scope, name) {
+            self.symbols.force_declare(scope, name, decl);
+        } else {
+            self.try_declare(scope, name, decl, error_code);
+        }
+    }
+
     // ── runtime catalog registration ─────────────────────────────────────
 
     fn ir_type_to_sema(&mut self, ir: &cb_ir::types::IrType) -> Type {
@@ -1516,21 +1541,45 @@ impl<'a> Checker<'a> {
 
         // If the target is an undeclared identifier, create an implicit declaration.
         let target_ty = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[target] {
-            let name = self.intern_ident(*name_span, *sigil);
-            if self.symbols.lookup(self.current_scope, name).is_none() {
+            let name_span = *name_span;
+            let sigil = sigil.to_owned();
+            let name = self.intern_ident(name_span, sigil);
+            let resolved = self.symbols.lookup(self.current_scope, name);
+            let is_command = matches!(
+                resolved.map(|d| &d.kind),
+                Some(DeclKind::RuntimeFn { .. } | DeclKind::OverloadSet { .. })
+            );
+            let is_bound = resolved.is_some();
+            if is_command {
+                // `name` resolves to a built-in command and the user never
+                // declared it. An implicit assignment may not shadow a command
+                // (FD-027) — tell them to declare it explicitly with `Dim`.
+                let name_str = self.interner.resolve(name).to_owned();
+                self.diagnostics.push(Diagnostic::error(
+                    E_RUNTIME_COMMAND_AS_VAR,
+                    format!(
+                        "`{name_str}` is a built-in command; an implicit assignment \
+                         cannot shadow it — declare it explicitly with `Dim {name_str}`"
+                    ),
+                    Label::new(name_span),
+                ));
+                self.check_expr(value);
+                return;
+            }
+            if is_bound {
+                self.check_expr(target)
+            } else {
                 // Implicit declaration.
-                let (var_ty, _) = types::resolve_var_type(*sigil, None);
+                let (var_ty, _) = types::resolve_var_type(sigil, None);
                 let decl = Declaration {
                     kind: DeclKind::Variable,
                     ty: var_ty.clone(),
-                    span: *name_span,
+                    span: name_span,
                     is_global: false,
                 };
                 self.try_declare(self.current_scope, name, decl, E_DUPLICATE_DECL);
                 self.types.insert(target, var_ty.clone());
                 var_ty
-            } else {
-                self.check_expr(target)
             }
         } else {
             self.check_expr(target)
@@ -1566,7 +1615,9 @@ impl<'a> Checker<'a> {
                 span: dn.name_span,
                 is_global: false,
             };
-            self.try_declare(self.current_scope, name, decl, E_DUPLICATE_DECL);
+            // An explicit `Dim` may shadow a runtime command of the same name
+            // (FD-027); reserved runtime constants/types still clash.
+            self.declare_var_shadowing(self.current_scope, name, decl, E_DUPLICATE_DECL);
         }
 
         if let Some(init_id) = init {
@@ -2730,6 +2781,57 @@ mod tests {
         let catalog = catalog_with_consts(vec![const_int("PI", 3)]);
         let result = analyze_with_catalog("Dim pi As Float = 3.14\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0303"]);
+    }
+
+    // ── runtime command name collisions (FD-027) ───────────────────────
+
+    #[test]
+    fn explicit_dim_shadows_runtime_command() {
+        // `Dim box` reclaims the name from the built-in `Box` command: the
+        // declaration succeeds and later uses resolve to the variable.
+        let catalog = catalog_of(vec![
+            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
+        ]);
+        let result = analyze_with_catalog(
+            "Dim box As Int\nbox = 5\n",
+            &catalog,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn implicit_assignment_over_runtime_command_is_e0328() {
+        // No prior `Dim`: an implicit declaration may not shadow a command.
+        let catalog = catalog_of(vec![
+            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
+        ]);
+        let result = analyze_with_catalog("box = 5\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0328"]);
+    }
+
+    #[test]
+    fn explicit_dim_shadows_overloaded_runtime_command() {
+        // The same rule applies when the command is an overload set.
+        let catalog = catalog_of(vec![
+            rt_func("color", "cb_color_1", &[("c", IrType::Int)], IrType::Void),
+            rt_func("color", "cb_color_3", &[("r", IrType::Int), ("g", IrType::Int), ("b", IrType::Int)], IrType::Void),
+        ]);
+        let result = analyze_with_catalog("Dim color As Int\ncolor = 7\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn dim_inside_function_shadows_runtime_command() {
+        // A `Dim` in a function declares into the function scope and shadows
+        // the top-level command through normal lookup — no special handling.
+        let catalog = catalog_of(vec![
+            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
+        ]);
+        let result = analyze_with_catalog(
+            "Function f()\nDim box As Int\nbox = 1\nEndFunction\n",
+            &catalog,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]

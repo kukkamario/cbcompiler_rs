@@ -11,7 +11,7 @@ use codespan_reporting::term;
 use codespan_reporting::term::termcolor::WriteColor;
 
 use crate::diagnostic::{Diagnostic, Label, Severity};
-use crate::source::SourceMap;
+use crate::source::{FileId, SourceMap};
 
 /// A consumer of [`Diagnostic`]s.
 ///
@@ -96,6 +96,14 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
 /// the referenced [`FileId`](crate::FileId) must exist in the
 /// [`SourceMap`], and `end` must not exceed the source's byte length
 /// (`end` is exclusive, so `end == text_len` is valid).
+///
+/// A label on the [`FileId::SYNTHETIC`] sentinel is an exception: it has no
+/// backing source, so it cannot be range-checked and is *not* an error here.
+/// The renderer degrades instead of aborting — [`to_codespan`] drops the
+/// snippet and folds the label's message into a note. This keeps a synthetic
+/// span (e.g. a built-in/runtime declaration site) from swallowing an
+/// otherwise-renderable real error (FD-027). Genuine caller bugs — an inverted
+/// span, or an unknown *non-synthetic* `FileId` — still fail hard.
 fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
     if label.span.end < label.span.start {
         let msg = format!(
@@ -104,6 +112,9 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
         );
         eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
+    }
+    if label.span.file == FileId::SYNTHETIC {
+        return Ok(());
     }
     let Some(src) = sources.get(label.span.file) else {
         let msg = format!("Span references unknown FileId({})", label.span.file.0);
@@ -132,9 +143,23 @@ fn to_codespan(diag: &Diagnostic) -> cs_diag::Diagnostic<usize> {
     };
 
     let mut labels = Vec::with_capacity(1 + diag.secondary.len());
-    labels.push(to_cs_label(&diag.primary, cs_diag::LabelStyle::Primary));
+    // A label on a synthetic span has no source snippet to underline. Rather
+    // than drop its message entirely, preserve it as a note so the diagnostic
+    // still carries the information (FD-027).
+    let mut degraded_notes: Vec<String> = Vec::new();
+    push_label_or_note(
+        &diag.primary,
+        cs_diag::LabelStyle::Primary,
+        &mut labels,
+        &mut degraded_notes,
+    );
     for sec in &diag.secondary {
-        labels.push(to_cs_label(sec, cs_diag::LabelStyle::Secondary));
+        push_label_or_note(
+            sec,
+            cs_diag::LabelStyle::Secondary,
+            &mut labels,
+            &mut degraded_notes,
+        );
     }
 
     let mut out = cs_diag::Diagnostic::new(severity)
@@ -143,10 +168,30 @@ fn to_codespan(diag: &Diagnostic) -> cs_diag::Diagnostic<usize> {
     if let Some(code) = diag.code {
         out = out.with_code(code.as_str());
     }
-    if !diag.notes.is_empty() {
-        out = out.with_notes(diag.notes.clone());
+    if !diag.notes.is_empty() || !degraded_notes.is_empty() {
+        let mut notes = diag.notes.clone();
+        notes.extend(degraded_notes);
+        out = out.with_notes(notes);
     }
     out
+}
+
+/// Add `label` to `labels` as a codespan label, unless its span is synthetic
+/// (no backing source) — in that case fold any message into `degraded_notes`
+/// so it survives rendering without a snippet. See [`validate_label`].
+fn push_label_or_note(
+    label: &Label,
+    style: cs_diag::LabelStyle,
+    labels: &mut Vec<cs_diag::Label<usize>>,
+    degraded_notes: &mut Vec<String>,
+) {
+    if label.span.file == FileId::SYNTHETIC {
+        if let Some(msg) = &label.message {
+            degraded_notes.push(format!("{msg} (built-in; no source location)"));
+        }
+        return;
+    }
+    labels.push(to_cs_label(label, style));
 }
 
 fn to_cs_label(label: &Label, style: cs_diag::LabelStyle) -> cs_diag::Label<usize> {
@@ -237,6 +282,36 @@ mod tests {
             .emit(&diag, &sources)
             .expect_err("emit should fail on unknown FileId");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn emit_synthetic_label_degrades() {
+        // A secondary label on the synthetic sentinel must NOT abort the whole
+        // diagnostic (which would swallow the real error — FD-027). It renders
+        // without a snippet, and its message is preserved as a note.
+        let mut sources = SourceMap::new();
+        let file = sources.add("real.cb".into(), "Dim box As Int\n".into());
+        let diag = Diagnostic::error(
+            "E0303",
+            "`box` is a reserved runtime name",
+            Label::new(Span::new(0, 3, file)),
+        )
+        .with_secondary(Label::with_message(
+            Span::new(0, 0, FileId::SYNTHETIC),
+            "previously declared here",
+        ));
+        let mut r = renderer();
+        r.emit(&diag, &sources)
+            .expect("synthetic label must degrade, not error");
+        let out = String::from_utf8(r.into_inner().into_inner()).expect("utf-8");
+        assert!(
+            out.contains("reserved runtime name"),
+            "real message preserved: {out}"
+        );
+        assert!(
+            out.contains("previously declared here"),
+            "synthetic label message folded into a note: {out}"
+        );
     }
 
     #[test]
