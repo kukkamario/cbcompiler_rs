@@ -1,0 +1,18 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+fn traps() -> Void {
+  bb0:
+    trap null_deref
+  bb1:
+    trap deleted_access
+  bb2:
+    trap division_by_zero
+  bb3:
+    trap index_out_of_bounds
+  bb4:
+    trap null_fn_ptr
+  bb5:
+    trap double_delete
+}

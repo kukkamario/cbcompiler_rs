@@ -1,0 +1,26 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+fn types() -> Void {
+  locals:
+    local0: v (Byte)
+    local1: v (Short)
+    local2: v (Int)
+    local3: v (UInt)
+    local4: v (Long)
+    local5: v (ULong)
+    local6: v (Float)
+    local7: v (Bool)
+    local8: v (String)
+    local9: v (Array<Int, 2>)
+    local10: v (TypeRef(enemy))
+    local11: v (StructVal(vec2))
+    local12: v (FnPtr(Int, Float) -> Bool)
+    local13: v (RuntimeType(Image))
+    local14: v (Null)
+    local15: v (Void)
+
+  bb0:
+    return
+}

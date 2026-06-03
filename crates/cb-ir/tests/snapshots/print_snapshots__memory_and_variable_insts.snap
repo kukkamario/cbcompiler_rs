@@ -1,0 +1,24 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+globals:
+  global0: g (Int)
+
+fn mem() -> Void {
+  locals:
+    local0: x (Int)
+
+  bb0:
+    r0 = load_local local0
+    store_local local0, r0
+    r1 = load_global global0
+    store_global global0, r1
+    r2 = new_type enemy
+    r3 = new_array Int, r0, r1
+    r4 = get_field r2, hp (Int)
+    r5 = get_element r3, r0, r1
+    store_place local0.hp[r0, r1], r4
+    store_place global0[r0], r1
+    return
+}

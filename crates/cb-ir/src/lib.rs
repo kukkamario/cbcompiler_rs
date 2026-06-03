@@ -54,6 +54,7 @@ pub enum FuncKind {
 /// and consumed by sema. Uses [`IrType`] so that both the FFI crate
 /// (`cb-runtime-sys`) and the semantic analysis crate (`cb-sema`) can share
 /// these types without depending on each other.
+#[derive(Clone, Debug)]
 pub struct FuncDesc {
     pub name: String,
     pub c_symbol: String,
@@ -65,12 +66,14 @@ pub struct FuncDesc {
 }
 
 /// A parameter in a runtime function description.
+#[derive(Clone, Debug)]
 pub struct FuncParamDesc {
     pub name: Option<String>,
     pub ty: IrType,
 }
 
 /// Description of an opaque type declared by the runtime catalog.
+#[derive(Clone, Debug)]
 pub struct RuntimeTypeDesc {
     pub name: String,
     pub tag: u32,
@@ -87,6 +90,7 @@ pub enum RuntimeConstValue {
 
 /// A global constant predeclared by the runtime catalog (FD-029). Seeded into
 /// the compiler's global scope and folded like a user `Const`.
+#[derive(Clone, Debug)]
 pub struct RuntimeConstDesc {
     pub name: String,
     pub ty: IrType,
@@ -94,6 +98,7 @@ pub struct RuntimeConstDesc {
 }
 
 /// The full runtime catalog: type, function, and constant declarations.
+#[derive(Clone, Debug)]
 pub struct RuntimeCatalog {
     pub types: Vec<RuntimeTypeDesc>,
     pub functions: Vec<FuncDesc>,

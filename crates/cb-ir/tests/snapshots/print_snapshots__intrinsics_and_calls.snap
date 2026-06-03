@@ -1,0 +1,23 @@
+---
+source: crates/cb-ir/tests/print_snapshots.rs
+expression: "print_program(&prog, &i)"
+---
+globals:
+  global0: garr (Array<Float, 2>)
+
+fn calls() -> Void {
+  locals:
+    local0: arr (Array<Int, 1>)
+
+  bb0:
+    r0 = len r50
+    r1 = len r50, r51
+    r2 = strlen r52
+    r3 = convert_explicit r0 -> Float
+    r4 = convert r0: Int -> Long
+    r5 = call spawn, r0, r1
+    r6 = call_indirect r5, r0
+    redim local0, Int, r0
+    redim global0, Float, r0, r1
+    return
+}
