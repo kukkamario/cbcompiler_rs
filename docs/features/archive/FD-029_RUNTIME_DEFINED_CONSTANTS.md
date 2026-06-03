@@ -1,6 +1,7 @@
 # FD-029: Runtime-Defined Constants
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-03
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Lets the runtime predeclare global constants (`On`, `Off`, `PI`, `cbKeyEsc`, `cbKeyA`, …) so CB programs can use the documented symbolic names instead of magic numbers.
