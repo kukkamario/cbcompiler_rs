@@ -31,3 +31,7 @@ pub const E_NO_MATCHING_OVERLOAD: DiagnosticCode = DiagnosticCode::new("E0324");
 pub const E_INVALID_ASSIGN_TARGET: DiagnosticCode = DiagnosticCode::new("E0325");
 pub const E_LITERAL_OVERFLOW: DiagnosticCode = DiagnosticCode::new("E0326");
 pub const E_CONST_FLOAT_DIV_ZERO: DiagnosticCode = DiagnosticCode::new("E0327");
+/// A built-in runtime command name was used as a variable via an implicit
+/// assignment. Implicit declarations may not shadow commands; an explicit
+/// `Dim` is required (FD-027).
+pub const E_RUNTIME_COMMAND_AS_VAR: DiagnosticCode = DiagnosticCode::new("E0328");

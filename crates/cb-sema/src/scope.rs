@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Span, Symbol};
+use cb_diagnostics::{FileId, Span, Symbol};
 
 use crate::types::Type;
 
@@ -120,6 +120,34 @@ impl SymbolTable {
         }
         s.symbols.insert(name, decl);
         Ok(())
+    }
+
+    /// Insert `decl` into `scope`, replacing any existing entry for `name`.
+    ///
+    /// Unlike [`declare`](Self::declare) this never fails on a collision. It is
+    /// used when an explicit user declaration is permitted to *shadow* a
+    /// runtime-seeded command of the same name (FD-027) — the catalog entry is
+    /// overwritten so the name now resolves to the user's declaration.
+    pub(crate) fn force_declare(&mut self, scope: ScopeId, name: Symbol, decl: Declaration) {
+        self.scopes[scope.0 as usize].symbols.insert(name, decl);
+    }
+
+    /// Whether `name` is declared *directly in this scope* as a runtime
+    /// *command* — a `RuntimeFn` or `OverloadSet` seeded from the catalog,
+    /// identified by its synthetic span.
+    ///
+    /// Such names may be shadowed by an explicit user declaration. Runtime
+    /// constants and opaque types are *not* commands and are intentionally
+    /// excluded: those names are reserved (a colliding user declaration is an
+    /// error). See [`force_declare`](Self::force_declare).
+    pub(crate) fn local_is_runtime_command(&self, scope: ScopeId, name: Symbol) -> bool {
+        self.scopes[scope.0 as usize]
+            .symbols
+            .get(&name)
+            .is_some_and(|d| {
+                d.span.file == FileId::SYNTHETIC
+                    && matches!(d.kind, DeclKind::RuntimeFn { .. } | DeclKind::OverloadSet { .. })
+            })
     }
 
     /// Look up a name following CoolBasic's visibility rules.

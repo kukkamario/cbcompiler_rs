@@ -110,6 +110,29 @@ Any `End <Keyword>` pair may also be written as a single token: `End If` == `End
 
 `REM` is recognised as the start of a line comment (§1.2) rather than as a value-producing keyword.
 
+### 1.5.1 Runtime command names
+
+Names provided by the runtime library (commands such as `Box`, `Text`,
+`LoadImage`; see [`cb_runtime.md`](cb_runtime.md)) are **not** keywords. They are
+ordinary identifiers seeded into the global scope, and shadowing rules apply by
+*kind*:
+
+- A runtime **command** (a runtime function or overload set) may be **shadowed
+  by an explicit declaration** of the same name. `Dim box As Int` — or
+  `Global box`, or a user `Function box(...)` — reclaims the name: from that
+  declaration onward `box` refers to the user's variable/function, not the
+  command.
+- An **implicit** declaration may **not** shadow a command. A bare assignment to
+  a never-declared command name, e.g. `box = 5`, is an error (`E0328`); the
+  diagnostic points the user to declare it explicitly with `Dim` if they intend
+  to shadow it.
+- Runtime-defined **constants** (e.g. `On`, `Off`, `Pi`, key scancodes) and
+  runtime **types** (opaque handle types) are **reserved**: any colliding user
+  declaration is an error (`E0303`), whether explicit or implicit.
+
+Case-insensitivity applies throughout (§1.3): `Box`, `box`, and `BOX` are the
+same name.
+
 ### 1.6 Literals
 
 #### Integer literals
