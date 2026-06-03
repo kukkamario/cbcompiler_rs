@@ -1,6 +1,7 @@
 # FD-022: C++ Runtime Allegro-Layer Fixes
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-03
 **Priority:** High
 **Effort:** Medium-High (3-6 hours)
 **Impact:** Fixes a use-after-free in the C++ runtime's Allegro layer, makes Linux font resolution actually work, clears up a confusing-but-correct collision-coordinate convention (with a regression fixture), folds in three lower-severity cleanups, and stands up the first native C++ test target so this 3.7k-LOC memory-sensitive layer stops being tested only indirectly.
