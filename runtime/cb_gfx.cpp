@@ -16,6 +16,7 @@
 #include "cb_runtime.h"
 #include "cb_input.h"
 #include "cb_font.h"
+#include "cb_geom.h"
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_primitives.h>
@@ -669,6 +670,10 @@ extern "C" void cb_rt_resize_image(CbImage* img, int32_t w, int32_t h) {
     int ow = al_get_bitmap_width(img->bmp);
     int oh = al_get_bitmap_height(img->bmp);
 
+    // Restore the caller's render target on exit, the way MakeImage does, so
+    // building `dest` is not an observable global-state side effect (FD-022).
+    ALLEGRO_BITMAP* prev = al_get_target_bitmap();
+
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -685,7 +690,9 @@ extern "C" void cb_rt_resize_image(CbImage* img, int32_t w, int32_t h) {
     ALLEGRO_BITMAP* old = img->bmp;
     img->bmp = dest;
     if (current_target == old) current_target = dest;
-    al_set_target_bitmap(current_target ? current_target : dest);
+    // Restore the previous target, but if it was the bitmap we just destroyed
+    // point it at the replacement instead of a dangling pointer.
+    al_set_target_bitmap(prev == old ? dest : prev);
     al_destroy_bitmap(old);
     img->hotspot_x = 0;
     img->hotspot_y = 0;
@@ -707,6 +714,9 @@ extern "C" void cb_rt_rotate_image(CbImage* img, double angle) {
     if (niw < 1) niw = 1;
     if (nih < 1) nih = 1;
 
+    // Restore the caller's render target on exit (see cb_rt_resize_image, FD-022).
+    ALLEGRO_BITMAP* prev = al_get_target_bitmap();
+
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -723,7 +733,7 @@ extern "C" void cb_rt_rotate_image(CbImage* img, double angle) {
     ALLEGRO_BITMAP* old = img->bmp;
     img->bmp = dest;
     if (current_target == old) current_target = dest;
-    al_set_target_bitmap(current_target ? current_target : dest);
+    al_set_target_bitmap(prev == old ? dest : prev);
     al_destroy_bitmap(old);
     img->hotspot_x = niw / 2;
     img->hotspot_y = nih / 2;
@@ -780,19 +790,8 @@ extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
     }
 }
 
-// AABB overlap helper (cbEnchanted's RectRectTest: box = left=x, right=x+w,
-// top=y-h, bottom=y; epsilon keeps shared edges from counting).
-static bool rect_overlap(double x1, double y1, double w1, double h1,
-                         double x2, double y2, double w2, double h2) {
-    constexpr double eps = 1e-5;
-    double l1 = x1, r1 = x1 + w1, t1 = y1 - h1, b1 = y1;
-    double l2 = x2, r2 = x2 + w2, t2 = y2 - h2, b2 = y2;
-    if (b1 < t2 + eps) return false;
-    if (t1 > b2 - eps) return false;
-    if (r1 < l2 + eps) return false;
-    if (l1 > r2 - eps) return false;
-    return true;
-}
+// rect_overlap lives in cb_geom.h (FD-022) so the unit tests can exercise it
+// without pulling in Allegro.
 
 // Bounding-box overlap between two placed images (Y negated for world space,
 // matching cbEnchanted/BoxOverlap).
@@ -814,6 +813,13 @@ extern "C" int32_t cb_rt_images_collide(const CbImage* a, double x1, double y1, 
     if (!a || !a->bmp || !b || !b->bmp) return 0;
     double w1 = al_get_bitmap_width(a->bmp), h1 = al_get_bitmap_height(a->bmp);
     double w2 = al_get_bitmap_width(b->bmp), h2 = al_get_bitmap_height(b->bmp);
+    // Broad phase uses rect_overlap's world-space form (Y negated), matching
+    // cb_rt_images_overlap; the narrow phase below works in screen-space
+    // top-left (where al_get_pixel row 0 is the top). These two conventions
+    // look mixed but are equivalent: negating both rectangles' Y is symmetric,
+    // so the overlap boolean is identical to a direct screen-space test, and
+    // the scan box is exactly the (non-empty) screen-space intersection the
+    // AABB just gated. Verified true/false by the collide_images golden fixture.
     if (!rect_overlap(x1, -y1, w1, h1, x2, -y2, w2, h2)) return 0;
 
     int xmin = (int)std::max(x1, x2);
@@ -1032,12 +1038,21 @@ extern "C" void cb_rt_set_font(CbFont* f) {
     current_font = (f && f->font) ? f->font : default_font;
 }
 
-// DeleteFont(f): frees a font. If it was current, falls back to the default so
-// later text never dereferences a freed font.
+// DeleteFont(f): frees a font. If it was the current font, falls back to the
+// default. Queued AddText entries snapshot a borrowed ALLEGRO_FONT* (see
+// cb_rt_add_text), so any that referenced this font are rebound to default_font
+// too — otherwise render_queued_texts would dereference the freed font on the
+// next DrawScreen (FD-022). default_font is process-owned and never freed here,
+// so the rebind is always safe.
 extern "C" void cb_rt_delete_font(CbFont* f) {
     if (!f) return;
     if (current_font == f->font) {
         current_font = default_font;
+    }
+    for (QueuedText& t : queued_texts) {
+        if (t.font == f->font) {
+            t.font = default_font;
+        }
     }
     if (f->font) {
         al_destroy_font(f->font);

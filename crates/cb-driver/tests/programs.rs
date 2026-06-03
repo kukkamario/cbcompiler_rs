@@ -169,6 +169,11 @@ fn runtime_image_fd017() {
 }
 
 #[test]
+fn collide_images() {
+    run("collide_images");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run("runtime_text_fd018");
 }

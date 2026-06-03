@@ -3,5 +3,13 @@
   "version": "0.1.0",
   "dependencies": [
     "allegro5"
-  ]
+  ],
+  "features": {
+    "tests": {
+      "description": "Native C++ unit tests (GoogleTest)",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
 }

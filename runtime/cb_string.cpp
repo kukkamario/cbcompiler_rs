@@ -76,11 +76,35 @@ static inline const uint8_t* data_of(const CbString* s) {
     return reinterpret_cast<const uint8_t*>(s) + s->offset;
 }
 
+// A statically-allocated immortal CbString carrying the out-of-memory message,
+// built as one object (header + inline bytes) so the OOM path touches no heap.
+// `offset` points past the header to `bytes`, exactly like a heap CbString, so
+// data_of() resolves to the message. refcount = -1 marks it immortal.
+namespace {
+struct OomMsg {
+    CbString hdr;
+    char     bytes[33];
+};
+const OomMsg CB_OOM = {
+    {/*refcount*/ -1, /*pad*/ 0, /*byte_len*/ 32, /*capacity*/ 32,
+     /*offset*/ offsetof(OomMsg, bytes)},
+    "CoolBasic runtime: out of memory",  // 32 bytes (NUL not counted)
+};
+}  // namespace
+
 // Single-block allocation: header + inline data. Refcount starts at 1;
-// caller is responsible for filling the data region.
+// caller is responsible for filling the data region. On allocation failure we
+// best-effort surface the condition through the FD-015 trap channel, then
+// abort. raise_error only RECORDS the intent and returns (cb_runtime_core.h),
+// so it cannot rescue an in-flight allocation that has no valid pointer to hand
+// back — std::abort() remains the hard stop (FD-022).
 static CbString* alloc_with_data(std::size_t len) {
     CbString* s = static_cast<CbString*>(std::malloc(sizeof(CbString) + len));
-    if (!s) std::abort();
+    if (!s) {
+        const CbHostApi* h = cb_host();
+        if (h && h->raise_error) h->raise_error(&CB_OOM.hdr);
+        std::abort();
+    }
     s->refcount = 1;
     s->pad      = 0;
     s->byte_len = len;

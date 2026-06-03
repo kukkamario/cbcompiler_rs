@@ -76,6 +76,23 @@ endif()
 
 target_link_libraries(cb_runtime PRIVATE ${CB_LINK_SEEDS})
 
+# ─── Font resolution backend (FD-022) ────────────────────────────────────
+# On non-Windows, cb_font.cpp resolves system font families through fontconfig,
+# but only when FONTCONFIG_FOUND is defined — otherwise the carefully-ported
+# branch compiles out and LoadFont("Arial") silently falls back to Allegro's
+# builtin 8x8 font. Define it (and link the lib) when fontconfig is available;
+# otherwise say so. Windows uses a static font-name table and needs none of this.
+if(NOT WIN32)
+    find_package(Fontconfig QUIET)
+    if(Fontconfig_FOUND)
+        target_compile_definitions(cb_runtime PRIVATE FONTCONFIG_FOUND)
+        target_link_libraries(cb_runtime PRIVATE Fontconfig::Fontconfig)
+    else()
+        message(STATUS
+            "Fontconfig not found: named-font resolution falls back to the Allegro builtin font")
+    endif()
+endif()
+
 # With static linking, Rust must be told about every transitive dependency
 # (libpng, zlib, ogg, vorbis, ...) and Windows system lib (dwmapi, mfplat,
 # ...) that CMake would otherwise inject automatically. Walk the
@@ -121,3 +138,35 @@ file(GENERATE
     OUTPUT "${CMAKE_BINARY_DIR}/cb_runtime_link_libs_$<CONFIG>.txt"
     CONTENT "${_cb_link_content}"
 )
+
+# ─── Native C++ unit tests (FD-022) ──────────────────────────────────────
+# OFF by default so the normal cargo build (build.rs runs `cmake --build .`)
+# never configures GoogleTest or builds this target. To run the tests:
+#
+#   cmake -S runtime -B build-tests -DCB_RUNTIME_TESTS=ON \
+#         -DVCPKG_MANIFEST_FEATURES=tests \
+#         -DCMAKE_TOOLCHAIN_FILE=runtime/vcpkg/scripts/buildsystems/vcpkg.cmake \
+#         -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+#   cmake --build build-tests --config Release
+#   ctest --test-dir build-tests -C Release --output-on-failure
+#
+# The pure-logic suites (geom, utf8) only #include cb_geom.h / cb_utf8.h; the
+# input suite drives the extern "C" state machine in cb_runtime with synthetic
+# ALLEGRO_EVENTs (no display), so the target links cb_runtime + Allegro.
+option(CB_RUNTIME_TESTS "Build the native C++ unit tests (requires GoogleTest)" OFF)
+if(CB_RUNTIME_TESTS)
+    enable_testing()
+    find_package(GTest CONFIG REQUIRED)
+    add_executable(cb_runtime_tests
+        tests/test_geom.cpp
+        tests/test_utf8.cpp
+        tests/test_input.cpp
+    )
+    target_link_libraries(cb_runtime_tests PRIVATE
+        cb_runtime ${CB_LINK_SEEDS} GTest::gtest GTest::gtest_main)
+    if(VCPKG_TARGET_TRIPLET MATCHES "static")
+        target_compile_definitions(cb_runtime_tests PRIVATE ALLEGRO_STATICLINK)
+    endif()
+    include(GoogleTest)
+    gtest_discover_tests(cb_runtime_tests)
+endif()

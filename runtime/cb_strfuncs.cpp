@@ -29,6 +29,7 @@
 // preserved. Full Unicode casing would need case tables — out of scope.
 
 #include "cb_runtime_func.h"
+#include "cb_utf8.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,55 +40,8 @@
 
 namespace {
 
-// Count Unicode codepoints in a UTF-8 buffer: every byte that is not a
-// continuation byte (0b10xxxxxx) starts a new codepoint.
-std::size_t cp_len(const uint8_t* data, std::size_t byte_len) {
-    std::size_t n = 0;
-    for (std::size_t i = 0; i < byte_len; ++i) {
-        if ((data[i] & 0xC0) != 0x80) ++n;
-    }
-    return n;
-}
-
-// Byte offset of the `cp_index`-th codepoint (0-based), clamped to
-// [0, byte_len]. cp_index >= codepoint count returns byte_len.
-std::size_t byte_offset_of_cp(const uint8_t* data, std::size_t byte_len,
-                              std::size_t cp_index) {
-    std::size_t seen = 0;
-    for (std::size_t i = 0; i < byte_len; ++i) {
-        if ((data[i] & 0xC0) != 0x80) {
-            if (seen == cp_index) return i;
-            ++seen;
-        }
-    }
-    return byte_len;
-}
-
-// Encode one codepoint as UTF-8 into out[0..4]; returns the byte length, or 0
-// for an invalid codepoint (negative, > U+10FFFF, or a surrogate).
-std::size_t encode_utf8(int64_t cp, uint8_t out[4]) {
-    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0;
-    auto c = static_cast<uint32_t>(cp);
-    if (c < 0x80) {
-        out[0] = static_cast<uint8_t>(c);
-        return 1;
-    } else if (c < 0x800) {
-        out[0] = static_cast<uint8_t>(0xC0 | (c >> 6));
-        out[1] = static_cast<uint8_t>(0x80 | (c & 0x3F));
-        return 2;
-    } else if (c < 0x10000) {
-        out[0] = static_cast<uint8_t>(0xE0 | (c >> 12));
-        out[1] = static_cast<uint8_t>(0x80 | ((c >> 6) & 0x3F));
-        out[2] = static_cast<uint8_t>(0x80 | (c & 0x3F));
-        return 3;
-    } else {
-        out[0] = static_cast<uint8_t>(0xF0 | (c >> 18));
-        out[1] = static_cast<uint8_t>(0x80 | ((c >> 12) & 0x3F));
-        out[2] = static_cast<uint8_t>(0x80 | ((c >> 6) & 0x3F));
-        out[3] = static_cast<uint8_t>(0x80 | (c & 0x3F));
-        return 4;
-    }
-}
+// cp_len / byte_offset_of_cp / encode_utf8 live in cb_utf8.h (FD-022) so the
+// unit tests can exercise them directly.
 
 // Owning reference to the immortal empty sentinel; the canonical "" result.
 // Reached through the public CbStringApi rather than the core's private
@@ -490,9 +444,12 @@ extern "C" int32_t cb_rt_count_words(const CbString* s, const CbString* sep) {
 }
 
 // The n-th (1-based) `sep`-separated word. Empty `sep` -> space. n past the
-// last word yields the final segment (mirrors cbEnchanted).
+// last word yields the final segment (mirrors cbEnchanted). n <= 0 clamps to
+// "" like the other 1-based string functions (Mid/Left), rather than returning
+// the first word (FD-022).
 extern "C" CbString* cb_rt_get_word(const CbString* s, int32_t n,
                                     const CbString* sep) {
+    if (n <= 0) return make_empty();
     std::string str = bytes_of(s);
     std::string sp = bytes_of(sep);
     if (sp.empty()) sp = " ";

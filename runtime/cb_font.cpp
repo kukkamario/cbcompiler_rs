@@ -211,6 +211,10 @@ std::string cb_findfont(const char* font, bool is_bold, bool is_italic) {
 
 #else  // !_WIN32
 
+// FONTCONFIG_FOUND is defined by runtime/CMakeLists.txt when find_package
+// (Fontconfig) succeeds on a non-Windows build; it then links the library too.
+// Without it (fontconfig not installed) this branch compiles out and font
+// resolution falls back to Allegro's builtin font — see CMakeLists (FD-022).
 #ifdef FONTCONFIG_FOUND
 #include <fontconfig/fontconfig.h>
 
