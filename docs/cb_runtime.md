@@ -535,7 +535,8 @@ Buttons are 1-based: **1=left, 2=right, 3=middle**, 4+ extra.
 
 ### Scancode table
 
-CB scancode → key (DirectInput-style; gaps are unmapped):
+CB scancode → key (DirectInput-style; gaps are unmapped). Scancodes 69/197 are
+NumLock/Pause, matching DirectInput and the real CoolBasic `cbKey*` constants:
 
 | Scan | Key | Scan | Key | Scan | Key |
 |-----:|-----|-----:|-----|-----:|-----|
@@ -552,7 +553,7 @@ CB scancode → key (DirectInput-style; gaps are unmapped):
 | 29 | LCtrl | 54 | RShift | 181 | Numpad / |
 | 55 | Numpad * | 56 | Alt | 183 | PrintScreen |
 | 57 | Space | 58 | CapsLock | 184 | AltGr |
-| 59–68 | F1–F10 | 69 | Pause | 197 | NumLock |
+| 59–68 | F1–F10 | 69 | NumLock | 197 | Pause |
 | 199 | Home | 200 | Up | 201 | PgUp |
 | 203 | Left | 205 | Right | 207 | End |
 | 208 | Down | 209 | PgDn | 210 | Insert |

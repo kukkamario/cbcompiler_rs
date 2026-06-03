@@ -1,0 +1,142 @@
+/* cb_keys.def — single source of truth for the CB DirectInput-style scancode
+ * table (FD-019). Intentionally has NO include guard: it is an X-macro body
+ * meant to be #included more than once with different macro definitions.
+ *
+ * Two entry kinds:
+ *   CB_KEY(name, scancode, allegro_key)  — a key that also gets a public
+ *       `cbKey*` constant (name) in addition to its sCBKeyMap entry.
+ *   CB_KEY_RAW(scancode, allegro_key)    — scancode→keycode mapping only, no
+ *       public constant yet (deferred punctuation / OEM / numpad-operator keys,
+ *       per FD-019 Q3c). `KeyDown(rawNumber)` still works for these.
+ *
+ * Consumers must `#define` BOTH macros before including, then `#undef` them:
+ *   - runtime/cb_input.cpp uses both to populate sCBKeyMap[scancode] = keycode.
+ *   - runtime/catalog.cpp expands CB_KEY into a CbConstDesc and CB_KEY_RAW into
+ *     nothing (the allegro_key argument is dropped there).
+ *
+ * Scancodes are the legacy DirectInput numbering. Names are taken verbatim from
+ * cbEnchanted's tools/cbkeys_mapping/keys_coolbasic.cb (a dump of the real
+ * CoolBasic constant names). NOTE: scancodes 69/197 are NumLock/Pause here,
+ * matching real CoolBasic + DirectInput — this corrects the swap previously
+ * present in the hand-written sCBKeyMap. */
+
+/* ── Top row / control ── */
+CB_KEY    (cbKeyEsc,        1,   ALLEGRO_KEY_ESCAPE)
+CB_KEY    (cbKey1,          2,   ALLEGRO_KEY_1)
+CB_KEY    (cbKey2,          3,   ALLEGRO_KEY_2)
+CB_KEY    (cbKey3,          4,   ALLEGRO_KEY_3)
+CB_KEY    (cbKey4,          5,   ALLEGRO_KEY_4)
+CB_KEY    (cbKey5,          6,   ALLEGRO_KEY_5)
+CB_KEY    (cbKey6,          7,   ALLEGRO_KEY_6)
+CB_KEY    (cbKey7,          8,   ALLEGRO_KEY_7)
+CB_KEY    (cbKey8,          9,   ALLEGRO_KEY_8)
+CB_KEY    (cbKey9,          10,  ALLEGRO_KEY_9)
+CB_KEY    (cbKey0,          11,  ALLEGRO_KEY_0)
+CB_KEY_RAW(                 12,  ALLEGRO_KEY_EQUALS)
+CB_KEY_RAW(                 13,  ALLEGRO_KEY_OPENBRACE)
+CB_KEY    (cbKeyBackspace,  14,  ALLEGRO_KEY_BACKSPACE)
+CB_KEY    (cbKeyTab,        15,  ALLEGRO_KEY_TAB)
+
+/* ── QWERTY row ── */
+CB_KEY    (cbKeyQ,          16,  ALLEGRO_KEY_Q)
+CB_KEY    (cbKeyW,          17,  ALLEGRO_KEY_W)
+CB_KEY    (cbKeyE,          18,  ALLEGRO_KEY_E)
+CB_KEY    (cbKeyR,          19,  ALLEGRO_KEY_R)
+CB_KEY    (cbKeyT,          20,  ALLEGRO_KEY_T)
+CB_KEY    (cbKeyY,          21,  ALLEGRO_KEY_Y)
+CB_KEY    (cbKeyU,          22,  ALLEGRO_KEY_U)
+CB_KEY    (cbKeyI,          23,  ALLEGRO_KEY_I)
+CB_KEY    (cbKeyO,          24,  ALLEGRO_KEY_O)
+CB_KEY    (cbKeyP,          25,  ALLEGRO_KEY_P)
+CB_KEY_RAW(                 26,  ALLEGRO_KEY_CLOSEBRACE)
+CB_KEY_RAW(                 27,  ALLEGRO_KEY_SEMICOLON)
+CB_KEY    (cbKeyReturn,     28,  ALLEGRO_KEY_ENTER)
+CB_KEY    (cbKeyLControl,   29,  ALLEGRO_KEY_LCTRL)
+
+/* ── ASDF row ── */
+CB_KEY    (cbKeyA,          30,  ALLEGRO_KEY_A)
+CB_KEY    (cbKeyS,          31,  ALLEGRO_KEY_S)
+CB_KEY    (cbKeyD,          32,  ALLEGRO_KEY_D)
+CB_KEY    (cbKeyF,          33,  ALLEGRO_KEY_F)
+CB_KEY    (cbKeyG,          34,  ALLEGRO_KEY_G)
+CB_KEY    (cbKeyH,          35,  ALLEGRO_KEY_H)
+CB_KEY    (cbKeyJ,          36,  ALLEGRO_KEY_J)
+CB_KEY    (cbKeyK,          37,  ALLEGRO_KEY_K)
+CB_KEY    (cbKeyL,          38,  ALLEGRO_KEY_L)
+CB_KEY_RAW(                 39,  ALLEGRO_KEY_TILDE)
+CB_KEY_RAW(                 40,  ALLEGRO_KEY_QUOTE)
+CB_KEY_RAW(                 41,  ALLEGRO_KEY_BACKSLASH)
+CB_KEY    (cbKeyLShift,     42,  ALLEGRO_KEY_LSHIFT)
+CB_KEY_RAW(                 43,  ALLEGRO_KEY_SLASH)
+
+/* ── ZXCV row ── */
+CB_KEY    (cbKeyZ,          44,  ALLEGRO_KEY_Z)
+CB_KEY    (cbKeyX,          45,  ALLEGRO_KEY_X)
+CB_KEY    (cbKeyC,          46,  ALLEGRO_KEY_C)
+CB_KEY    (cbKeyV,          47,  ALLEGRO_KEY_V)
+CB_KEY    (cbKeyB,          48,  ALLEGRO_KEY_B)
+CB_KEY    (cbKeyN,          49,  ALLEGRO_KEY_N)
+CB_KEY    (cbKeyM,          50,  ALLEGRO_KEY_M)
+CB_KEY_RAW(                 51,  ALLEGRO_KEY_COMMA)
+CB_KEY_RAW(                 52,  ALLEGRO_KEY_FULLSTOP)
+CB_KEY_RAW(                 53,  ALLEGRO_KEY_MINUS)
+CB_KEY    (cbKeyRShift,     54,  ALLEGRO_KEY_RSHIFT)
+CB_KEY_RAW(                 55,  ALLEGRO_KEY_PAD_ASTERISK)
+CB_KEY    (cbKeyLAlt,       56,  ALLEGRO_KEY_ALT)
+CB_KEY    (cbKeySpace,      57,  ALLEGRO_KEY_SPACE)
+CB_KEY    (cbKeyCapsLock,   58,  ALLEGRO_KEY_CAPSLOCK)
+
+/* ── Function keys ── */
+CB_KEY    (cbKeyF1,         59,  ALLEGRO_KEY_F1)
+CB_KEY    (cbKeyF2,         60,  ALLEGRO_KEY_F2)
+CB_KEY    (cbKeyF3,         61,  ALLEGRO_KEY_F3)
+CB_KEY    (cbKeyF4,         62,  ALLEGRO_KEY_F4)
+CB_KEY    (cbKeyF5,         63,  ALLEGRO_KEY_F5)
+CB_KEY    (cbKeyF6,         64,  ALLEGRO_KEY_F6)
+CB_KEY    (cbKeyF7,         65,  ALLEGRO_KEY_F7)
+CB_KEY    (cbKeyF8,         66,  ALLEGRO_KEY_F8)
+CB_KEY    (cbKeyF9,         67,  ALLEGRO_KEY_F9)
+CB_KEY    (cbKeyF10,        68,  ALLEGRO_KEY_F10)
+
+/* ── Locks (69/197 corrected to DirectInput/real CB) ── */
+CB_KEY    (cbKeyNumlock,    69,  ALLEGRO_KEY_NUMLOCK)
+CB_KEY    (cbKeyScroll,     70,  ALLEGRO_KEY_SCROLLLOCK)
+
+/* ── Numpad ── */
+CB_KEY    (cbKeyNum7,       71,  ALLEGRO_KEY_PAD_7)
+CB_KEY    (cbKeyNum8,       72,  ALLEGRO_KEY_PAD_8)
+CB_KEY    (cbKeyNum9,       73,  ALLEGRO_KEY_PAD_9)
+CB_KEY_RAW(                 74,  ALLEGRO_KEY_PAD_MINUS)
+CB_KEY    (cbKeyNum4,       75,  ALLEGRO_KEY_PAD_4)
+CB_KEY    (cbKeyNum5,       76,  ALLEGRO_KEY_PAD_5)
+CB_KEY    (cbKeyNum6,       77,  ALLEGRO_KEY_PAD_6)
+CB_KEY_RAW(                 78,  ALLEGRO_KEY_PAD_PLUS)
+CB_KEY    (cbKeyNum1,       79,  ALLEGRO_KEY_PAD_1)
+CB_KEY    (cbKeyNum2,       80,  ALLEGRO_KEY_PAD_2)
+CB_KEY    (cbKeyNum3,       81,  ALLEGRO_KEY_PAD_3)
+CB_KEY    (cbKeyNum0,       82,  ALLEGRO_KEY_PAD_0)
+CB_KEY_RAW(                 83,  ALLEGRO_KEY_PAD_DELETE)
+CB_KEY_RAW(                 86,  ALLEGRO_KEY_BACKSLASH2)
+CB_KEY    (cbKeyF11,        87,  ALLEGRO_KEY_F11)
+CB_KEY    (cbKeyF12,        88,  ALLEGRO_KEY_F12)
+
+/* ── Extended block ── */
+CB_KEY    (cbKeyEnter,      156, ALLEGRO_KEY_PAD_ENTER)
+CB_KEY    (cbKeyRControl,   157, ALLEGRO_KEY_RCTRL)
+CB_KEY_RAW(                 181, ALLEGRO_KEY_PAD_SLASH)
+CB_KEY    (cbKeyPrint,      183, ALLEGRO_KEY_PRINTSCREEN)
+CB_KEY    (cbKeyRAlt,       184, ALLEGRO_KEY_ALTGR)
+CB_KEY    (cbKeyPause,      197, ALLEGRO_KEY_PAUSE)
+CB_KEY    (cbKeyHome,       199, ALLEGRO_KEY_HOME)
+CB_KEY    (cbKeyUp,         200, ALLEGRO_KEY_UP)
+CB_KEY    (cbKeyPgUp,       201, ALLEGRO_KEY_PGUP)
+CB_KEY    (cbKeyLeft,       203, ALLEGRO_KEY_LEFT)
+CB_KEY    (cbKeyRight,      205, ALLEGRO_KEY_RIGHT)
+CB_KEY    (cbKeyEnd,        207, ALLEGRO_KEY_END)
+CB_KEY    (cbKeyDown,       208, ALLEGRO_KEY_DOWN)
+CB_KEY    (cbKeyPgDown,     209, ALLEGRO_KEY_PGDN)
+CB_KEY    (cbKeyInsert,     210, ALLEGRO_KEY_INSERT)
+CB_KEY    (cbKeyDel,        211, ALLEGRO_KEY_DELETE)
+CB_KEY    (cbKeyLWin,       219, ALLEGRO_KEY_LWIN)
+CB_KEY    (cbKeyRWin,       220, ALLEGRO_KEY_RWIN)
+CB_KEY    (cbKeyApps,       221, ALLEGRO_KEY_MENU)

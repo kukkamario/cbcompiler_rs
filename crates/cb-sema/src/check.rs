@@ -126,14 +126,25 @@ impl<'a> Checker<'a> {
         let decl_span = decl.span;
         if let Err(prev_span) = self.symbols.declare(scope, name, decl) {
             let name_str = self.interner.resolve(name);
-            self.diagnostics.push(
-                Diagnostic::error(
+            if prev_span.file == FileId::SYNTHETIC {
+                // The clashing name was seeded by the runtime catalog (a
+                // reserved function/type/constant). There is no user source to
+                // point at, so render only the offending declaration site.
+                self.diagnostics.push(Diagnostic::error(
                     error_code,
-                    format!("duplicate declaration of `{name_str}`"),
+                    format!("`{name_str}` is a reserved runtime name"),
                     Label::new(decl_span),
-                )
-                .with_secondary(Label::with_message(prev_span, "previously declared here")),
-            );
+                ));
+            } else {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        error_code,
+                        format!("duplicate declaration of `{name_str}`"),
+                        Label::new(decl_span),
+                    )
+                    .with_secondary(Label::with_message(prev_span, "previously declared here")),
+                );
+            }
         }
     }
 
@@ -237,6 +248,34 @@ impl<'a> Checker<'a> {
             // If declare fails, a user-defined function (from pass 1) already
             // took this name — that's fine, user functions shadow runtime functions.
             let _ = self.symbols.declare(top, sym, decl);
+        }
+
+        // Register runtime-defined constants (FD-019). These fold at compile
+        // time like a user `Const` (lower.rs inlines DeclKind::Constant) and,
+        // being in the hoist list, are visible inside functions too. Unlike
+        // runtime functions, a name collision with a user declaration is an
+        // ERROR (the name is reserved): pass 1 already ran, so a clashing user
+        // `Const`/`Dim` is sitting in the top scope — `declare` returns its
+        // span and we report E0303 pointing at the user's declaration.
+        for c in &catalog.constants {
+            let sym = self.interner.intern(&c.name.to_lowercase());
+            let (ty, value) = match c.value {
+                cb_ir::RuntimeConstValue::Int(v) => (Type::Int, ConstValue::Int(v)),
+                cb_ir::RuntimeConstValue::Float(v) => (Type::Float, ConstValue::Float(v)),
+            };
+            let decl = Declaration {
+                kind: DeclKind::Constant { value },
+                ty,
+                span,
+                is_global: false,
+            };
+            if let Err(prev_span) = self.symbols.declare(top, sym, decl) {
+                self.diagnostics.push(Diagnostic::error(
+                    E_DUPLICATE_DECL,
+                    format!("`{}` is a reserved runtime constant", c.name),
+                    Label::with_message(prev_span, "cannot redeclare a runtime-defined constant"),
+                ));
+            }
         }
     }
 
@@ -1823,6 +1862,7 @@ mod tests {
         crate::RuntimeCatalog {
             types: Vec::new(),
             functions: Vec::new(),
+            constants: Vec::new(),
         }
     }
 
@@ -2414,6 +2454,23 @@ mod tests {
         crate::RuntimeCatalog {
             types: Vec::new(),
             functions,
+            constants: Vec::new(),
+        }
+    }
+
+    fn catalog_with_consts(constants: Vec<crate::RuntimeConstDesc>) -> crate::RuntimeCatalog {
+        crate::RuntimeCatalog {
+            types: Vec::new(),
+            functions: Vec::new(),
+            constants,
+        }
+    }
+
+    fn const_int(name: &str, v: i64) -> crate::RuntimeConstDesc {
+        crate::RuntimeConstDesc {
+            name: name.to_string(),
+            ty: cb_ir::types::IrType::Int,
+            value: crate::RuntimeConstValue::Int(v),
         }
     }
 
@@ -2439,6 +2496,46 @@ mod tests {
         ]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── runtime constants (FD-019) ──────────────────────────────────────
+
+    #[test]
+    fn runtime_constant_folds_in_expr() {
+        // A runtime-seeded constant is visible and usable like a user `Const`.
+        let catalog = catalog_with_consts(vec![const_int("On", 1), const_int("cbKeyEsc", 1)]);
+        let result =
+            analyze_with_catalog("Dim x As Integer\nx = On\nx = cbKeyEsc\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn runtime_constant_visible_inside_function() {
+        let catalog = catalog_with_consts(vec![const_int("On", 1)]);
+        let result = analyze_with_catalog(
+            "Function f()\nDim y As Integer\ny = On\nEndFunction\n",
+            &catalog,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn user_const_colliding_with_runtime_is_e0303() {
+        // A user declaration that reuses a reserved runtime-constant name is a
+        // duplicate-declaration error (FD-019 Q2 = error). Hoisted form.
+        let catalog = catalog_with_consts(vec![const_int("On", 1)]);
+        let result = analyze_with_catalog("Const On = 5\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0303"]);
+    }
+
+    #[test]
+    fn user_dim_colliding_with_runtime_const_is_e0303() {
+        // The non-hoisted (`Dim`) path: caught in pass 2 by try_declare against
+        // the runtime constant's synthetic span. Must still be E0303 (and must
+        // not produce a diagnostic that references the synthetic FileId).
+        let catalog = catalog_with_consts(vec![const_int("PI", 3)]);
+        let result = analyze_with_catalog("Dim pi As Float = 3.14\n", &catalog);
+        assert_eq!(error_codes(&result), vec!["E0303"]);
     }
 
     #[test]

@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 
 use cb_ir::types::IrType;
-use cb_ir::{FuncDesc, FuncParamDesc, RuntimeCatalog, RuntimeTypeDesc};
+use cb_ir::{
+    FuncDesc, FuncParamDesc, RuntimeCatalog, RuntimeConstDesc, RuntimeConstValue, RuntimeTypeDesc,
+};
 
 // ── C ABI mirror types ─────────────────────────────────────────────────
 
@@ -39,6 +41,17 @@ pub struct CbFuncDesc {
     pub flags: u32,
 }
 
+/// A runtime-defined global constant (FD-019, catalog v6). Mirrors C
+/// `CbConstDesc`. The C side stores the value in a `union { int64_t i; double f; }`;
+/// we mirror it as raw bits (`value_bits`) and decode per `tag`, which keeps
+/// this module free of Rust union field access.
+#[repr(C)]
+pub struct CbConstDesc {
+    pub name: *const std::ffi::c_char,
+    pub tag: u32,
+    pub value_bits: u64,
+}
+
 #[repr(C)]
 pub struct CbCatalog {
     pub version: u32,
@@ -46,6 +59,8 @@ pub struct CbCatalog {
     pub types: *const CbTypeDesc,
     pub func_count: u32,
     pub funcs: *const CbFuncDesc,
+    pub const_count: u32,
+    pub consts: *const CbConstDesc,
     /// Backend-only API for the primitive String type. Always non-null
     /// in catalog v4+. See `CbStringApi` below.
     pub strings: *const CbStringApi,
@@ -97,7 +112,7 @@ pub struct CbRuntimeHooks {
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-pub const CB_CATALOG_VERSION: u32 = 5;
+pub const CB_CATALOG_VERSION: u32 = 6;
 const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
@@ -284,9 +299,44 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
         });
     }
 
+    // Read constant declarations (catalog v6+).
+    let mut constants = Vec::new();
+    if catalog.const_count > 0 {
+        if catalog.consts.is_null() {
+            return Err("null consts pointer with non-zero const_count".to_string());
+        }
+        let consts_slice =
+            unsafe { std::slice::from_raw_parts(catalog.consts, catalog.const_count as usize) };
+        for (i, cd) in consts_slice.iter().enumerate() {
+            if cd.name.is_null() {
+                return Err(format!("null constant name at index {i}"));
+            }
+            let name = unsafe { CStr::from_ptr(cd.name) }
+                .to_str()
+                .map_err(|e| format!("invalid UTF-8 in constant name at index {i}: {e}"))?
+                .to_string();
+            // The C union holds either an int64 or a double; decode by tag.
+            // Only Int and Float are supported (see CbConstDesc / FD-019).
+            let (ty, value) = match cd.tag {
+                CB_TYPE_INT => (IrType::Int, RuntimeConstValue::Int(cd.value_bits as i64)),
+                CB_TYPE_FLOAT => (
+                    IrType::Float,
+                    RuntimeConstValue::Float(f64::from_bits(cd.value_bits)),
+                ),
+                other => {
+                    return Err(format!(
+                        "constant '{name}' has unsupported type tag {other} (only Int/Float)"
+                    ));
+                }
+            };
+            constants.push(RuntimeConstDesc { name, ty, value });
+        }
+    }
+
     Ok(RuntimeCatalog {
         types: custom_types,
         functions,
+        constants,
     })
 }
 
@@ -410,6 +460,29 @@ mod tests {
         assert_eq!(use_h.name, "usetesthandle");
         assert_eq!(use_h.params[0].ty, IrType::RuntimeType("TestHandle".to_string()));
         assert_eq!(use_h.return_ty, IrType::Int);
+
+        // Constants (FD-019): On/Off/PI plus the cbKey* scancode family.
+        let consts_by_name: std::collections::HashMap<&str, &RuntimeConstDesc> =
+            catalog.constants.iter().map(|c| (c.name.as_str(), c)).collect();
+
+        let on = consts_by_name["On"];
+        assert_eq!(on.ty, IrType::Int);
+        assert_eq!(on.value, RuntimeConstValue::Int(1));
+        assert_eq!(consts_by_name["Off"].value, RuntimeConstValue::Int(0));
+
+        let pi = consts_by_name["PI"];
+        assert_eq!(pi.ty, IrType::Float);
+        match &pi.value {
+            RuntimeConstValue::Float(v) => assert!((v - std::f64::consts::PI).abs() < 1e-9),
+            other => panic!("PI should be Float, got {other:?}"),
+        }
+
+        // A representative key constant, and the 69/197 Pause/NumLock fix
+        // (scancode values match real CoolBasic / DirectInput).
+        assert_eq!(consts_by_name["cbKeyEsc"].value, RuntimeConstValue::Int(1));
+        assert_eq!(consts_by_name["cbKeyA"].value, RuntimeConstValue::Int(30));
+        assert_eq!(consts_by_name["cbKeyNumlock"].value, RuntimeConstValue::Int(69));
+        assert_eq!(consts_by_name["cbKeyPause"].value, RuntimeConstValue::Int(197));
     }
 
     #[test]

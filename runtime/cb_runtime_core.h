@@ -21,7 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define CB_CATALOG_VERSION 5
+#define CB_CATALOG_VERSION 6
 
 typedef uint32_t CbTypeTag;
 #define CB_TYPE_VOID    0
@@ -102,12 +102,28 @@ typedef struct {
     uint32_t           flags;
 } CbFuncDesc;
 
+/* A global constant predeclared by the runtime and seeded into the compiler's
+   global scope (FD-019). The compiler folds these like a user `Const`, so they
+   never reach the backend at runtime. `tag` is restricted to CB_TYPE_INT and
+   CB_TYPE_FLOAT for now; the union grows (and other tags become legal) behind a
+   future CB_CATALOG_VERSION bump. */
+typedef struct {
+    const char* name;
+    CbTypeTag   tag;            /* CB_TYPE_INT or CB_TYPE_FLOAT only for now */
+    union {
+        int64_t i;
+        double  f;
+    } v;
+} CbConstDesc;
+
 typedef struct {
     uint32_t            version;
     uint32_t            type_count;
     const CbTypeDesc*   types;
     uint32_t            func_count;
     const CbFuncDesc*   funcs;
+    uint32_t            const_count;
+    const CbConstDesc*  consts;
     /* Backend-only API for the String primitive. Not callable from CB
        source; see CbStringApi above for rationale. Always non-null in v4+. */
     const CbStringApi*  strings;

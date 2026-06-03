@@ -11,6 +11,7 @@ fn empty_catalog() -> cb_sema::RuntimeCatalog {
     cb_sema::RuntimeCatalog {
         types: Vec::new(),
         functions: Vec::new(),
+        constants: Vec::new(),
     }
 }
 
@@ -154,6 +155,7 @@ fn runtime_function_call() {
             }],
             return_ty: cb_ir::types::IrType::Void,
         }],
+        constants: Vec::new(),
     };
     let ir = lower_with_catalog("print(\"hello world\")\n", &catalog);
     insta::assert_snapshot!(ir);
@@ -192,6 +194,7 @@ fn bare_overloaded_command_lowers_to_call() {
                 return_ty: cb_ir::types::IrType::Void,
             },
         ],
+        constants: Vec::new(),
     };
     let ir = lower_with_catalog("DrawScreen\n", &catalog);
     assert!(
