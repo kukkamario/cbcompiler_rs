@@ -1,6 +1,7 @@
 # FD-027: Runtime-Command Name Collisions Produce an Unrenderable Diagnostic
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-04
 **Priority:** Medium
 **Effort:** Low-Medium
 **Impact:** A user program that declares a name colliding with a runtime command (e.g. `Dim box As Int`, where `Box` is the rectangle-draw command) produces *no usable error* — the compiler prints an internal renderer failure (`Span references unknown FileId(4294967295)`) and swallows the real diagnostic. Fixing this restores a clear message for a common, easy-to-hit mistake and hardens the renderer against any synthetic-span label.
