@@ -1,0 +1,19 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: m (TypeRef(mob))
+    local1: h (Int)
+
+  bb0:
+    r0 = new_type mob
+    store_local local0, r0
+    r1 = const_int 5
+    store_place local0.hp, r1
+    r2 = load_local local0
+    r3 = get_field r2, hp (Int)
+    store_local local1, r3
+    return
+}

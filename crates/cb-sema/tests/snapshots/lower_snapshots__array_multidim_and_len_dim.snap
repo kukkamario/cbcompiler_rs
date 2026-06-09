@@ -1,0 +1,24 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: b (Array<Float, 2>)
+    local1: n (Int)
+
+  bb0:
+    r0 = const_int 4
+    r1 = const_int 8
+    r2 = new_array Float, r0, r1
+    store_local local0, r2
+    r3 = const_float 1.5
+    r4 = const_int 1
+    r5 = const_int 2
+    store_place local0[r4, r5], r3
+    r6 = load_local local0
+    r7 = const_int 1
+    r8 = len r6, r7
+    store_local local1, r8
+    return
+}

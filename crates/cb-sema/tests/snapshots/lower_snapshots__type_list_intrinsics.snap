@@ -1,0 +1,28 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: a (TypeRef(mob))
+    local1: b (TypeRef(mob))
+    local2: n (TypeRef(mob))
+    local3: l (TypeRef(mob))
+
+  bb0:
+    r0 = new_type mob
+    store_local local0, r0
+    r1 = new_type mob
+    store_local local1, r1
+    r2 = first mob
+    store_local local2, r2
+    r3 = load_local local2
+    r4 = next r3
+    store_local local2, r4
+    r5 = load_local local2
+    r6 = previous r5
+    store_local local2, r6
+    r7 = last mob
+    store_local local3, r7
+    return
+}

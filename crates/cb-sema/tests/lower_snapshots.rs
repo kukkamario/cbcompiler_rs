@@ -262,3 +262,196 @@ fn bare_overloaded_command_lowers_to_call() {
         "bare overloaded command did not lower to a call:\n{ir}"
     );
 }
+
+// FD-030: loops, Break and Continue. Continue's target differs per loop kind
+// (Forever → body, Repeat-While/While → condition, For → step block), so each
+// kind gets its own snapshot.
+
+#[test]
+fn repeat_forever_break_continue() {
+    let ir = lower_src(
+        "Dim i As Int\nRepeat\n  i = i + 1\n  If i = 3 Then Continue\n  If i = 5 Then Break\nForever\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn repeat_while_break_continue() {
+    let ir = lower_src(
+        "Dim i As Int\nRepeat\n  i = i + 1\n  If i = 3 Then Continue\n  If i = 9 Then Break\nWhile i < 10\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn while_break_continue() {
+    let ir = lower_src(
+        "Dim i As Int\nWhile i < 10\n  i = i + 1\n  If i = 3 Then Continue\n  If i = 5 Then Break\nWend\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn for_loop_break_continue() {
+    let ir = lower_src(
+        "Dim i As Int\nFor i = 1 To 10\n  If i = 3 Then Continue\n  If i = 5 Then Break\nNext\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// `Break 2` must jump to the *outer* loop's exit block, not the inner one's.
+#[test]
+fn break_count_exits_nested_loops() {
+    let ir = lower_src(
+        "Dim i As Int\nDim j As Int\nFor i = 0 To 9\n  For j = 0 To 9\n    If j = 5 Then Break 2\n  Next j\nNext i\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: For Each desugaring — index+Len walk for arrays, First/Next walk for
+// Type linked lists.
+
+#[test]
+fn for_each_array() {
+    let ir = lower_src(
+        "Dim scores As Float[] = New Float[3]\nDim total As Float\nFor v = Each scores\n  total = total + v\nNext v\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn for_each_type() {
+    let ir = lower_src(
+        "Type Mob\n  Field hp As Int\nEndType\nDim count As Int\nFor n = Each Mob\n  count = count + n.hp\nNext n\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: arrays — allocation, element store/load, Len with a dimension
+// argument, and Redim in both local and global form.
+
+#[test]
+fn array_new_index_store_load() {
+    let ir = lower_src("Dim a As Integer[]\na = New Integer[10]\na[3] = 42\nDim x As Int = a[3]\n");
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn array_multidim_and_len_dim() {
+    let ir = lower_src(
+        "Dim b As Float[,]\nb = New Float[4, 8]\nb[1, 2] = 1.5\nDim n As Int\nn = Len(b, 1)\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn redim_local_and_global() {
+    let ir = lower_src(
+        "Global garr As Float[]\nDim larr As Int[]\nRedim larr As Int[5]\nRedim garr As Float[8]\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: value structs — the FD-019 StorePlace projection paths.
+
+#[test]
+fn struct_field_write_read() {
+    let ir = lower_src(
+        "Struct Vec2\n  Field x As Float\n  Field y As Float\nEndStruct\n\
+         Dim p As Vec2\np.x = 1.5\nDim s As Float = p.x + p.y\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn struct_nested_field_write() {
+    let ir = lower_src(
+        "Struct Inner\n  Field v As Int\nEndStruct\n\
+         Struct Outer\n  Field inner As Inner\n  Field w As Int\nEndStruct\n\
+         Dim o As Outer\no.inner.v = 5\nDim r As Int = o.inner.v\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// Whole-struct assignment is a value copy (load + store), never aliasing.
+#[test]
+fn struct_copy_assignment() {
+    let ir = lower_src(
+        "Struct Vec2\n  Field x As Int\nEndStruct\n\
+         Dim p As Vec2\np.x = 1\nDim q As Vec2 = p\nq.x = 99\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// Mixed [Index, Field] projection chain — `arr[1].x = 42` must be a single
+// store_place addressing the owning local (FD-019 regression surface).
+#[test]
+fn array_of_structs_element_field() {
+    let ir = lower_src(
+        "Struct P\n  Field x As Int\nEndStruct\n\
+         Dim arr As P[] = New P[3]\narr[1].x = 42\nDim r As Int = arr[1].x\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: Type (heap) instances — New, field access, list intrinsics, Delete.
+
+#[test]
+fn type_new_and_field_assign() {
+    let ir = lower_src(
+        "Type Mob\n  Field hp As Int\nEndType\n\
+         Dim m As Mob = New Mob\nm.hp = 5\nDim h As Int = m.hp\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn type_list_intrinsics() {
+    let ir = lower_src(
+        "Type Mob\n  Field hp As Int\nEndType\n\
+         Dim a As Mob = New Mob\nDim b As Mob = New Mob\n\
+         Dim n As Mob = First(Mob)\nn = Next(n)\nn = Previous(n)\nDim l As Mob = Last(Mob)\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// All three Delete lowerings: lvalue on a local (rewind+mark), lvalue on a
+// global, and rvalue (no rewind) on a call result.
+#[test]
+fn type_delete_lvalue_rvalue_global() {
+    let ir = lower_src(
+        "Type Mob\n  Field hp As Int\nEndType\n\
+         Global gm As Mob\ngm = New Mob\nDim n As Mob = New Mob\n\
+         Delete n\nDelete gm\nDelete First(Mob)\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: string comparisons lower to the str_* ops and Len(String) to
+// str_len, not their numeric/array counterparts.
+#[test]
+fn string_compare_and_strlen() {
+    let ir = lower_src(
+        "Dim a As String = \"abc\"\nDim b As String = \"abd\"\nDim x As Int\n\
+         If a < b Then x = 1\nIf a = b Then x = 2\nIf a <> b Then x = 3\nIf a >= b Then x = 4\n\
+         Dim n As Int = Len(a)\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// Mirror of short_circuit_and: rhs must only be evaluated on the else edge.
+#[test]
+fn short_circuit_or() {
+    let ir = lower_src("Dim a As Int\nDim b As Int\nIf a Or b Then\n  a = 1\nEndIf\n");
+    insta::assert_snapshot!(ir);
+}
+
+// FD-030: Continue inside Select is explicit fall-through (§6.2) — the arm
+// body jumps straight into the *next* arm's body, skipping its test.
+#[test]
+fn select_continue_fallthrough() {
+    let ir = lower_src(
+        "Dim x As Int\nx = 30\nSelect x\n  Case 30\n    x = 1\n    Continue\n  Case 40\n    x = 2\n  Default\n    x = 0\nEnd Select\n",
+    );
+    insta::assert_snapshot!(ir);
+}
