@@ -1,0 +1,57 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: a (String)
+    local1: b (String)
+    local2: x (Int)
+    local3: n (Int)
+
+  bb0:
+    r0 = const_string "abc"
+    store_local local0, r0
+    r1 = const_string "abd"
+    store_local local1, r1
+    r2 = load_local local0
+    r3 = load_local local1
+    r4 = str_lt r2, r3
+    branch_if r4, bb2, bb1
+  bb1:
+    r6 = load_local local0
+    r7 = load_local local1
+    r8 = str_eq r6, r7
+    branch_if r8, bb4, bb3
+  bb2:
+    r5 = const_int 1
+    store_local local2, r5
+    goto bb1
+  bb3:
+    r10 = load_local local0
+    r11 = load_local local1
+    r12 = str_not_eq r10, r11
+    branch_if r12, bb6, bb5
+  bb4:
+    r9 = const_int 2
+    store_local local2, r9
+    goto bb3
+  bb5:
+    r14 = load_local local0
+    r15 = load_local local1
+    r16 = str_gt_eq r14, r15
+    branch_if r16, bb8, bb7
+  bb6:
+    r13 = const_int 3
+    store_local local2, r13
+    goto bb5
+  bb7:
+    r18 = load_local local0
+    r19 = strlen r18
+    store_local local3, r19
+    return
+  bb8:
+    r17 = const_int 4
+    store_local local2, r17
+    goto bb7
+}

@@ -1,0 +1,18 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+globals:
+  global0: garr (Array<Float, 1>)
+
+fn @main() -> Void {
+  locals:
+    local0: larr (Array<Int, 1>)
+
+  bb0:
+    r0 = const_int 5
+    redim local0, Int, r0
+    r1 = const_int 8
+    redim global0, Float, r1
+    return
+}

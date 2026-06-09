@@ -1,0 +1,22 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+globals:
+  global0: gm (TypeRef(mob))
+
+fn @main() -> Void {
+  locals:
+    local0: n (TypeRef(mob))
+
+  bb0:
+    r0 = new_type mob
+    store_global global0, r0
+    r1 = new_type mob
+    store_local local0, r1
+    delete_lvalue local0
+    delete_lvalue global0
+    r2 = first mob
+    delete_rvalue r2
+    return
+}

@@ -1,0 +1,33 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: count (Int)
+    local1: n (TypeRef(mob))
+
+  bb0:
+    r0 = first mob
+    store_local local1, r0
+    goto bb1
+  bb1:
+    r1 = load_local local1
+    r2 = const_null
+    r3 = not_eq r1, r2
+    branch_if r3, bb2, bb4
+  bb2:
+    r4 = load_local local0
+    r5 = load_local local1
+    r6 = get_field r5, hp (Int)
+    r7 = add r4, r6
+    store_local local0, r7
+    goto bb3
+  bb3:
+    r8 = load_local local1
+    r9 = next r8
+    store_local local1, r9
+    goto bb1
+  bb4:
+    return
+}

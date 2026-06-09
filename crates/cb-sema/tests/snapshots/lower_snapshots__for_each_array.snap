@@ -1,0 +1,46 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: scores (Array<Float, 1>)
+    local1: total (Float)
+    local2: v (Float)
+    local3: @foreach_idx_0 (Int)
+    local4: @foreach_len_1 (Int)
+
+  bb0:
+    r0 = const_int 3
+    r1 = new_array Float, r0
+    store_local local0, r1
+    r2 = load_local local0
+    r3 = len r2
+    store_local local4, r3
+    r4 = const_int 0
+    store_local local3, r4
+    goto bb1
+  bb1:
+    r5 = load_local local3
+    r6 = load_local local4
+    r7 = lt r5, r6
+    branch_if r7, bb2, bb4
+  bb2:
+    r8 = load_local local3
+    r9 = load_local local0
+    r10 = get_element r9, r8
+    store_local local2, r10
+    r11 = load_local local1
+    r12 = load_local local2
+    r13 = add r11, r12
+    store_local local1, r13
+    goto bb3
+  bb3:
+    r14 = load_local local3
+    r15 = const_int 1
+    r16 = add r14, r15
+    store_local local3, r16
+    goto bb1
+  bb4:
+    return
+}

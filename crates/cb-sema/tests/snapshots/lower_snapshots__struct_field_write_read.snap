@@ -1,0 +1,20 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: p (StructVal(vec2))
+    local1: s (Float)
+
+  bb0:
+    r0 = const_float 1.5
+    store_place local0.x, r0
+    r1 = load_local local0
+    r2 = get_field r1, x (Float)
+    r3 = load_local local0
+    r4 = get_field r3, y (Float)
+    r5 = add r2, r4
+    store_local local1, r5
+    return
+}
