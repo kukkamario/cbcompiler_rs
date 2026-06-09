@@ -17,6 +17,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 | [FD-031](FD-031_DIAGNOSTIC_ASSERTION_SWEEP.md) | Diagnostic Assertion Sweep | Open | Medium | Medium |
 | [FD-032](FD-032_INTERPRETER_HARDENING_TESTS.md) | Interpreter Hardening Tests | Open | Medium | Medium-High |
 | [FD-033](FD-033_CATALOG_MOCK_FOR_SDK_FREE_TESTS.md) | Catalog Mock for SDK-Free Testing | Open | Medium-High | High |
+| [FD-034](FD-034_SEMA_LOWERING_CORRECTNESS_FD030_FINDINGS.md) | Sema/Lowering Correctness — FD-030 Findings | Open | Medium | Medium-High |
 
 ## Completed
 
