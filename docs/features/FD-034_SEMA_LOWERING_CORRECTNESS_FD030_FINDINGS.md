@@ -1,6 +1,6 @@
 # FD-034: Sema/Lowering Correctness — FD-030 Findings
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium-High
 **Effort:** Medium (1-4 hours)
 **Impact:** Fixes three correctness defects in `cb-sema` surfaced by the FD-030 snapshot review: a type-table inconsistency for arrays of structs, a silently dropped `Delete` form, and a For-Each-over-multi-dim-array path that traps at runtime.
@@ -44,6 +44,54 @@ All in `cb-sema` (item 3 may optionally touch `cb-ir`/interp depending on the ch
 - Item 2: `Delete n.link` produces either IR or a diagnostic — grep the printed IR / diags in a test; never silence.
 - Item 3: a `For v = Each b` over `New Float[2, 3]` either iterates all 6 elements (interp test, SDK machine or post-FD-033) or fails sema with a clear error.
 - `cargo llvm-cov -p cb-sema` not regressed; clippy `-D warnings` green.
+
+## Implementation results (2026-06-15)
+
+All three findings fixed. Decisions taken: item 2 → **rvalue delete** (user
+choice, matches §3.3's `Delete n.something` worked example); item 3 → **full
+row-major flat iteration** (the spec mandates it at §6.3, so the "emit a sema
+error" interim option was rejected).
+
+1. **Recursive `TypeRef` refinement.** Extracted the decl-kind refinement in
+   `check.rs::resolve_type_expr` into a new `refine_type` helper that walks the
+   resolved `Type` structurally — `Array` element and `FnPtr` params/return —
+   refining every embedded `TypeRef` to `StructVal`/`RuntimeType`. `Dim arr As
+   P[]` now resolves to `Array<StructVal(p), 1>`, consistent with `New P[3]`;
+   the `array_of_structs_element_field` snapshot flipped accordingly, and For
+   Each over a struct array now types the loop variable `StructVal(p)` (new
+   `for_each_struct_array` snapshot). Helper takes `&self` (the symbol-table
+   `lookup` is `&self`), so the recursion borrow-checks cleanly.
+
+2. **`Delete <field/index>` → rvalue delete.** `check.rs::check_delete` now
+   classifies only `Expr::Ident` as `DeleteClass::Lvalue`; Field/Index operands
+   are `Rvalue`, so the lowerer evaluates the place and emits `delete_rvalue`
+   over the loaded reference (node freed, no rewind, aliases dangle — exactly
+   like `Delete First(T)`). The silent drop is gone. New `lower_snapshots`
+   case `delete_field_and_index_are_rvalue` pins the IR; interp tests
+   `delete_field_frees_node`/`delete_array_element_frees_node` confirm the node
+   is actually unlinked at runtime (totals 1 and 2; would be 3 if dropped).
+   Fixed the self-contradicting §3.3 line in `cb_syntax.md` (it had called
+   field/element operands "lvalues").
+
+3. **For Each over rank ≥ 2 — flat row-major walk.** Added two IR instructions
+   in `cb-ir`: `ArrayTotalLen { array }` (product of all dimension lengths) and
+   `GetElementFlat { array, index }` (single flat index into the row-major
+   backing store, any rank). `lower_for_each_array` now emits these instead of
+   `Len{dim:None}` + single-index `GetElement`, unifying every rank onto one
+   desugar (for rank 1 they reduce to the old behavior — `for_each_array`
+   snapshot updated). Wired through `print.rs`, `verify.rs`, and the interpreter
+   (`interp.rs` reads `arr.total_len()` / `arr.data[flat]`; both trap
+   `IndexOutOfBounds`/`NullDeref` appropriately). The LLVM backend is a stub
+   with no `InstKind` match, so it needed no change. New snapshot
+   `for_each_multidim_array`; interp test `for_each_multidim_array_row_major`
+   over `New Int[2,3]` prints `1..6` in row-major order (previously trapped on
+   the first iteration).
+
+**Verification (Windows + Allegro SDK).** `cargo test --workspace` 624 passed /
+0 failed (cb-sema 124+44, cb-backend-interp 50); `cargo clippy --workspace
+--all-targets -D warnings` clean; `cargo llvm-cov -p cb-sema` lower.rs 80.56%
+(unchanged), crate total 84.74% (not regressed). Every new/changed snapshot
+hand-reviewed before acceptance.
 
 ## Related
 

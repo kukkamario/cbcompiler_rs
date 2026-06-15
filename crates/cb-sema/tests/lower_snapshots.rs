@@ -455,3 +455,46 @@ fn select_continue_fallthrough() {
     );
     insta::assert_snapshot!(ir);
 }
+
+// FD-034: an array of value structs must carry `StructVal(p)` elements
+// consistently (the declared array type is refined recursively, not just at the
+// top level), so For Each over it types the loop variable as the struct value
+// — not a heap `TypeRef`. The element is read via get_element_flat and its
+// field accessed by value.
+#[test]
+fn for_each_struct_array() {
+    let ir = lower_src(
+        "Struct P\n  Field x As Int\nEndStruct\n\
+         Dim arr As P[] = New P[3]\nDim total As Int\n\
+         For e = Each arr\n  total = total + e.x\nNext e\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-034: For Each over a rank ≥ 2 array walks every element in row-major order
+// (§6.3), not just dimension 0 — the bound is `array_total_len` and elements are
+// read with a single flat `get_element_flat` index. Previously this emitted an
+// axis-0 `len` plus a single-index `get_element`, which trapped at runtime.
+#[test]
+fn for_each_multidim_array() {
+    let ir = lower_src(
+        "Dim grid As Int[,] = New Int[2, 3]\nDim sum As Int\n\
+         For v = Each grid\n  sum = sum + v\nNext v\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+// FD-034: `Delete <field>` and `Delete <index>` are rvalue deletes (§3.3): the
+// node is freed with no slot rewind, exactly like `Delete First(T)`. They must
+// emit `delete_rvalue` over the loaded reference — previously they were
+// classified lvalue and the lowerer dropped them silently (no IR at all).
+#[test]
+fn delete_field_and_index_are_rvalue() {
+    let ir = lower_src(
+        "Type Node\n  Field link As Node\nEndType\n\
+         Dim a As Node = New Node\na.link = New Node\n\
+         Dim arr As Node[] = New Node[3]\narr[0] = New Node\n\
+         Delete a.link\nDelete arr[0]\n",
+    );
+    insta::assert_snapshot!(ir);
+}

@@ -1,0 +1,30 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 499
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: a (TypeRef(node))
+    local1: arr (Array<TypeRef(node), 1>)
+
+  bb0:
+    r0 = new_type node
+    store_local local0, r0
+    r1 = new_type node
+    store_place local0.link, r1
+    r2 = const_int 3
+    r3 = new_array TypeRef(node), r2
+    store_local local1, r3
+    r4 = new_type node
+    r5 = const_int 0
+    store_place local1[r5], r4
+    r6 = load_local local0
+    r7 = get_field r6, link (TypeRef(node))
+    delete_rvalue r7
+    r8 = load_local local1
+    r9 = const_int 0
+    r10 = get_element r8, r9
+    delete_rvalue r10
+    return
+}

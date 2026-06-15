@@ -70,6 +70,20 @@ pub enum InstKind {
     // ── Array ───────────────────────────────────────────────────────
     Redim { local: LocalId, elem_type: IrType, dims: Vec<Reg> },
     RedimGlobal { global: GlobalId, elem_type: IrType, dims: Vec<Reg> },
+
+    /// Total number of elements in an array across all dimensions (the product
+    /// of every dimension length). Distinct from [`InstKind::Len`], which
+    /// yields a single axis length: the `For Each` desugar uses this to walk an
+    /// array of any rank in row-major order (cb_syntax.md §6.3).
+    ArrayTotalLen { array: Reg },
+
+    /// Element access by a single flat (row-major) index into an array of any
+    /// rank, bypassing per-dimension index decoding. Paired with
+    /// [`InstKind::ArrayTotalLen`] in the `For Each` desugar; because the
+    /// backing store is row-major, visiting flat positions `0..total` yields
+    /// elements last-index-fastest, matching §6.3. Unlike [`InstKind::GetElement`]
+    /// (which requires one index per dimension), exactly one index is given.
+    GetElementFlat { array: Reg, index: Reg },
 }
 
 /// The owning storage a [`InstKind::StorePlace`] path is rooted at. Every

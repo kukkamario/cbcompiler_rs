@@ -107,19 +107,43 @@ impl<'a> Checker<'a> {
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
         let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
-        // The base resolver returns `TypeRef` for every user-defined name; it
-        // cannot tell apart a heap `Type`, a runtime type, and a value
-        // `Struct`. Refine it here using the declaration kind.
-        if let Type::TypeRef { name } = &ty
-            && let Some(decl) = self.symbols.lookup(self.current_scope, *name)
-        {
-            match decl.kind {
-                DeclKind::RuntimeTypeDef => return Type::RuntimeType { name: *name },
-                DeclKind::StructDef { .. } => return Type::StructVal { name: *name },
-                _ => {}
+        self.refine_type(ty)
+    }
+
+    /// Refine every `TypeRef` produced by the base resolver into its true kind
+    /// (`RuntimeType`, `StructVal`, or a genuine heap `TypeRef`) using the
+    /// declaration table, recursing into composite types.
+    ///
+    /// The base resolver returns `TypeRef` for every user-defined name because
+    /// it cannot tell apart a heap `Type`, a runtime type, and a value
+    /// `Struct`. Walking `Array` elements and `FnPtr` parameter/return
+    /// positions keeps embedded names consistent: without this, `Dim arr As P[]`
+    /// would resolve to `Array { elem: TypeRef(p) }` while `New P[3]` produces
+    /// `Array { elem: StructVal(p) }`, so checker decisions (field access,
+    /// copy-vs-reference, For-Each element typing) ran on the wrong kind for
+    /// arrays of structs (FD-034).
+    fn refine_type(&self, ty: Type) -> Type {
+        match ty {
+            Type::TypeRef { name } => {
+                if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
+                    match decl.kind {
+                        DeclKind::RuntimeTypeDef => return Type::RuntimeType { name },
+                        DeclKind::StructDef { .. } => return Type::StructVal { name },
+                        _ => {}
+                    }
+                }
+                Type::TypeRef { name }
             }
+            Type::Array { elem, rank } => Type::Array {
+                elem: Box::new(self.refine_type(*elem)),
+                rank,
+            },
+            Type::FnPtr { params, ret } => Type::FnPtr {
+                params: params.into_iter().map(|p| self.refine_type(p)).collect(),
+                ret: ret.map(|r| Box::new(self.refine_type(*r))),
+            },
+            other => other,
         }
-        ty
     }
 
     fn try_declare(
@@ -1924,11 +1948,16 @@ impl<'a> Checker<'a> {
                 Label::new(self.arena.span_of(operand)),
             ));
         }
-        // Classify lvalue vs rvalue.
+        // Classify lvalue vs rvalue. Only a plain variable is an lvalue delete:
+        // it has a slot to rewind to `prev` and mark deleted (cb_syntax.md
+        // §3.3). A field or array-element operand (`Delete n.link`,
+        // `Delete arr[0]`) is an rvalue delete — the node is freed with no
+        // rewind and any alias dangles, exactly as for `Delete First(T)` (§3.3
+        // worked example). Previously these were classified lvalue but the
+        // lowerer only emitted IR for `Ident`, so the statement silently
+        // vanished (FD-034).
         let class = match &self.arena[operand] {
-            Node::Expr(Expr::Ident { .. })
-            | Node::Expr(Expr::Field { .. })
-            | Node::Expr(Expr::Index { .. }) => crate::DeleteClass::Lvalue,
+            Node::Expr(Expr::Ident { .. }) => crate::DeleteClass::Lvalue,
             _ => crate::DeleteClass::Rvalue,
         };
         self.delete_classes.insert(stmt_id, class);

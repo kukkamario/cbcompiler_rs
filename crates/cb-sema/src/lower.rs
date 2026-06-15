@@ -1904,9 +1904,11 @@ impl<'a> Lowerer<'a> {
         // Allocate unique temps (safe for nested ForEach loops).
         let idx_local = self.alloc_temp("@foreach_idx", IrType::Int);
 
-        // Init: idx = 0, compute length
+        // Init: idx = 0, compute total element count. For Each walks the whole
+        // array in row-major order regardless of rank (cb_syntax.md §6.3), so
+        // the bound is the product of all dimensions, not axis-0's length.
         let arr = self.lower_expr(source);
-        let len = self.emit(InstKind::Len { array: arr, dim: None }, span);
+        let len = self.emit(InstKind::ArrayTotalLen { array: arr }, span);
         let len_local = self.alloc_temp("@foreach_len", IrType::Int);
         self.emit_void(InstKind::StoreLocal { local: len_local, value: len }, span);
 
@@ -1932,14 +1934,15 @@ impl<'a> Lowerer<'a> {
             else_block: exit_block,
         }, span);
 
-        // Body: var = arr[idx]
+        // Body: var = arr[flat idx]. A single flat index into the row-major
+        // backing store visits elements last-index-fastest for any rank.
         self.switch_to(body_block);
         let idx_for_load = self.emit(InstKind::LoadLocal { local: idx_local }, span);
         let arr_reload = self.lower_expr(source);
         let elem = self.emit(
-            InstKind::GetElement {
+            InstKind::GetElementFlat {
                 array: arr_reload,
-                indices: vec![idx_for_load],
+                index: idx_for_load,
             },
             span,
         );
