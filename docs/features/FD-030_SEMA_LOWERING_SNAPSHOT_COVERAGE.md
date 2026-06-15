@@ -49,9 +49,18 @@ and both For-Each desugars match the spec.
 
 Coverage (cargo llvm-cov, lines): `lower.rs` **53.8% → 80.6%**, `check.rs`
 82.4% → 86.2%, crate total 84.8%. `cargo test -p cb-sema` (165 tests) and
-clippy `-D warnings` on host crates green. Interp cross-check of `Break 2` /
-struct snapshots still pending on a machine with the Allegro SDK (blocked here;
-see FD-033).
+clippy `-D warnings` on host crates green.
+
+**Verification (2026-06-15, Windows + Allegro SDK):** re-ran on a machine with
+the SDK available. `cargo test -p cb-sema` (41 `lower_snapshots` tests) green
+with no snapshot drift; `cargo llvm-cov -p cb-sema --summary-only` confirms
+`lower.rs` 80.56% lines (crate total 84.81%); clippy `-D warnings` clean. Interp
+cross-check completed: `cargo test -p cb-backend-interp` (47 tests) green,
+including `value_struct_copy_semantics`, `value_struct_nested_field_write`,
+`type_for_each`, and `type_delete_and_continue_iteration` — confirming the
+struct/type lowering snapshots agree with interpreter behavior. (Nested `Break n`
+has a correct lowering snapshot but no dedicated interpreter test yet — candidate
+for FD-032.)
 
 ### Bugs surfaced (not fixed here — candidate follow-up FDs)
 
