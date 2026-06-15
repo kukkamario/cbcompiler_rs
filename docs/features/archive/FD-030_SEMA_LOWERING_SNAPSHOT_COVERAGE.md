@@ -1,6 +1,7 @@
 # FD-030: Sema Lowering Snapshot Coverage
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-15
 **Priority:** High
 **Effort:** Medium (1-4 hours)
 **Impact:** Pins the IR shape for every major language construct, so backend disagreements (interp vs. future LLVM) can be triaged at the lowering layer instead of bisected end-to-end.
