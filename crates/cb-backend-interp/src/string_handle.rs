@@ -87,7 +87,10 @@ impl CbStringHandle {
 impl Clone for CbStringHandle {
     fn clone(&self) -> Self {
         unsafe { (self.api.retain)(self.ptr) };
-        Self { ptr: self.ptr, api: self.api }
+        Self {
+            ptr: self.ptr,
+            api: self.api,
+        }
     }
 }
 
@@ -125,7 +128,10 @@ mod tests {
 
         // Sentinel refcount is negative and never changes.
         let rc = unsafe { cb_rt_string_test_refcount(h.as_ptr()) };
-        assert!(rc < 0, "empty handle should wrap the static sentinel, got refcount {rc}");
+        assert!(
+            rc < 0,
+            "empty handle should wrap the static sentinel, got refcount {rc}"
+        );
         drop(h);
         // After drop, sentinel refcount unchanged (release was a no-op).
         assert_eq!(unsafe { cb_rt_string_test_refcount(api.empty) }, rc);

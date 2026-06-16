@@ -171,7 +171,10 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
         format!("-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={}", out_dir.display()),
     ];
     if vcpkg_toolchain.exists() {
-        cmake_args.push(format!("-DCMAKE_TOOLCHAIN_FILE={}", vcpkg_toolchain.display()));
+        cmake_args.push(format!(
+            "-DCMAKE_TOOLCHAIN_FILE={}",
+            vcpkg_toolchain.display()
+        ));
         cmake_args.push(format!("-DVCPKG_MANIFEST_DIR={}", runtime_src.display()));
         // x64-windows-static-md: static Allegro + transitive deps, dynamic CRT
         // (matches Rust's default /MD CRT linkage on MSVC). Produces a

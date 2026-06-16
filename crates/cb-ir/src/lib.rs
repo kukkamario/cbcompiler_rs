@@ -39,7 +39,9 @@ pub struct FuncDecl {
 /// Whether a function is user-defined (has an IR body) or runtime-provided.
 #[derive(Clone, Debug)]
 pub enum FuncKind {
-    UserDefined { body_index: usize },
+    UserDefined {
+        body_index: usize,
+    },
     Runtime {
         symbol: String,
         /// Statically-linked address of the runtime function. The interpreter

@@ -188,11 +188,7 @@ impl<'a> Lowerer<'a> {
 
     fn alloc_local(&mut self, name: Symbol, ty: IrType, is_param: bool) -> LocalId {
         let id = LocalId(self.locals.len() as u32);
-        self.locals.push(Local {
-            name,
-            ty,
-            is_param,
-        });
+        self.locals.push(Local { name, ty, is_param });
         self.local_map.insert(name, id);
         id
     }
@@ -346,7 +342,10 @@ impl<'a> Lowerer<'a> {
             if matches!(decl.kind, DeclKind::Variable) && decl.is_global {
                 let ir_ty = self.sema_type_to_ir(&decl.ty);
                 let gid = GlobalId(self.globals.len() as u32);
-                self.globals.push(Global { name: sym, ty: ir_ty });
+                self.globals.push(Global {
+                    name: sym,
+                    ty: ir_ty,
+                });
                 self.global_map.insert(sym, gid);
             }
         }
@@ -437,19 +436,17 @@ impl<'a> Lowerer<'a> {
         for (body_index, &id) in func_stmts.iter().enumerate() {
             if let Node::Stmt(Stmt::Function { name_span, .. }) = &self.arena[id] {
                 let name = self.intern_ident(*name_span, None);
-                let (param_types, ret) =
-                    if let Some(decl) = self.symbols.lookup(top_scope, name)
-                        && let DeclKind::Function {
-                            params, return_ty, ..
-                        } = &decl.kind
-                    {
-                        let pt: Vec<_> =
-                            params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
-                        let rt = Box::new(self.sema_type_to_ir(return_ty));
-                        (pt, rt)
-                    } else {
-                        (Vec::new(), Box::new(IrType::Void))
-                    };
+                let (param_types, ret) = if let Some(decl) = self.symbols.lookup(top_scope, name)
+                    && let DeclKind::Function {
+                        params, return_ty, ..
+                    } = &decl.kind
+                {
+                    let pt: Vec<_> = params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
+                    let rt = Box::new(self.sema_type_to_ir(return_ty));
+                    (pt, rt)
+                } else {
+                    (Vec::new(), Box::new(IrType::Void))
+                };
 
                 let func_id = FuncId(self.func_table.len() as u32);
                 self.func_table.push(FuncDecl {
@@ -561,7 +558,10 @@ impl<'a> Lowerer<'a> {
             if let Some(fn_scope) = scope {
                 self.current_scope = *fn_scope;
             }
-            let pt: Vec<_> = param_infos.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
+            let pt: Vec<_> = param_infos
+                .iter()
+                .map(|p| self.sema_type_to_ir(&p.ty))
+                .collect();
             let rt = self.sema_type_to_ir(return_ty);
             (pt, rt, param_infos.clone())
         } else {
@@ -739,9 +739,7 @@ impl<'a> Lowerer<'a> {
             }
             Node::Expr(Expr::FloatLit(v)) => self.emit(InstKind::ConstFloat(v.to_f64()), span),
             Node::Expr(Expr::BoolLit(v)) => self.emit(InstKind::ConstBool(v), span),
-            Node::Expr(Expr::StrLit { value, .. }) => {
-                self.emit(InstKind::ConstString(value), span)
-            }
+            Node::Expr(Expr::StrLit { value, .. }) => self.emit(InstKind::ConstString(value), span),
             Node::Expr(Expr::NullLit) => self.emit(InstKind::ConstNull, span),
 
             Node::Expr(Expr::Ident { name_span, sigil }) => {
@@ -764,7 +762,13 @@ impl<'a> Lowerer<'a> {
                     UnOp::Not => IrUnOp::Not,
                     UnOp::BinNot => IrUnOp::BinNot,
                 };
-                self.emit(InstKind::UnOp { op: ir_op, operand: val }, span)
+                self.emit(
+                    InstKind::UnOp {
+                        op: ir_op,
+                        operand: val,
+                    },
+                    span,
+                )
             }
 
             Node::Expr(Expr::Call { callee, args }) => self.lower_call(id, callee, &args, span),
@@ -772,7 +776,13 @@ impl<'a> Lowerer<'a> {
             Node::Expr(Expr::Index { array, indices }) => {
                 let arr = self.lower_expr(array);
                 let idxs: Vec<_> = indices.iter().map(|&i| self.lower_expr(i)).collect();
-                self.emit(InstKind::GetElement { array: arr, indices: idxs }, span)
+                self.emit(
+                    InstKind::GetElement {
+                        array: arr,
+                        indices: idxs,
+                    },
+                    span,
+                )
             }
 
             Node::Expr(Expr::Field { target, name_span }) => {
@@ -880,9 +890,7 @@ impl<'a> Lowerer<'a> {
                 }
                 ConstValue::Float(v) => self.emit(InstKind::ConstFloat(v), span),
                 ConstValue::Bool(v) => self.emit(InstKind::ConstBool(v), span),
-                ConstValue::String(ref v) => {
-                    self.emit(InstKind::ConstString(v.clone()), span)
-                }
+                ConstValue::String(ref v) => self.emit(InstKind::ConstString(v.clone()), span),
             };
         }
 
@@ -899,8 +907,14 @@ impl<'a> Lowerer<'a> {
         let rhs_reg = self.lower_expr(rhs);
 
         // Check if this is a string operation by looking at operand types.
-        let is_string = self.types.get(lhs).is_some_and(|t| matches!(t, Type::String))
-            || self.types.get(rhs).is_some_and(|t| matches!(t, Type::String));
+        let is_string = self
+            .types
+            .get(lhs)
+            .is_some_and(|t| matches!(t, Type::String))
+            || self
+                .types
+                .get(rhs)
+                .is_some_and(|t| matches!(t, Type::String));
 
         let ir_op = if is_string {
             match op {
@@ -967,30 +981,48 @@ impl<'a> Lowerer<'a> {
         match op {
             BinOp::And => {
                 // If lhs is true, evaluate rhs; otherwise short-circuit to false.
-                self.terminate(Terminator::BranchIf {
-                    cond: lhs_reg,
-                    then_block: rhs_block,
-                    else_block: short_block,
-                }, span);
+                self.terminate(
+                    Terminator::BranchIf {
+                        cond: lhs_reg,
+                        then_block: rhs_block,
+                        else_block: short_block,
+                    },
+                    span,
+                );
 
                 // Short-circuit block: result = false
                 self.switch_to(short_block);
                 let false_reg = self.emit(InstKind::ConstBool(false), span);
-                self.emit_void(InstKind::StoreLocal { local: tmp, value: false_reg }, span);
+                self.emit_void(
+                    InstKind::StoreLocal {
+                        local: tmp,
+                        value: false_reg,
+                    },
+                    span,
+                );
                 self.terminate(Terminator::Goto(merge_block), span);
             }
             BinOp::Or => {
                 // If lhs is true, short-circuit to true; otherwise evaluate rhs.
-                self.terminate(Terminator::BranchIf {
-                    cond: lhs_reg,
-                    then_block: short_block,
-                    else_block: rhs_block,
-                }, span);
+                self.terminate(
+                    Terminator::BranchIf {
+                        cond: lhs_reg,
+                        then_block: short_block,
+                        else_block: rhs_block,
+                    },
+                    span,
+                );
 
                 // Short-circuit block: result = true
                 self.switch_to(short_block);
                 let true_reg = self.emit(InstKind::ConstBool(true), span);
-                self.emit_void(InstKind::StoreLocal { local: tmp, value: true_reg }, span);
+                self.emit_void(
+                    InstKind::StoreLocal {
+                        local: tmp,
+                        value: true_reg,
+                    },
+                    span,
+                );
                 self.terminate(Terminator::Goto(merge_block), span);
             }
             _ => unreachable!(),
@@ -999,7 +1031,13 @@ impl<'a> Lowerer<'a> {
         // RHS block: evaluate rhs and store result.
         self.switch_to(rhs_block);
         let rhs_reg = self.lower_expr(rhs);
-        self.emit_void(InstKind::StoreLocal { local: tmp, value: rhs_reg }, span);
+        self.emit_void(
+            InstKind::StoreLocal {
+                local: tmp,
+                value: rhs_reg,
+            },
+            span,
+        );
         self.terminate(Terminator::Goto(merge_block), span);
 
         // Merge block: load result.
@@ -1007,13 +1045,7 @@ impl<'a> Lowerer<'a> {
         self.emit(InstKind::LoadLocal { local: tmp }, span)
     }
 
-    fn lower_call(
-        &mut self,
-        call_id: NodeId,
-        callee: NodeId,
-        args: &[NodeId],
-        span: Span,
-    ) -> Reg {
+    fn lower_call(&mut self, call_id: NodeId, callee: NodeId, args: &[NodeId], span: Span) -> Reg {
         // Check for intrinsic calls.
         if let Node::Expr(Expr::Ident {
             name_span,
@@ -1027,7 +1059,11 @@ impl<'a> Lowerer<'a> {
                 "len" => {
                     // Len(s$) lowers to StrLen; Len(arr[, dim]) to Len. Mirror
                     // the operand-type probe used for string binops above.
-                    if self.types.get(args[0]).is_some_and(|t| matches!(t, Type::String)) {
+                    if self
+                        .types
+                        .get(args[0])
+                        .is_some_and(|t| matches!(t, Type::String))
+                    {
                         let s = self.lower_expr(args[0]);
                         return self.emit(InstKind::StrLen { s }, span);
                     }
@@ -1111,7 +1147,13 @@ impl<'a> Lowerer<'a> {
                 ResolvedCall::UserDefined { name } => self.func_id_map[name],
                 ResolvedCall::RuntimeFn { c_symbol } => self.runtime_func_map[c_symbol],
             };
-            return self.emit(InstKind::Call { callee: func_id, args: arg_regs }, span);
+            return self.emit(
+                InstKind::Call {
+                    callee: func_id,
+                    args: arg_regs,
+                },
+                span,
+            );
         }
 
         // Check if callee is an identifier referring to a known function
@@ -1128,7 +1170,13 @@ impl<'a> Lowerer<'a> {
             {
                 let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();
                 let func_id = self.func_id_map[&name];
-                return self.emit(InstKind::Call { callee: func_id, args: arg_regs }, span);
+                return self.emit(
+                    InstKind::Call {
+                        callee: func_id,
+                        args: arg_regs,
+                    },
+                    span,
+                );
             }
         }
 
@@ -1178,7 +1226,13 @@ impl<'a> Lowerer<'a> {
                         };
                         if let Some(func_id) = func_id {
                             let span = self.arena.span_of(expr);
-                            self.emit(InstKind::Call { callee: func_id, args: vec![] }, span);
+                            self.emit(
+                                InstKind::Call {
+                                    callee: func_id,
+                                    args: vec![],
+                                },
+                                span,
+                            );
                             return;
                         }
                     }
@@ -1242,8 +1296,7 @@ impl<'a> Lowerer<'a> {
                 let span = self.arena.span_of(id);
                 match self.delete_classes.get(&id) {
                     Some(DeleteClass::Lvalue) => {
-                        if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[operand]
-                        {
+                        if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[operand] {
                             let name = self.intern_ident(*name_span, *sigil);
                             match self.resolve_var(name) {
                                 Some(VarRef::Local(local)) => {
@@ -1262,9 +1315,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
-            Node::Stmt(Stmt::Redim {
-                target, dims, ..
-            }) => {
+            Node::Stmt(Stmt::Redim { target, dims, .. }) => {
                 let span = self.arena.span_of(id);
                 if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[target] {
                     let name = self.intern_ident(*name_span, *sigil);
@@ -1278,7 +1329,11 @@ impl<'a> Lowerer<'a> {
                                 IrType::Int
                             };
                             self.emit_void(
-                                InstKind::Redim { local, elem_type: elem_ir, dims: dim_regs },
+                                InstKind::Redim {
+                                    local,
+                                    elem_type: elem_ir,
+                                    dims: dim_regs,
+                                },
                                 span,
                             );
                         }
@@ -1290,7 +1345,11 @@ impl<'a> Lowerer<'a> {
                                 IrType::Int
                             };
                             self.emit_void(
-                                InstKind::RedimGlobal { global, elem_type: elem_ir, dims: dim_regs },
+                                InstKind::RedimGlobal {
+                                    global,
+                                    elem_type: elem_ir,
+                                    dims: dim_regs,
+                                },
                                 span,
                             );
                         }
@@ -1300,15 +1359,11 @@ impl<'a> Lowerer<'a> {
             }
             Node::Stmt(Stmt::Label { name_span }) => {
                 let name = self.intern_span(name_span);
-                let label_bb = self
-                    .label_blocks
-                    .get(&name)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        let bb = self.fresh_block();
-                        self.label_blocks.insert(name, bb);
-                        bb
-                    });
+                let label_bb = self.label_blocks.get(&name).copied().unwrap_or_else(|| {
+                    let bb = self.fresh_block();
+                    self.label_blocks.insert(name, bb);
+                    bb
+                });
                 if !self.current_block_is_terminated() {
                     self.terminate(Terminator::Goto(label_bb), self.arena.span_of(id));
                 }
@@ -1316,15 +1371,11 @@ impl<'a> Lowerer<'a> {
             }
             Node::Stmt(Stmt::Goto { label_span }) => {
                 let name = self.intern_span(label_span);
-                let target = self
-                    .label_blocks
-                    .get(&name)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        let bb = self.fresh_block();
-                        self.label_blocks.insert(name, bb);
-                        bb
-                    });
+                let target = self.label_blocks.get(&name).copied().unwrap_or_else(|| {
+                    let bb = self.fresh_block();
+                    self.label_blocks.insert(name, bb);
+                    bb
+                });
                 self.terminate(Terminator::Goto(target), self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Break { count }) => {
@@ -1347,10 +1398,11 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::Continue) => {
                 if let Some(ctx) = self.context_stack.iter().next_back() {
                     match ctx {
-                        ControlContext::Loop {
-                            continue_block, ..
-                        } => {
-                            self.terminate(Terminator::Goto(*continue_block), self.arena.span_of(id));
+                        ControlContext::Loop { continue_block, .. } => {
+                            self.terminate(
+                                Terminator::Goto(*continue_block),
+                                self.arena.span_of(id),
+                            );
                         }
                         ControlContext::Select { next_arm_body } => {
                             if let Some(target) = next_arm_body {
@@ -1458,7 +1510,10 @@ impl<'a> Lowerer<'a> {
                 };
                 Some((root, Vec::new()))
             }
-            Node::Expr(Expr::Field { target: obj, name_span }) => {
+            Node::Expr(Expr::Field {
+                target: obj,
+                name_span,
+            }) => {
                 let (root, mut path) = self.lower_place(obj)?;
                 path.push(Projection::Field(self.intern_span(name_span)));
                 Some((root, path))
@@ -1495,11 +1550,14 @@ impl<'a> Lowerer<'a> {
         };
 
         let cond_reg = self.lower_expr(cond);
-        self.terminate(Terminator::BranchIf {
-            cond: cond_reg,
-            then_block,
-            else_block: first_else,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cond_reg,
+                then_block,
+                else_block: first_else,
+            },
+            span,
+        );
 
         // Then block.
         self.switch_to(then_block);
@@ -1522,11 +1580,14 @@ impl<'a> Lowerer<'a> {
             };
 
             let ei_cond = self.lower_expr(ei.cond);
-            self.terminate(Terminator::BranchIf {
-                cond: ei_cond,
-                then_block: ei_then,
-                else_block: ei_else,
-            }, span);
+            self.terminate(
+                Terminator::BranchIf {
+                    cond: ei_cond,
+                    then_block: ei_then,
+                    else_block: ei_else,
+                },
+                span,
+            );
 
             self.switch_to(ei_then);
             for &s in &ei.body {
@@ -1564,11 +1625,14 @@ impl<'a> Lowerer<'a> {
         // Condition block.
         self.switch_to(cond_block);
         let cond_reg = self.lower_expr(cond);
-        self.terminate(Terminator::BranchIf {
-            cond: cond_reg,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cond_reg,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         // Body block.
         self.switch_to(body_block);
@@ -1635,11 +1699,14 @@ impl<'a> Lowerer<'a> {
         // Condition block.
         self.switch_to(cond_block);
         let cond_reg = self.lower_expr(cond);
-        self.terminate(Terminator::BranchIf {
-            cond: cond_reg,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cond_reg,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         self.switch_to(exit_block);
     }
@@ -1678,7 +1745,13 @@ impl<'a> Lowerer<'a> {
         // `check_for` coerces from/to/step to this type, so the loaded regs match.
         let var_is_float = var_ty == IrType::Float;
         let to_local = self.alloc_temp("@for_to", var_ty.clone());
-        self.emit_void(InstKind::StoreLocal { local: to_local, value: to_reg }, span);
+        self.emit_void(
+            InstKind::StoreLocal {
+                local: to_local,
+                value: to_reg,
+            },
+            span,
+        );
 
         // Cache "step" value (default 1) in a unique temp local.
         let step_reg = if let Some(step_id) = step {
@@ -1722,11 +1795,14 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::BranchIf {
-            cond: step_positive,
-            then_block: cond_up_block,
-            else_block: cond_down_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: step_positive,
+                then_block: cond_up_block,
+                else_block: cond_down_block,
+            },
+            span,
+        );
 
         // Ascending check: var <= to
         self.switch_to(cond_up_block);
@@ -1740,11 +1816,14 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::BranchIf {
-            cond: cmp_up,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cmp_up,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         // Descending check: var >= to
         self.switch_to(cond_down_block);
@@ -1758,11 +1837,14 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::BranchIf {
-            cond: cmp_down,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cmp_down,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         // Body block.
         self.switch_to(body_block);
@@ -1796,13 +1878,7 @@ impl<'a> Lowerer<'a> {
         self.switch_to(exit_block);
     }
 
-    fn lower_for_each(
-        &mut self,
-        var: NodeId,
-        source: NodeId,
-        body: &[NodeId],
-        stmt_id: NodeId,
-    ) {
+    fn lower_for_each(&mut self, var: NodeId, source: NodeId, body: &[NodeId], stmt_id: NodeId) {
         let span = self.arena.span_of(stmt_id);
         let source_ty = self.types.get(source).cloned().unwrap_or(Type::Void);
 
@@ -1859,11 +1935,14 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::BranchIf {
-            cond: not_null,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: not_null,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         // Body
         self.switch_to(body_block);
@@ -1910,10 +1989,22 @@ impl<'a> Lowerer<'a> {
         let arr = self.lower_expr(source);
         let len = self.emit(InstKind::ArrayTotalLen { array: arr }, span);
         let len_local = self.alloc_temp("@foreach_len", IrType::Int);
-        self.emit_void(InstKind::StoreLocal { local: len_local, value: len }, span);
+        self.emit_void(
+            InstKind::StoreLocal {
+                local: len_local,
+                value: len,
+            },
+            span,
+        );
 
         let zero = self.emit(InstKind::ConstInt(0), span);
-        self.emit_void(InstKind::StoreLocal { local: idx_local, value: zero }, span);
+        self.emit_void(
+            InstKind::StoreLocal {
+                local: idx_local,
+                value: zero,
+            },
+            span,
+        );
         self.terminate(Terminator::Goto(cond_block), span);
 
         // Cond: idx < len
@@ -1928,11 +2019,14 @@ impl<'a> Lowerer<'a> {
             },
             span,
         );
-        self.terminate(Terminator::BranchIf {
-            cond: in_bounds,
-            then_block: body_block,
-            else_block: exit_block,
-        }, span);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: in_bounds,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+            span,
+        );
 
         // Body: var = arr[flat idx]. A single flat index into the row-major
         // backing store visits elements last-index-fastest for any rank.
@@ -1984,12 +2078,7 @@ impl<'a> Lowerer<'a> {
         self.switch_to(exit_block);
     }
 
-    fn lower_select(
-        &mut self,
-        scrutinee: NodeId,
-        arms: &[NodeId],
-        stmt_id: NodeId,
-    ) {
+    fn lower_select(&mut self, scrutinee: NodeId, arms: &[NodeId], stmt_id: NodeId) {
         let span = self.arena.span_of(stmt_id);
         let scrut_reg = self.lower_expr(scrutinee);
 
@@ -2030,11 +2119,14 @@ impl<'a> Lowerer<'a> {
                             },
                             span,
                         );
-                        self.terminate(Terminator::BranchIf {
-                            cond: eq,
-                            then_block: arm_body_bb,
-                            else_block: next_check,
-                        }, span);
+                        self.terminate(
+                            Terminator::BranchIf {
+                                cond: eq,
+                                then_block: arm_body_bb,
+                                else_block: next_check,
+                            },
+                            span,
+                        );
                     } else {
                         // Multiple values: chain with Or-style logic.
                         let mut prev_check = current_check;
@@ -2053,19 +2145,25 @@ impl<'a> Lowerer<'a> {
                             );
                             let else_target = if vi + 1 < values.len() {
                                 let nb = self.fresh_block();
-                                self.terminate(Terminator::BranchIf {
-                                    cond: eq,
-                                    then_block: arm_body_bb,
-                                    else_block: nb,
-                                }, span);
+                                self.terminate(
+                                    Terminator::BranchIf {
+                                        cond: eq,
+                                        then_block: arm_body_bb,
+                                        else_block: nb,
+                                    },
+                                    span,
+                                );
                                 prev_check = nb;
                                 nb
                             } else {
-                                self.terminate(Terminator::BranchIf {
-                                    cond: eq,
-                                    then_block: arm_body_bb,
-                                    else_block: next_check,
-                                }, span);
+                                self.terminate(
+                                    Terminator::BranchIf {
+                                        cond: eq,
+                                        then_block: arm_body_bb,
+                                        else_block: next_check,
+                                    },
+                                    span,
+                                );
                                 next_check
                             };
                             let _ = else_target;
@@ -2074,9 +2172,8 @@ impl<'a> Lowerer<'a> {
 
                     // Arm body.
                     self.switch_to(arm_body_bb);
-                    self.context_stack.push(ControlContext::Select {
-                        next_arm_body,
-                    });
+                    self.context_stack
+                        .push(ControlContext::Select { next_arm_body });
                     for &s in &body {
                         self.lower_stmt(s);
                     }
@@ -2093,9 +2190,8 @@ impl<'a> Lowerer<'a> {
                     self.terminate(Terminator::Goto(arm_body_bb), span);
 
                     self.switch_to(arm_body_bb);
-                    self.context_stack.push(ControlContext::Select {
-                        next_arm_body,
-                    });
+                    self.context_stack
+                        .push(ControlContext::Select { next_arm_body });
                     for &s in &body {
                         self.lower_stmt(s);
                     }

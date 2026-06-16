@@ -60,10 +60,7 @@ impl Value {
             Value::Int(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),
             Value::Long(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),
             Value::Float(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),
-            Value::Bool(v) => CbStringHandle::from_bytes(
-                api,
-                if *v { b"True" } else { b"False" },
-            ),
+            Value::Bool(v) => CbStringHandle::from_bytes(api, if *v { b"True" } else { b"False" }),
             Value::Byte(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),
             Value::Short(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),
             Value::UInt(v) => CbStringHandle::from_bytes(api, v.to_string().as_bytes()),

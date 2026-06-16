@@ -49,7 +49,10 @@ enum Marshaled {
     /// source value was a coercion (e.g. `print(5)` → `Convert(Int, String)`
     /// → marshal would otherwise drop the freshly-allocated handle before
     /// `cif.call` dereferences it).
-    CbStringArg { _owner: CbStringHandle, ptr: *const c_void },
+    CbStringArg {
+        _owner: CbStringHandle,
+        ptr: *const c_void,
+    },
     Ptr(*const c_void),
 }
 
@@ -133,7 +136,10 @@ fn marshal(value: &Value, ty: &IrType, string_api: &'static CbStringApi) -> Mars
             // `CString::new` allocation).
             let handle = value.as_cb_string(string_api);
             let ptr = handle.as_ptr() as *const c_void;
-            Marshaled::CbStringArg { _owner: handle, ptr }
+            Marshaled::CbStringArg {
+                _owner: handle,
+                ptr,
+            }
         }
         IrType::RuntimeType(_) => {
             let h = match value {

@@ -47,12 +47,18 @@ impl Slab {
         if let Some(idx) = self.free_list.pop() {
             let generation = self.generations[idx as usize];
             self.entries[idx as usize] = Some(obj);
-            TypeInstanceId { index: idx, generation }
+            TypeInstanceId {
+                index: idx,
+                generation,
+            }
         } else {
             let idx = self.entries.len() as u32;
             self.entries.push(Some(obj));
             self.generations.push(0);
-            TypeInstanceId { index: idx, generation: 0 }
+            TypeInstanceId {
+                index: idx,
+                generation: 0,
+            }
         }
     }
 
@@ -132,7 +138,9 @@ impl TypeList {
     }
 
     pub fn first(&self, slab: &Slab) -> Option<TypeInstanceId> {
-        slab.get(self.sentinel).expect("first: sentinel must exist").next
+        slab.get(self.sentinel)
+            .expect("first: sentinel must exist")
+            .next
     }
 }
 

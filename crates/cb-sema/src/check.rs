@@ -246,7 +246,10 @@ impl<'a> Checker<'a> {
         // Group function entries by (lowercased) name.
         let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
         for desc in &catalog.functions {
-            groups.entry(desc.name.to_lowercase()).or_default().push(desc);
+            groups
+                .entry(desc.name.to_lowercase())
+                .or_default()
+                .push(desc);
         }
 
         for (name, descs) in &groups {
@@ -355,16 +358,33 @@ impl<'a> Checker<'a> {
     /// Skips Function bodies (they have their own scope).
     fn collect_consts_recursive(&mut self, id: NodeId, scope: ScopeId) {
         match self.arena[id].clone() {
-            Node::Stmt(Stmt::Const { name_span, sigil, ty, is_global, .. }) => {
+            Node::Stmt(Stmt::Const {
+                name_span,
+                sigil,
+                ty,
+                is_global,
+                ..
+            }) => {
                 self.pass1_const(scope, name_span, sigil, ty, is_global);
             }
-            Node::Stmt(Stmt::If { then_body, elseifs, else_body, .. }) => {
-                for &s in &then_body { self.collect_consts_recursive(s, scope); }
+            Node::Stmt(Stmt::If {
+                then_body,
+                elseifs,
+                else_body,
+                ..
+            }) => {
+                for &s in &then_body {
+                    self.collect_consts_recursive(s, scope);
+                }
                 for ei in &elseifs {
-                    for &s in &ei.body { self.collect_consts_recursive(s, scope); }
+                    for &s in &ei.body {
+                        self.collect_consts_recursive(s, scope);
+                    }
                 }
                 if let Some(eb) = &else_body {
-                    for &s in eb { self.collect_consts_recursive(s, scope); }
+                    for &s in eb {
+                        self.collect_consts_recursive(s, scope);
+                    }
                 }
             }
             Node::Stmt(Stmt::While { body, .. })
@@ -372,7 +392,9 @@ impl<'a> Checker<'a> {
             | Node::Stmt(Stmt::RepeatWhile { body, .. })
             | Node::Stmt(Stmt::For { body, .. })
             | Node::Stmt(Stmt::ForEach { body, .. }) => {
-                for &s in &body { self.collect_consts_recursive(s, scope); }
+                for &s in &body {
+                    self.collect_consts_recursive(s, scope);
+                }
             }
             Node::Stmt(Stmt::Select { arms, .. }) => {
                 for &arm_id in &arms {
@@ -380,7 +402,9 @@ impl<'a> Checker<'a> {
                     | Node::CaseArm(CaseArm::Default { body }) = &self.arena[arm_id]
                     {
                         let body = body.clone();
-                        for &s in &body { self.collect_consts_recursive(s, scope); }
+                        for &s in &body {
+                            self.collect_consts_recursive(s, scope);
+                        }
                     }
                 }
             }
@@ -410,24 +434,38 @@ impl<'a> Checker<'a> {
                     self.label_for_nesting.insert(name, for_stack.clone());
                 }
             }
-            Node::Stmt(Stmt::If { then_body, elseifs, else_body, .. }) => {
-                for &s in &then_body { self.collect_labels_recursive(s, scope, for_stack); }
+            Node::Stmt(Stmt::If {
+                then_body,
+                elseifs,
+                else_body,
+                ..
+            }) => {
+                for &s in &then_body {
+                    self.collect_labels_recursive(s, scope, for_stack);
+                }
                 for ei in &elseifs {
-                    for &s in &ei.body { self.collect_labels_recursive(s, scope, for_stack); }
+                    for &s in &ei.body {
+                        self.collect_labels_recursive(s, scope, for_stack);
+                    }
                 }
                 if let Some(eb) = &else_body {
-                    for &s in eb { self.collect_labels_recursive(s, scope, for_stack); }
+                    for &s in eb {
+                        self.collect_labels_recursive(s, scope, for_stack);
+                    }
                 }
             }
             Node::Stmt(Stmt::While { body, .. })
             | Node::Stmt(Stmt::RepeatForever { body })
             | Node::Stmt(Stmt::RepeatWhile { body, .. }) => {
-                for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+                for &s in &body {
+                    self.collect_labels_recursive(s, scope, for_stack);
+                }
             }
-            Node::Stmt(Stmt::For { body, .. })
-            | Node::Stmt(Stmt::ForEach { body, .. }) => {
+            Node::Stmt(Stmt::For { body, .. }) | Node::Stmt(Stmt::ForEach { body, .. }) => {
                 for_stack.push(id);
-                for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+                for &s in &body {
+                    self.collect_labels_recursive(s, scope, for_stack);
+                }
                 for_stack.pop();
             }
             Node::Stmt(Stmt::Select { arms, .. }) => {
@@ -436,7 +474,9 @@ impl<'a> Checker<'a> {
                     | Node::CaseArm(CaseArm::Default { body }) = &self.arena[arm_id]
                     {
                         let body = body.clone();
-                        for &s in &body { self.collect_labels_recursive(s, scope, for_stack); }
+                        for &s in &body {
+                            self.collect_labels_recursive(s, scope, for_stack);
+                        }
                     }
                 }
             }
@@ -514,8 +554,7 @@ impl<'a> Checker<'a> {
             }
         }
         let as_ret = return_ty_node.map(|tid| self.resolve_type_expr(tid));
-        let (ret_ty, sigil_as_disagree) =
-            types::resolve_return_type(return_sigil, as_ret.as_ref());
+        let (ret_ty, sigil_as_disagree) = types::resolve_return_type(return_sigil, as_ret.as_ref());
         if sigil_as_disagree {
             self.diagnostics.push(Diagnostic::error(
                 E_SIGIL_AS_DISAGREE,
@@ -709,21 +748,13 @@ impl<'a> Checker<'a> {
                 self.check_ident(name_span, sigil, false)
             }
 
-            Node::Expr(Expr::Binary { op, lhs, rhs }) => {
-                self.check_binary(op, lhs, rhs, span)
-            }
+            Node::Expr(Expr::Binary { op, lhs, rhs }) => self.check_binary(op, lhs, rhs, span),
 
-            Node::Expr(Expr::Unary { op, operand }) => {
-                self.check_unary(op, operand, span)
-            }
+            Node::Expr(Expr::Unary { op, operand }) => self.check_unary(op, operand, span),
 
-            Node::Expr(Expr::Call { callee, args }) => {
-                self.check_call(id, callee, &args, span)
-            }
+            Node::Expr(Expr::Call { callee, args }) => self.check_call(id, callee, &args, span),
 
-            Node::Expr(Expr::Index { array, indices }) => {
-                self.check_index(array, &indices, span)
-            }
+            Node::Expr(Expr::Index { array, indices }) => self.check_index(array, &indices, span),
 
             Node::Expr(Expr::Field { target, name_span }) => {
                 self.check_field(target, name_span, span)
@@ -756,10 +787,7 @@ impl<'a> Checker<'a> {
                 if sigil_ty != decl_ty && !decl_ty.is_error() {
                     self.diagnostics.push(Diagnostic::error(
                         E_SIGIL_CONFLICT,
-                        format!(
-                            "sigil `{}` conflicts with declared type",
-                            sigil_char(s),
-                        ),
+                        format!("sigil `{}` conflicts with declared type", sigil_char(s),),
                         Label::new(name_span),
                     ));
                 }
@@ -771,10 +799,7 @@ impl<'a> Checker<'a> {
             // as a read, this is an error.
             self.diagnostics.push(Diagnostic::error(
                 E_UNDECLARED_IDENT,
-                format!(
-                    "undeclared identifier `{}`",
-                    self.interner.resolve(name)
-                ),
+                format!("undeclared identifier `{}`", self.interner.resolve(name)),
                 Label::new(name_span),
             ));
             Type::Error
@@ -835,15 +860,13 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn check_call(
-        &mut self,
-        call_id: NodeId,
-        callee: NodeId,
-        args: &[NodeId],
-        span: Span,
-    ) -> Type {
+    fn check_call(&mut self, call_id: NodeId, callee: NodeId, args: &[NodeId], span: Span) -> Type {
         // Check if callee is an identifier that names an intrinsic.
-        if let Node::Expr(Expr::Ident { name_span, sigil: None }) = &self.arena[callee] {
+        if let Node::Expr(Expr::Ident {
+            name_span,
+            sigil: None,
+        }) = &self.arena[callee]
+        {
             let name = self.intern_ident(*name_span, None);
             let name_str = self.interner.resolve(name).to_owned();
 
@@ -870,7 +893,9 @@ impl<'a> Checker<'a> {
             if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
                 let decl_kind = decl.kind.clone();
                 match &decl_kind {
-                    DeclKind::Function { params, return_ty, .. } => {
+                    DeclKind::Function {
+                        params, return_ty, ..
+                    } => {
                         let min_args = params.iter().filter(|p| !p.has_default).count();
                         let max_args = params.len();
                         if arg_types.len() < min_args || arg_types.len() > max_args {
@@ -925,9 +950,7 @@ impl<'a> Checker<'a> {
                     }
                     DeclKind::OverloadSet { variants } => {
                         let variants = variants.clone();
-                        return self.resolve_overload(
-                            call_id, &variants, &arg_types, args, span,
-                        );
+                        return self.resolve_overload(call_id, &variants, &arg_types, args, span);
                     }
                     _ => {}
                 }
@@ -976,10 +999,7 @@ impl<'a> Checker<'a> {
         if candidates.is_empty() {
             self.diagnostics.push(Diagnostic::error(
                 E_NO_MATCHING_OVERLOAD,
-                format!(
-                    "no overload accepts {} argument(s)",
-                    arg_types.len()
-                ),
+                format!("no overload accepts {} argument(s)", arg_types.len()),
                 Label::new(span),
             ));
             return Type::Error;
@@ -1041,12 +1061,7 @@ impl<'a> Checker<'a> {
         winner.return_ty.clone()
     }
 
-    fn check_intrinsic_call(
-        &mut self,
-        name: &str,
-        args: &[NodeId],
-        span: Span,
-    ) -> Option<Type> {
+    fn check_intrinsic_call(&mut self, name: &str, args: &[NodeId], span: Span) -> Option<Type> {
         match name {
             INTRINSIC_LEN => {
                 if args.is_empty() || args.len() > 2 {
@@ -1149,7 +1164,10 @@ impl<'a> Checker<'a> {
         if args.len() != 1 {
             self.diagnostics.push(Diagnostic::error(
                 E_WRONG_ARG_COUNT,
-                format!("conversion intrinsic expects 1 argument, got {}", args.len()),
+                format!(
+                    "conversion intrinsic expects 1 argument, got {}",
+                    args.len()
+                ),
                 Label::new(span),
             ));
             return Some(Type::Error);
@@ -1198,16 +1216,15 @@ impl<'a> Checker<'a> {
         let field_name = self.intern_span(name_span);
 
         let fields = match &target_ty {
-            Type::TypeRef { name } | Type::StructVal { name } => {
-                self.symbols
-                    .lookup(self.current_scope, *name)
-                    .and_then(|decl| match &decl.kind {
-                        DeclKind::TypeDef { fields } | DeclKind::StructDef { fields } => {
-                            Some(fields.clone())
-                        }
-                        _ => None,
-                    })
-            }
+            Type::TypeRef { name } | Type::StructVal { name } => self
+                .symbols
+                .lookup(self.current_scope, *name)
+                .and_then(|decl| match &decl.kind {
+                    DeclKind::TypeDef { fields } | DeclKind::StructDef { fields } => {
+                        Some(fields.clone())
+                    }
+                    _ => None,
+                }),
             _ => {
                 self.diagnostics.push(Diagnostic::error(
                     E_FIELD_ON_NON_TYPE,
@@ -1226,10 +1243,7 @@ impl<'a> Checker<'a> {
             }
             self.diagnostics.push(Diagnostic::error(
                 E_NO_SUCH_FIELD,
-                format!(
-                    "no field `{}` on type",
-                    self.interner.resolve(field_name)
-                ),
+                format!("no field `{}` on type", self.interner.resolve(field_name)),
                 Label::new(name_span),
             ));
             Type::Error
@@ -1288,7 +1302,11 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Dim { names, ty, init }) => {
                 self.check_dim(&names, ty, init);
             }
-            Node::Stmt(Stmt::Global { names: _, ty: _, init: Some(init_id) }) => {
+            Node::Stmt(Stmt::Global {
+                names: _,
+                ty: _,
+                init: Some(init_id),
+            }) => {
                 self.check_expr(init_id);
             }
             Node::Stmt(Stmt::Global { .. }) => {}
@@ -1302,7 +1320,8 @@ impl<'a> Checker<'a> {
                 // Evaluate the constant expression and update the declaration.
                 if let Some(const_val) = self.eval_const_expr(value) {
                     let name = self.intern_ident(name_span, sigil);
-                    self.symbols.update_const_value(self.current_scope, name, const_val);
+                    self.symbols
+                        .update_const_value(self.current_scope, name, const_val);
                 }
             }
             Node::Stmt(Stmt::If {
@@ -1388,9 +1407,7 @@ impl<'a> Checker<'a> {
             }) => {
                 self.check_redim(target, elem_ty, &dims);
             }
-            Node::Stmt(Stmt::Label { name_span })
-                if !self.for_loop_stack.is_empty() =>
-            {
+            Node::Stmt(Stmt::Label { name_span }) if !self.for_loop_stack.is_empty() => {
                 let name = self.intern_span(name_span);
                 self.label_for_nesting
                     .insert(name, self.for_loop_stack.clone());
@@ -1463,12 +1480,14 @@ impl<'a> Checker<'a> {
         match &self.arena[node] {
             Node::Expr(Expr::IntLit(v)) => Some(*v as i128),
             Node::Expr(Expr::Paren { inner }) => self.literal_int_value(*inner),
-            Node::Expr(Expr::Unary { op: UnOp::Neg, operand }) => {
-                self.literal_int_value(*operand).map(|v| -v)
-            }
-            Node::Expr(Expr::Unary { op: UnOp::Plus, operand }) => {
-                self.literal_int_value(*operand).map(|v| v.abs())
-            }
+            Node::Expr(Expr::Unary {
+                op: UnOp::Neg,
+                operand,
+            }) => self.literal_int_value(*operand).map(|v| -v),
+            Node::Expr(Expr::Unary {
+                op: UnOp::Plus,
+                operand,
+            }) => self.literal_int_value(*operand).map(|v| v.abs()),
             _ => None,
         }
     }
@@ -1905,10 +1924,7 @@ impl<'a> Checker<'a> {
             if !matches!(decl.kind, DeclKind::Label) {
                 self.diagnostics.push(Diagnostic::error(
                     E_UNDECLARED_LABEL,
-                    format!(
-                        "`{}` is not a label",
-                        self.interner.resolve(name)
-                    ),
+                    format!("`{}` is not a label", self.interner.resolve(name)),
                     Label::new(label_span),
                 ));
             } else {
@@ -1930,10 +1946,7 @@ impl<'a> Checker<'a> {
         } else {
             self.diagnostics.push(Diagnostic::error(
                 E_UNDECLARED_LABEL,
-                format!(
-                    "undeclared label `{}`",
-                    self.interner.resolve(name)
-                ),
+                format!("undeclared label `{}`", self.interner.resolve(name)),
                 Label::new(label_span),
             ));
         }
@@ -1992,11 +2005,21 @@ fn const_as_f64(v: &ConstValue) -> Option<f64> {
 fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstValue> {
     match (op, l, r) {
         // Integer arithmetic
-        (BinOp::Add, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_add(*b))),
-        (BinOp::Sub, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_sub(*b))),
-        (BinOp::Mul, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int(a.wrapping_mul(*b))),
-        (BinOp::Div, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => Some(ConstValue::Int(a / b)),
-        (BinOp::Mod, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => Some(ConstValue::Int(a % b)),
+        (BinOp::Add, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(a.wrapping_add(*b)))
+        }
+        (BinOp::Sub, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(a.wrapping_sub(*b)))
+        }
+        (BinOp::Mul, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(a.wrapping_mul(*b)))
+        }
+        (BinOp::Div, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => {
+            Some(ConstValue::Int(a / b))
+        }
+        (BinOp::Mod, ConstValue::Int(a), ConstValue::Int(b)) if *b != 0 => {
+            Some(ConstValue::Int(a % b))
+        }
 
         // Float arithmetic
         (BinOp::Add, ConstValue::Float(a), ConstValue::Float(b)) => Some(ConstValue::Float(a + b)),
@@ -2045,7 +2068,7 @@ fn sigil_char(s: Sigil) -> char {
 #[cfg(test)]
 mod tests {
     use cb_diagnostics::FileId;
-    use cb_frontend::{parse, tokenize, BinOp, LexerOptions};
+    use cb_frontend::{BinOp, LexerOptions, parse, tokenize};
     use cb_ir::types::IrType;
 
     use super::eval_const_binary;
@@ -2187,7 +2210,9 @@ mod tests {
 
     #[test]
     fn pass1_function_with_default_params() {
-        let result = analyze_src("Function move(distance As Float, count = 1) As Float\nReturn distance\nEndFunction\n");
+        let result = analyze_src(
+            "Function move(distance As Float, count = 1) As Float\nReturn distance\nEndFunction\n",
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -2310,17 +2335,15 @@ mod tests {
 
     #[test]
     fn pass2_field_access_ok() {
-        let result = analyze_src(
-            "Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nobj.x = 42\n",
-        );
+        let result =
+            analyze_src("Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nobj.x = 42\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn pass2_field_not_found_e0308() {
-        let result = analyze_src(
-            "Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nobj.y = 42\n",
-        );
+        let result =
+            analyze_src("Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nobj.y = 42\n");
         assert!(
             error_codes(&result).contains(&"E0308"),
             "expected E0308, got {:?}",
@@ -2428,17 +2451,15 @@ mod tests {
 
     #[test]
     fn pass2_function_sees_global() {
-        let result = analyze_src(
-            "Global g As Integer\nFunction f() As Integer\nReturn g\nEndFunction\n",
-        );
+        let result =
+            analyze_src("Global g As Integer\nFunction f() As Integer\nReturn g\nEndFunction\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn pass2_function_cannot_see_toplevel_var() {
-        let result = analyze_src(
-            "Dim x As Integer\nFunction f() As Integer\nReturn x\nEndFunction\n",
-        );
+        let result =
+            analyze_src("Dim x As Integer\nFunction f() As Integer\nReturn x\nEndFunction\n");
         assert!(
             error_codes(&result).contains(&"E0300"),
             "expected E0300, got {:?}",
@@ -2456,9 +2477,8 @@ mod tests {
 
     #[test]
     fn pass2_function_sees_hoisted_const() {
-        let result = analyze_src(
-            "Const MAX = 100\nFunction f() As Integer\nReturn MAX\nEndFunction\n",
-        );
+        let result =
+            analyze_src("Const MAX = 100\nFunction f() As Integer\nReturn MAX\nEndFunction\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -2496,8 +2516,10 @@ mod tests {
         let result = analyze_src("Dim x As Float\nx = 42\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         // Check that a conversion was recorded
-        assert!(result.conversions.get(cb_frontend::NodeId(4)).is_some()
-            || result.diagnostics.is_empty()); // at minimum no errors
+        assert!(
+            result.conversions.get(cb_frontend::NodeId(4)).is_some()
+                || result.diagnostics.is_empty()
+        ); // at minimum no errors
     }
 
     #[test]
@@ -2514,7 +2536,8 @@ mod tests {
 
     #[test]
     fn conversion_null_to_typeref() {
-        let result = analyze_src("Type MyType\nField x As Integer\nEndType\nDim t As MyType\nt = Null\n");
+        let result =
+            analyze_src("Type MyType\nField x As Integer\nEndType\nDim t As MyType\nt = Null\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -2647,9 +2670,8 @@ mod tests {
 
     #[test]
     fn delete_lvalue_variable() {
-        let result = analyze_src(
-            "Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nDelete obj\n",
-        );
+        let result =
+            analyze_src("Type MyObj\nField x As Integer\nEndType\nDim obj As MyObj\nDelete obj\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         // Find the Delete statement's NodeId and check its classification.
         let has_lvalue = result
@@ -2683,9 +2705,7 @@ mod tests {
 
     #[test]
     fn goto_into_for_e0321() {
-        let result = analyze_src(
-            "Goto inner\nFor i = 0 To 10\ninner:\nNext\n",
-        );
+        let result = analyze_src("Goto inner\nFor i = 0 To 10\ninner:\nNext\n");
         assert!(
             error_codes(&result).contains(&"E0321"),
             "expected E0321, got {:?}",
@@ -2701,17 +2721,14 @@ mod tests {
 
     #[test]
     fn goto_within_for_ok() {
-        let result = analyze_src(
-            "For i = 0 To 10\nGoto skip\nskip:\nNext\n",
-        );
+        let result = analyze_src("For i = 0 To 10\nGoto skip\nskip:\nNext\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn goto_label_nested_in_if_inside_function() {
-        let result = analyze_src(
-            "Function f()\nGoto target\nIf True Then\ntarget:\nEndIf\nEndFunction\n",
-        );
+        let result =
+            analyze_src("Function f()\nGoto target\nIf True Then\ntarget:\nEndIf\nEndFunction\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -2750,24 +2767,35 @@ mod tests {
 
     extern "C" fn dummy_fn() {}
 
-    fn rt_func(name: &str, c_symbol: &str, params: &[(&str, cb_ir::types::IrType)], ret: cb_ir::types::IrType) -> crate::FuncDesc {
+    fn rt_func(
+        name: &str,
+        c_symbol: &str,
+        params: &[(&str, cb_ir::types::IrType)],
+        ret: cb_ir::types::IrType,
+    ) -> crate::FuncDesc {
         crate::FuncDesc {
             name: name.to_string(),
             c_symbol: c_symbol.to_string(),
             fn_ptr: dummy_fn,
-            params: params.iter().map(|(n, ty)| crate::FuncParamDesc {
-                name: Some(n.to_string()),
-                ty: ty.clone(),
-            }).collect(),
+            params: params
+                .iter()
+                .map(|(n, ty)| crate::FuncParamDesc {
+                    name: Some(n.to_string()),
+                    ty: ty.clone(),
+                })
+                .collect(),
             return_ty: ret,
         }
     }
 
     #[test]
     fn runtime_fn_call_ok() {
-        let catalog = catalog_of(vec![
-            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "print",
+            "cb_rt_print",
+            &[("text", IrType::String)],
+            IrType::Void,
+        )]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
@@ -2778,8 +2806,7 @@ mod tests {
     fn runtime_constant_folds_in_expr() {
         // A runtime-seeded constant is visible and usable like a user `Const`.
         let catalog = catalog_with_consts(vec![const_int("On", 1), const_int("cbKeyEsc", 1)]);
-        let result =
-            analyze_with_catalog("Dim x As Integer\nx = On\nx = cbKeyEsc\n", &catalog);
+        let result = analyze_with_catalog("Dim x As Integer\nx = On\nx = cbKeyEsc\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -2818,22 +2845,25 @@ mod tests {
     fn explicit_dim_shadows_runtime_command() {
         // `Dim box` reclaims the name from the built-in `Box` command: the
         // declaration succeeds and later uses resolve to the variable.
-        let catalog = catalog_of(vec![
-            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
-        ]);
-        let result = analyze_with_catalog(
-            "Dim box As Int\nbox = 5\n",
-            &catalog,
-        );
+        let catalog = catalog_of(vec![rt_func(
+            "Box",
+            "cb_box",
+            &[("x", IrType::Float)],
+            IrType::Void,
+        )]);
+        let result = analyze_with_catalog("Dim box As Int\nbox = 5\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn implicit_assignment_over_runtime_command_is_e0328() {
         // No prior `Dim`: an implicit declaration may not shadow a command.
-        let catalog = catalog_of(vec![
-            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "Box",
+            "cb_box",
+            &[("x", IrType::Float)],
+            IrType::Void,
+        )]);
         let result = analyze_with_catalog("box = 5\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0328"]);
     }
@@ -2843,7 +2873,12 @@ mod tests {
         // The same rule applies when the command is an overload set.
         let catalog = catalog_of(vec![
             rt_func("color", "cb_color_1", &[("c", IrType::Int)], IrType::Void),
-            rt_func("color", "cb_color_3", &[("r", IrType::Int), ("g", IrType::Int), ("b", IrType::Int)], IrType::Void),
+            rt_func(
+                "color",
+                "cb_color_3",
+                &[("r", IrType::Int), ("g", IrType::Int), ("b", IrType::Int)],
+                IrType::Void,
+            ),
         ]);
         let result = analyze_with_catalog("Dim color As Int\ncolor = 7\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2853,9 +2888,12 @@ mod tests {
     fn dim_inside_function_shadows_runtime_command() {
         // A `Dim` in a function declares into the function scope and shadows
         // the top-level command through normal lookup — no special handling.
-        let catalog = catalog_of(vec![
-            rt_func("Box", "cb_box", &[("x", IrType::Float)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "Box",
+            "cb_box",
+            &[("x", IrType::Float)],
+            IrType::Void,
+        )]);
         let result = analyze_with_catalog(
             "Function f()\nDim box As Int\nbox = 1\nEndFunction\n",
             &catalog,
@@ -2865,18 +2903,24 @@ mod tests {
 
     #[test]
     fn runtime_fn_wrong_arg_count() {
-        let catalog = catalog_of(vec![
-            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "print",
+            "cb_rt_print",
+            &[("text", IrType::String)],
+            IrType::Void,
+        )]);
         let result = analyze_with_catalog("print(\"a\", \"b\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0305"]);
     }
 
     #[test]
     fn runtime_fn_return_type() {
-        let catalog = catalog_of(vec![
-            rt_func("sin", "cb_rt_sin", &[("x", IrType::Float)], IrType::Float),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "sin",
+            "cb_rt_sin",
+            &[("x", IrType::Float)],
+            IrType::Float,
+        )]);
         let result = analyze_with_catalog("Dim x As Float\nx = sin(1.0)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
@@ -2885,7 +2929,12 @@ mod tests {
     fn overload_exact_match() {
         let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
-            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
+            rt_func(
+                "abs",
+                "cb_rt_abs_float",
+                &[("x", IrType::Float)],
+                IrType::Float,
+            ),
         ]);
         let result = analyze_with_catalog("Dim x As Int\nx = abs(42)\n", &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2893,14 +2942,19 @@ mod tests {
 
     #[test]
     fn overload_with_widening() {
-        let catalog = catalog_of(vec![
-            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "abs",
+            "cb_rt_abs_float",
+            &[("x", IrType::Float)],
+            IrType::Float,
+        )]);
         // Int -> Float is an implicit widening conversion
         let result = analyze_with_catalog("Dim x As Float\nx = abs(42)\n", &catalog);
         // Should succeed with a narrowing warning (Float return assigned to Float is fine,
         // but Int arg to Float param is a widening - no warning)
-        let errors: Vec<_> = result.diagnostics.iter()
+        let errors: Vec<_> = result
+            .diagnostics
+            .iter()
             .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "{:?}", errors);
@@ -2921,7 +2975,12 @@ mod tests {
         // Two overloads, neither accepts String
         let catalog = catalog_of(vec![
             rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
-            rt_func("abs", "cb_rt_abs_float", &[("x", IrType::Float)], IrType::Float),
+            rt_func(
+                "abs",
+                "cb_rt_abs_float",
+                &[("x", IrType::Float)],
+                IrType::Float,
+            ),
         ]);
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0324"]);
@@ -2930,18 +2989,24 @@ mod tests {
     #[test]
     fn runtime_fn_type_mismatch() {
         // Single runtime function, incompatible arg type
-        let catalog = catalog_of(vec![
-            rt_func("abs", "cb_rt_abs_int", &[("x", IrType::Int)], IrType::Int),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "abs",
+            "cb_rt_abs_int",
+            &[("x", IrType::Int)],
+            IrType::Int,
+        )]);
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0317"]);
     }
 
     #[test]
     fn user_function_shadows_runtime() {
-        let catalog = catalog_of(vec![
-            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "print",
+            "cb_rt_print",
+            &[("text", IrType::String)],
+            IrType::Void,
+        )]);
         // User defines their own print function — should shadow the runtime one
         let result = analyze_with_catalog(
             "Function print(x As Int)\nEndFunction\nprint(42)\n",
@@ -2952,9 +3017,12 @@ mod tests {
 
     #[test]
     fn runtime_fn_resolved_call_recorded() {
-        let catalog = catalog_of(vec![
-            rt_func("print", "cb_rt_print", &[("text", IrType::String)], IrType::Void),
-        ]);
+        let catalog = catalog_of(vec![rt_func(
+            "print",
+            "cb_rt_print",
+            &[("text", IrType::String)],
+            IrType::Void,
+        )]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
         assert!(!result.resolved_calls.is_empty());
         let rc = result.resolved_calls.values().next().unwrap();
@@ -2972,7 +3040,9 @@ mod tests {
             "Function add(a As Int, b As Int) As Int\nReturn a + b\nEndFunction\nDim x As Int\nx = add(1, 2)\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-        let user_calls: Vec<_> = result.resolved_calls.values()
+        let user_calls: Vec<_> = result
+            .resolved_calls
+            .values()
             .filter(|rc| matches!(rc, crate::ResolvedCall::UserDefined { .. }))
             .collect();
         assert_eq!(user_calls.len(), 1);

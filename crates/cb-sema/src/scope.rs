@@ -41,10 +41,20 @@ pub struct Declaration {
 #[derive(Clone, Debug)]
 pub enum DeclKind {
     Variable,
-    Constant { value: ConstValue },
-    Function { params: Vec<ParamInfo>, return_ty: Type, scope: Option<ScopeId> },
-    TypeDef { fields: Vec<FieldInfo> },
-    StructDef { fields: Vec<FieldInfo> },
+    Constant {
+        value: ConstValue,
+    },
+    Function {
+        params: Vec<ParamInfo>,
+        return_ty: Type,
+        scope: Option<ScopeId>,
+    },
+    TypeDef {
+        fields: Vec<FieldInfo>,
+    },
+    StructDef {
+        fields: Vec<FieldInfo>,
+    },
     Label,
     RuntimeFn {
         params: Vec<ParamInfo>,
@@ -52,7 +62,9 @@ pub enum DeclKind {
         c_symbol: String,
         fn_ptr: unsafe extern "C" fn(),
     },
-    OverloadSet { variants: Vec<OverloadVariant> },
+    OverloadSet {
+        variants: Vec<OverloadVariant>,
+    },
     RuntimeTypeDef,
 }
 
@@ -146,7 +158,10 @@ impl SymbolTable {
             .get(&name)
             .is_some_and(|d| {
                 d.span.file == FileId::SYNTHETIC
-                    && matches!(d.kind, DeclKind::RuntimeFn { .. } | DeclKind::OverloadSet { .. })
+                    && matches!(
+                        d.kind,
+                        DeclKind::RuntimeFn { .. } | DeclKind::OverloadSet { .. }
+                    )
             })
     }
 
@@ -219,19 +234,16 @@ impl SymbolTable {
     ) {
         let s = &mut self.scopes[scope.0 as usize];
         if let Some(decl) = s.symbols.get_mut(&name)
-            && let DeclKind::Function { scope: ref mut s, .. } = decl.kind
+            && let DeclKind::Function {
+                scope: ref mut s, ..
+            } = decl.kind
         {
             *s = Some(fn_scope);
         }
     }
 
     /// Update the ConstValue of an existing Constant declaration.
-    pub(crate) fn update_const_value(
-        &mut self,
-        scope: ScopeId,
-        name: Symbol,
-        value: ConstValue,
-    ) {
+    pub(crate) fn update_const_value(&mut self, scope: ScopeId, name: Symbol, value: ConstValue) {
         let s = &mut self.scopes[scope.0 as usize];
         if let Some(decl) = s.symbols.get_mut(&name)
             && let DeclKind::Constant { value: ref mut v } = decl.kind
@@ -239,5 +251,4 @@ impl SymbolTable {
             *v = value;
         }
     }
-
 }

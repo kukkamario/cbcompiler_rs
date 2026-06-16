@@ -17,7 +17,13 @@ pub fn print_program(program: &Program, interner: &Interner) -> String {
         if i > 0 {
             out.push('\n');
         }
-        print_function(&mut out, func, &program.func_table, &program.type_defs, interner);
+        print_function(
+            &mut out,
+            func,
+            &program.func_table,
+            &program.type_defs,
+            interner,
+        );
     }
     out
 }
@@ -33,7 +39,13 @@ fn print_globals(out: &mut String, globals: &[Global], interner: &Interner) {
     }
 }
 
-fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], type_defs: &[TypeDefInfo], interner: &Interner) {
+fn print_function(
+    out: &mut String,
+    func: &Function,
+    func_table: &[FuncDecl],
+    type_defs: &[TypeDefInfo],
+    interner: &Interner,
+) {
     use std::fmt::Write;
 
     let name = interner.resolve(func.name);
@@ -85,7 +97,13 @@ fn print_function(out: &mut String, func: &Function, func_table: &[FuncDecl], ty
     out.push_str("}\n");
 }
 
-fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], type_defs: &[TypeDefInfo], interner: &Interner) {
+fn print_inst_kind(
+    out: &mut String,
+    kind: &InstKind,
+    func_table: &[FuncDecl],
+    type_defs: &[TypeDefInfo],
+    interner: &Interner,
+) {
     use std::fmt::Write;
 
     match kind {
@@ -108,7 +126,8 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
             write!(out, "store_global {global}, {value}").unwrap();
         }
         InstKind::NewType { type_def } => {
-            let name = type_defs.get(type_def.0 as usize)
+            let name = type_defs
+                .get(type_def.0 as usize)
                 .map(|t| interner.resolve(t.name))
                 .unwrap_or("<unknown_type>");
             write!(out, "new_type {name}").unwrap();
@@ -163,13 +182,15 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
             write!(out, ", {value}").unwrap();
         }
         InstKind::First { type_def } => {
-            let name = type_defs.get(type_def.0 as usize)
+            let name = type_defs
+                .get(type_def.0 as usize)
                 .map(|t| interner.resolve(t.name))
                 .unwrap_or("<unknown_type>");
             write!(out, "first {name}").unwrap();
         }
         InstKind::Last { type_def } => {
-            let name = type_defs.get(type_def.0 as usize)
+            let name = type_defs
+                .get(type_def.0 as usize)
                 .map(|t| interner.resolve(t.name))
                 .unwrap_or("<unknown_type>");
             write!(out, "last {name}").unwrap();
@@ -371,7 +392,11 @@ fn format_type(ty: &IrType, interner: &Interner) -> String {
         IrType::TypeRef(sym) => format!("TypeRef({})", interner.resolve(*sym)),
         IrType::StructVal(sym) => format!("StructVal({})", interner.resolve(*sym)),
         IrType::FnPtr(sig) => {
-            let params: Vec<_> = sig.params.iter().map(|p| format_type(p, interner)).collect();
+            let params: Vec<_> = sig
+                .params
+                .iter()
+                .map(|p| format_type(p, interner))
+                .collect();
             format!(
                 "FnPtr({}) -> {}",
                 params.join(", "),

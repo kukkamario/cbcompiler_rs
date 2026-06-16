@@ -64,9 +64,7 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
 
     match (from, to) {
         // Integer widening/narrowing
-        (f, t) if f.is_integer() && t.is_integer() => {
-            Some(Conversion::NumericWiden)
-        }
+        (f, t) if f.is_integer() && t.is_integer() => Some(Conversion::NumericWiden),
 
         // Int → Float
         (f, Type::Float) if f.is_integer() => Some(Conversion::IntToFloat),
@@ -142,8 +140,14 @@ mod tests {
 
     #[test]
     fn integer_widening() {
-        assert_eq!(find_implicit_conversion(&Type::Byte, &Type::Int), Some(Conversion::NumericWiden));
-        assert_eq!(find_implicit_conversion(&Type::Short, &Type::Long), Some(Conversion::NumericWiden));
+        assert_eq!(
+            find_implicit_conversion(&Type::Byte, &Type::Int),
+            Some(Conversion::NumericWiden)
+        );
+        assert_eq!(
+            find_implicit_conversion(&Type::Short, &Type::Long),
+            Some(Conversion::NumericWiden)
+        );
     }
 
     #[test]
@@ -155,8 +159,15 @@ mod tests {
 
     #[test]
     fn int_to_float() {
-        assert_eq!(find_implicit_conversion(&Type::Int, &Type::Float), Some(Conversion::IntToFloat));
-        assert!(!is_narrowing(Conversion::IntToFloat, &Type::Int, &Type::Float));
+        assert_eq!(
+            find_implicit_conversion(&Type::Int, &Type::Float),
+            Some(Conversion::IntToFloat)
+        );
+        assert!(!is_narrowing(
+            Conversion::IntToFloat,
+            &Type::Int,
+            &Type::Float
+        ));
     }
 
     #[test]
@@ -168,31 +179,57 @@ mod tests {
 
     #[test]
     fn bool_to_numeric() {
-        assert_eq!(find_implicit_conversion(&Type::Bool, &Type::Int), Some(Conversion::BoolToNumeric));
-        assert_eq!(find_implicit_conversion(&Type::Bool, &Type::Float), Some(Conversion::BoolToNumeric));
+        assert_eq!(
+            find_implicit_conversion(&Type::Bool, &Type::Int),
+            Some(Conversion::BoolToNumeric)
+        );
+        assert_eq!(
+            find_implicit_conversion(&Type::Bool, &Type::Float),
+            Some(Conversion::BoolToNumeric)
+        );
     }
 
     #[test]
     fn numeric_to_bool() {
-        assert_eq!(find_implicit_conversion(&Type::Int, &Type::Bool), Some(Conversion::NumericToBool));
-        assert_eq!(find_implicit_conversion(&Type::Float, &Type::Bool), Some(Conversion::NumericToBool));
+        assert_eq!(
+            find_implicit_conversion(&Type::Int, &Type::Bool),
+            Some(Conversion::NumericToBool)
+        );
+        assert_eq!(
+            find_implicit_conversion(&Type::Float, &Type::Bool),
+            Some(Conversion::NumericToBool)
+        );
     }
 
     #[test]
     fn numeric_to_string() {
-        assert_eq!(find_implicit_conversion(&Type::Int, &Type::String), Some(Conversion::NumericToString));
-        assert_eq!(find_implicit_conversion(&Type::Float, &Type::String), Some(Conversion::NumericToString));
+        assert_eq!(
+            find_implicit_conversion(&Type::Int, &Type::String),
+            Some(Conversion::NumericToString)
+        );
+        assert_eq!(
+            find_implicit_conversion(&Type::Float, &Type::String),
+            Some(Conversion::NumericToString)
+        );
     }
 
     #[test]
     fn bool_to_string() {
-        assert_eq!(find_implicit_conversion(&Type::Bool, &Type::String), Some(Conversion::NumericToString));
+        assert_eq!(
+            find_implicit_conversion(&Type::Bool, &Type::String),
+            Some(Conversion::NumericToString)
+        );
     }
 
     #[test]
     fn null_to_ref() {
-        let ty = Type::TypeRef { name: cb_diagnostics::Symbol::DUMMY };
-        assert_eq!(find_implicit_conversion(&Type::Null, &ty), Some(Conversion::NullToRef));
+        let ty = Type::TypeRef {
+            name: cb_diagnostics::Symbol::DUMMY,
+        };
+        assert_eq!(
+            find_implicit_conversion(&Type::Null, &ty),
+            Some(Conversion::NullToRef)
+        );
     }
 
     #[test]
@@ -204,9 +241,15 @@ mod tests {
     fn int_range_bounds() {
         assert_eq!(int_range(&Type::Byte), Some((0, 255)));
         assert_eq!(int_range(&Type::Short), Some((0, 65535)));
-        assert_eq!(int_range(&Type::Int), Some((i32::MIN as i128, i32::MAX as i128)));
+        assert_eq!(
+            int_range(&Type::Int),
+            Some((i32::MIN as i128, i32::MAX as i128))
+        );
         assert_eq!(int_range(&Type::UInt), Some((0, u32::MAX as i128)));
-        assert_eq!(int_range(&Type::Long), Some((i64::MIN as i128, i64::MAX as i128)));
+        assert_eq!(
+            int_range(&Type::Long),
+            Some((i64::MIN as i128, i64::MAX as i128))
+        );
         assert_eq!(int_range(&Type::ULong), Some((0, u64::MAX as i128)));
         assert_eq!(int_range(&Type::Float), None);
         assert_eq!(int_range(&Type::String), None);
@@ -214,7 +257,15 @@ mod tests {
 
     #[test]
     fn widening_is_not_narrowing() {
-        assert!(!is_narrowing(Conversion::NumericWiden, &Type::Byte, &Type::Int));
-        assert!(!is_narrowing(Conversion::NumericWiden, &Type::Short, &Type::Long));
+        assert!(!is_narrowing(
+            Conversion::NumericWiden,
+            &Type::Byte,
+            &Type::Int
+        ));
+        assert!(!is_narrowing(
+            Conversion::NumericWiden,
+            &Type::Short,
+            &Type::Long
+        ));
     }
 }

@@ -83,13 +83,13 @@ pub struct CbString {
 /// empty-string sentinel.
 #[repr(C)]
 pub struct CbStringApi {
-    pub retain:       unsafe extern "C" fn(*mut CbString) -> *mut CbString,
-    pub release:      unsafe extern "C" fn(*mut CbString),
+    pub retain: unsafe extern "C" fn(*mut CbString) -> *mut CbString,
+    pub release: unsafe extern "C" fn(*mut CbString),
     pub from_literal: unsafe extern "C" fn(*const u8, usize) -> *mut CbString,
-    pub len:          unsafe extern "C" fn(*const CbString) -> usize,
-    pub data:         unsafe extern "C" fn(*const CbString) -> *const u8,
-    pub concat:       unsafe extern "C" fn(*const CbString, *const CbString) -> *mut CbString,
-    pub empty:        *const CbString,
+    pub len: unsafe extern "C" fn(*const CbString) -> usize,
+    pub data: unsafe extern "C" fn(*const CbString) -> *const u8,
+    pub concat: unsafe extern "C" fn(*const CbString, *const CbString) -> *mut CbString,
+    pub empty: *const CbString,
 }
 
 /// Host API delivered to the runtime at startup via [`runtime_init`] — the
@@ -179,7 +179,10 @@ unsafe extern "C" {
 /// surface immediately at startup rather than be silently absorbed.
 pub fn string_api() -> &'static CbStringApi {
     let catalog_ptr = unsafe { cb_runtime_get_catalog() };
-    assert!(!catalog_ptr.is_null(), "cb_runtime_get_catalog() returned null");
+    assert!(
+        !catalog_ptr.is_null(),
+        "cb_runtime_get_catalog() returned null"
+    );
     let catalog = unsafe { &*catalog_ptr };
     assert_eq!(
         catalog.version, CB_CATALOG_VERSION,
@@ -207,7 +210,8 @@ pub fn runtime_init(host: &'static CbHostApi) -> Result<&'static CbRuntimeHooks,
     let hooks = unsafe { cb_runtime_init(host) };
     if hooks.is_null() {
         return Err(
-            "cb_runtime_init declined the handshake (returned null — host ABI rejected)".to_string(),
+            "cb_runtime_init declined the handshake (returned null — host ABI rejected)"
+                .to_string(),
         );
     }
     let hooks = unsafe { &*hooks };
@@ -285,10 +289,7 @@ fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
                     td.tag
                 ));
             }
-            custom_types.push(RuntimeTypeDesc {
-                name,
-                tag: td.tag,
-            });
+            custom_types.push(RuntimeTypeDesc { name, tag: td.tag });
         }
     }
 
@@ -340,7 +341,9 @@ fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
                             unsafe { CStr::from_ptr(p.name) }
                                 .to_str()
                                 .map_err(|e| {
-                                    format!("invalid UTF-8 in param name for function '{name}': {e}")
+                                    format!(
+                                        "invalid UTF-8 in param name for function '{name}': {e}"
+                                    )
                                 })?
                                 .to_string(),
                         )
@@ -458,7 +461,11 @@ mod tests {
         // makes this a linker-checked invariant.
         for func in &catalog.functions {
             let _: unsafe extern "C" fn() = func.fn_ptr; // type-asserts non-null
-            assert!(!func.c_symbol.is_empty(), "entry '{}' has empty c_symbol", func.name);
+            assert!(
+                !func.c_symbol.is_empty(),
+                "entry '{}' has empty c_symbol",
+                func.name
+            );
         }
 
         // Look up by c_symbol so adding new runtime functions doesn't break
@@ -488,61 +495,76 @@ mod tests {
         // Graphics + input entries are present only in the full Allegro build.
         #[cfg(not(cb_no_allegro))]
         {
-        let screen = by_symbol["cb_rt_screen"];
-        assert_eq!(screen.name, "screen");
-        assert_eq!(screen.params.len(), 2);
+            let screen = by_symbol["cb_rt_screen"];
+            assert_eq!(screen.name, "screen");
+            assert_eq!(screen.params.len(), 2);
 
-        assert_eq!(by_symbol["cb_rt_drawscreen"].name, "drawscreen");
-        assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
-        assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
+            assert_eq!(by_symbol["cb_rt_drawscreen"].name, "drawscreen");
+            assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
 
-        // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
-        let make_image = by_symbol["cb_rt_make_image"];
-        assert_eq!(make_image.name, "makeimage");
-        assert_eq!(make_image.return_ty, IrType::RuntimeType("Image".to_string()));
+            // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
+            let make_image = by_symbol["cb_rt_make_image"];
+            assert_eq!(make_image.name, "makeimage");
+            assert_eq!(
+                make_image.return_ty,
+                IrType::RuntimeType("Image".to_string())
+            );
 
-        let get_pixel = by_symbol["cb_rt_get_pixel"];
-        assert_eq!(get_pixel.name, "getpixel");
-        assert_eq!(get_pixel.params[0].ty, IrType::RuntimeType("Image".to_string()));
-        assert_eq!(get_pixel.return_ty, IrType::Int);
+            let get_pixel = by_symbol["cb_rt_get_pixel"];
+            assert_eq!(get_pixel.name, "getpixel");
+            assert_eq!(
+                get_pixel.params[0].ty,
+                IrType::RuntimeType("Image".to_string())
+            );
+            assert_eq!(get_pixel.return_ty, IrType::Int);
 
-        // Input: keyboard + mouse queries (FD-013 Batch 5). All are
-        // Int->Int or ()->Int catalog entries dispatched generically.
-        let key_down = by_symbol["cb_rt_key_down"];
-        assert_eq!(key_down.name, "keydown");
-        assert_eq!(key_down.params.len(), 1);
-        assert_eq!(key_down.params[0].ty, IrType::Int);
-        assert_eq!(key_down.return_ty, IrType::Int);
+            // Input: keyboard + mouse queries (FD-013 Batch 5). All are
+            // Int->Int or ()->Int catalog entries dispatched generically.
+            let key_down = by_symbol["cb_rt_key_down"];
+            assert_eq!(key_down.name, "keydown");
+            assert_eq!(key_down.params.len(), 1);
+            assert_eq!(key_down.params[0].ty, IrType::Int);
+            assert_eq!(key_down.return_ty, IrType::Int);
 
-        let escape_key = by_symbol["cb_rt_escape_key"];
-        assert_eq!(escape_key.name, "escapekey");
-        assert_eq!(escape_key.params.len(), 0);
-        assert_eq!(escape_key.return_ty, IrType::Int);
+            let escape_key = by_symbol["cb_rt_escape_key"];
+            assert_eq!(escape_key.name, "escapekey");
+            assert_eq!(escape_key.params.len(), 0);
+            assert_eq!(escape_key.return_ty, IrType::Int);
 
-        let mouse_hit = by_symbol["cb_rt_mouse_hit"];
-        assert_eq!(mouse_hit.name, "mousehit");
-        assert_eq!(mouse_hit.params.len(), 1);
-        assert_eq!(mouse_hit.params[0].ty, IrType::Int);
-        assert_eq!(mouse_hit.return_ty, IrType::Int);
+            let mouse_hit = by_symbol["cb_rt_mouse_hit"];
+            assert_eq!(mouse_hit.name, "mousehit");
+            assert_eq!(mouse_hit.params.len(), 1);
+            assert_eq!(mouse_hit.params[0].ty, IrType::Int);
+            assert_eq!(mouse_hit.return_ty, IrType::Int);
 
-        assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
-        assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
-        assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
+            assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
+            assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];
         assert_eq!(create.name, "createtesthandle");
         assert_eq!(create.params.len(), 0);
-        assert_eq!(create.return_ty, IrType::RuntimeType("TestHandle".to_string()));
+        assert_eq!(
+            create.return_ty,
+            IrType::RuntimeType("TestHandle".to_string())
+        );
 
         let use_h = by_symbol["cb_rt_use_test_handle"];
         assert_eq!(use_h.name, "usetesthandle");
-        assert_eq!(use_h.params[0].ty, IrType::RuntimeType("TestHandle".to_string()));
+        assert_eq!(
+            use_h.params[0].ty,
+            IrType::RuntimeType("TestHandle".to_string())
+        );
         assert_eq!(use_h.return_ty, IrType::Int);
 
         // Constants (FD-029): On/Off/PI plus the cbKey* scancode family.
-        let consts_by_name: std::collections::HashMap<&str, &RuntimeConstDesc> =
-            catalog.constants.iter().map(|c| (c.name.as_str(), c)).collect();
+        let consts_by_name: std::collections::HashMap<&str, &RuntimeConstDesc> = catalog
+            .constants
+            .iter()
+            .map(|c| (c.name.as_str(), c))
+            .collect();
 
         let on = consts_by_name["On"];
         assert_eq!(on.ty, IrType::Int);
@@ -560,8 +582,14 @@ mod tests {
         // (scancode values match real CoolBasic / DirectInput).
         assert_eq!(consts_by_name["cbKeyEsc"].value, RuntimeConstValue::Int(1));
         assert_eq!(consts_by_name["cbKeyA"].value, RuntimeConstValue::Int(30));
-        assert_eq!(consts_by_name["cbKeyNumlock"].value, RuntimeConstValue::Int(69));
-        assert_eq!(consts_by_name["cbKeyPause"].value, RuntimeConstValue::Int(197));
+        assert_eq!(
+            consts_by_name["cbKeyNumlock"].value,
+            RuntimeConstValue::Int(69)
+        );
+        assert_eq!(
+            consts_by_name["cbKeyPause"].value,
+            RuntimeConstValue::Int(197)
+        );
     }
 
     #[test]
@@ -571,7 +599,10 @@ mod tests {
         // Empty sentinel: immortal (refcount < 0), zero-length, retain/release no-op.
         assert!(!api.empty.is_null());
         let empty_rc = unsafe { cb_rt_string_test_refcount(api.empty) };
-        assert!(empty_rc < 0, "empty sentinel refcount must be negative, got {empty_rc}");
+        assert!(
+            empty_rc < 0,
+            "empty sentinel refcount must be negative, got {empty_rc}"
+        );
         assert_eq!(unsafe { (api.len)(api.empty) }, 0);
 
         // retain/release on the sentinel are no-ops and don't perturb refcount.
@@ -600,8 +631,7 @@ mod tests {
         let b = unsafe { (api.from_literal)(b"bar".as_ptr(), 3) };
         let ab = unsafe { (api.concat)(a, b) };
         assert_eq!(unsafe { (api.len)(ab) }, 6);
-        let read =
-            unsafe { std::slice::from_raw_parts((api.data)(ab), (api.len)(ab)) };
+        let read = unsafe { std::slice::from_raw_parts((api.data)(ab), (api.len)(ab)) };
         assert_eq!(read, b"foobar");
         unsafe {
             (api.release)(a);
@@ -743,7 +773,10 @@ mod tests {
 
     #[test]
     fn decode_rejects_null_type_name() {
-        let types = [CbTypeDesc { name: std::ptr::null(), tag: 10 }];
+        let types = [CbTypeDesc {
+            name: std::ptr::null(),
+            tag: 10,
+        }];
         let mut c = empty_catalog();
         c.type_count = 1;
         c.types = types.as_ptr();
@@ -754,7 +787,10 @@ mod tests {
     #[test]
     fn decode_rejects_reserved_tag() {
         let name = CString::new("Bad").unwrap();
-        let types = [CbTypeDesc { name: name.as_ptr(), tag: 9 }];
+        let types = [CbTypeDesc {
+            name: name.as_ptr(),
+            tag: 9,
+        }];
         let mut c = empty_catalog();
         c.type_count = 1;
         c.types = types.as_ptr();
@@ -766,7 +802,10 @@ mod tests {
     fn decode_rejects_bad_utf8_type_name() {
         // 0xFF is not valid UTF-8; NUL-terminated so CStr reads exactly [0xFF].
         let bad: [u8; 2] = [0xFF, 0x00];
-        let types = [CbTypeDesc { name: bad.as_ptr() as *const c_char, tag: 10 }];
+        let types = [CbTypeDesc {
+            name: bad.as_ptr() as *const c_char,
+            tag: 10,
+        }];
         let mut c = empty_catalog();
         c.type_count = 1;
         c.types = types.as_ptr();
@@ -779,8 +818,14 @@ mod tests {
         let a = CString::new("Alpha").unwrap();
         let b = CString::new("Beta").unwrap();
         let types = [
-            CbTypeDesc { name: a.as_ptr(), tag: 10 },
-            CbTypeDesc { name: b.as_ptr(), tag: 10 },
+            CbTypeDesc {
+                name: a.as_ptr(),
+                tag: 10,
+            },
+            CbTypeDesc {
+                name: b.as_ptr(),
+                tag: 10,
+            },
         ];
         let mut c = empty_catalog();
         c.type_count = 2;
@@ -866,7 +911,11 @@ mod tests {
         c.funcs = funcs.as_ptr();
         let cat = decode_catalog(&c).expect("shared-symbol aliases are valid");
         assert_eq!(cat.functions.len(), 2);
-        assert!(cat.functions.iter().all(|f| f.c_symbol == "cb_rt_put_pixel_argb"));
+        assert!(
+            cat.functions
+                .iter()
+                .all(|f| f.c_symbol == "cb_rt_put_pixel_argb")
+        );
     }
 
     #[test]
@@ -874,7 +923,10 @@ mod tests {
         let name = CString::new("foo").unwrap();
         let sym = CString::new("cb_rt_foo").unwrap();
         let bad: [u8; 2] = [0xFF, 0x00];
-        let params = [CbParamDesc { name: bad.as_ptr() as *const c_char, ty: CB_TYPE_INT }];
+        let params = [CbParamDesc {
+            name: bad.as_ptr() as *const c_char,
+            ty: CB_TYPE_INT,
+        }];
         let funcs = [CbFuncDesc {
             name: name.as_ptr(),
             symbol: sym.as_ptr(),
@@ -894,7 +946,11 @@ mod tests {
     #[test]
     fn decode_rejects_unsupported_const_tag() {
         let name = CString::new("Greeting").unwrap();
-        let consts = [CbConstDesc { name: name.as_ptr(), tag: CB_TYPE_STRING, value_bits: 0 }];
+        let consts = [CbConstDesc {
+            name: name.as_ptr(),
+            tag: CB_TYPE_STRING,
+            value_bits: 0,
+        }];
         let mut c = empty_catalog();
         c.const_count = 1;
         c.consts = consts.as_ptr();
@@ -907,7 +963,11 @@ mod tests {
         let on = CString::new("On").unwrap();
         let pi = CString::new("PI").unwrap();
         let consts = [
-            CbConstDesc { name: on.as_ptr(), tag: CB_TYPE_INT, value_bits: 1 },
+            CbConstDesc {
+                name: on.as_ptr(),
+                tag: CB_TYPE_INT,
+                value_bits: 1,
+            },
             CbConstDesc {
                 name: pi.as_ptr(),
                 tag: CB_TYPE_FLOAT,
