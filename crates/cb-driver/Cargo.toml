@@ -26,6 +26,9 @@ codespan-reporting.workspace = true
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
+# Lets the program fixtures query HAS_GRAPHICS so graphics/input cases skip
+# cleanly on the SDK-free runtime build (FD-033).
+cb-runtime-sys = { path = "../cb-runtime-sys" }
 insta = { workspace = true }
 predicates = { workspace = true }
 tempfile = { workspace = true }

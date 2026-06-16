@@ -14,7 +14,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 | [FD-026](FD-026_INTERNER_SPEC_COMPLIANCE.md) | Identifier Interner Spec Compliance | Open | Low-Medium | Medium |
 | [FD-031](FD-031_DIAGNOSTIC_ASSERTION_SWEEP.md) | Diagnostic Assertion Sweep | Open | Medium | Medium |
 | [FD-032](FD-032_INTERPRETER_HARDENING_TESTS.md) | Interpreter Hardening Tests | Open | Medium | Medium-High |
-| [FD-033](FD-033_CATALOG_MOCK_FOR_SDK_FREE_TESTS.md) | Catalog Mock for SDK-Free Testing | Open | Medium-High | High |
+| [FD-033](FD-033_CATALOG_MOCK_FOR_SDK_FREE_TESTS.md) | Catalog Mock for SDK-Free Testing | Pending Verification | Medium-High | High |
 
 ## Completed
 

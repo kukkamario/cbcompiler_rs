@@ -38,6 +38,17 @@ fn run(name: &str) {
     );
 }
 
+/// Like [`run`], but skips when the linked runtime has no graphics/input — the
+/// SDK-free build (FD-033), whose language-core catalog omits the Allegro-
+/// backed functions these fixtures call (sema would reject them as unknown).
+fn run_graphics(name: &str) {
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping {name}: SDK-free runtime build has no graphics/input");
+        return;
+    }
+    run(name);
+}
+
 // Type system ------------------------------------------------------------
 
 #[test]
@@ -155,35 +166,38 @@ fn runtime_system() {
 
 #[test]
 fn runtime_image() {
-    run("runtime_image");
+    run_graphics("runtime_image");
 }
 
 #[test]
 fn runtime_gfx_fd017() {
-    run("runtime_gfx_fd017");
+    run_graphics("runtime_gfx_fd017");
 }
 
 #[test]
 fn runtime_image_fd017() {
-    run("runtime_image_fd017");
+    run_graphics("runtime_image_fd017");
 }
 
 #[test]
 fn collide_images() {
-    run("collide_images");
+    run_graphics("collide_images");
 }
 
 #[test]
 fn runtime_text_fd018() {
-    run("runtime_text_fd018");
+    run_graphics("runtime_text_fd018");
 }
 
 #[test]
 fn runtime_input() {
-    run("runtime_input");
+    run_graphics("runtime_input");
 }
 
 #[test]
 fn runtime_constants_fd029() {
-    run("runtime_constants_fd029");
+    // The cbKey* constants resolve SDK-free, but this fixture also calls
+    // KeyDown (an input function), so it needs the full runtime. Constant
+    // decoding itself is covered by the cb-runtime-sys unit tests in both modes.
+    run_graphics("runtime_constants_fd029");
 }

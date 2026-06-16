@@ -829,3 +829,33 @@ function-pointer indirection on the hot path. This relies on value-based
   immortality (retain/release no-op) is `refcount < 0`. The single
   `CB_EMPTY_STRING_INSTANCE` address is only an intra-module shortcut — never
   compare a string pointer against `cb_runtime_string_api.empty` for correctness.
+
+#### SDK-free build (FD-033)
+
+`cb-runtime-sys` builds on machines that have **only a Rust toolchain** — no
+CMake, vcpkg, or Allegro SDK — so `cargo test --workspace` runs the interpreter
+(the reference implementation) and the driver fixtures anywhere, including CI and
+cloud sessions. It does this by leaning on the FD-016 split: the Allegro-free TUs
+(`cb_string.cpp`, `cb_host.cpp`, `cb_math.cpp`, `cb_strfuncs.cpp`,
+`cb_system.cpp`) plus `catalog.cpp` compiled with **`-DCB_NO_ALLEGRO`** are built
+directly via the `cc` crate. Under that define, `catalog.cpp` guards out only the
+graphics/text/input `CB_FN` rows (and the `Image`/`Font` type entries) — the sole
+things that would otherwise force a link against the Allegro closure — leaving a
+real `cb_runtime_get_catalog` for every language-core function (`Print`, `Abs`,
+Math, the String library, System/Time) with the **same** string implementation.
+There is no second, divergent mock of the string primitives.
+
+`build.rs` picks the path automatically:
+
+| Situation | Path |
+|-----------|------|
+| `cmake` present and configures cleanly | full Allegro build (CMake), complete catalog |
+| `cmake` absent, or configure/build fails | SDK-free `cc` build (language-core catalog) |
+| `CB_RUNTIME_FORCE_SDK_FREE=1` | SDK-free `cc` build, no probing |
+| `CB_RUNTIME_REQUIRE_ALLEGRO=1` | full build, **fatal** if it fails (no fallback) |
+
+(The two env vars are mutually exclusive.) When the SDK-free path is taken,
+`build.rs` emits a `cargo:warning` so the downgrade is visible, and exposes
+`cb_runtime_sys::HAS_GRAPHICS = false`. Tests that exercise graphics/input/text
+gate on `HAS_GRAPHICS` and skip cleanly rather than failing on absent catalog
+entries.

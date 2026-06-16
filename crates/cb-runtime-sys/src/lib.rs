@@ -132,6 +132,13 @@ const _: () = {
 
 pub const CB_CATALOG_VERSION: u32 = 6;
 
+/// Whether the linked runtime includes the Allegro-backed graphics, text, and
+/// input functions. `false` in the SDK-free build (FD-033), where `build.rs`
+/// could not (or was told not to) build the full Allegro runtime and compiled
+/// only the language-core TUs. Tests and tools use this to skip graphics-
+/// dependent work cleanly instead of failing on absent catalog entries.
+pub const HAS_GRAPHICS: bool = cfg!(not(cb_no_allegro));
+
 /// Host trap-channel ABI version (FD-015/FD-024). Mirrors C `CB_HOST_ABI_VERSION`.
 /// Versions the `CbHostApi`/`CbRuntimeHooks` handshake independently of the
 /// catalog data format — see [`runtime_init`].
@@ -434,10 +441,18 @@ mod tests {
         // (tag 11, FD-013 Batch 4), and the Font handle (tag 12, FD-018).
         let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
             catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
-        assert_eq!(catalog.types.len(), 3);
         assert_eq!(types_by_name["TestHandle"].tag, 10);
-        assert_eq!(types_by_name["Image"].tag, 11);
-        assert_eq!(types_by_name["Font"].tag, 12);
+        // Image/Font (and the graphics/input functions below) exist only in the
+        // full Allegro build; the SDK-free catalog (FD-033) advertises just
+        // TestHandle and the language-core functions.
+        #[cfg(not(cb_no_allegro))]
+        {
+            assert_eq!(catalog.types.len(), 3);
+            assert_eq!(types_by_name["Image"].tag, 11);
+            assert_eq!(types_by_name["Font"].tag, 12);
+        }
+        #[cfg(cb_no_allegro)]
+        assert_eq!(catalog.types.len(), 1);
 
         // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
         // makes this a linker-checked invariant.
@@ -470,6 +485,9 @@ mod tests {
         assert_eq!(abs_float.params[0].ty, IrType::Float);
         assert_eq!(abs_float.return_ty, IrType::Float);
 
+        // Graphics + input entries are present only in the full Allegro build.
+        #[cfg(not(cb_no_allegro))]
+        {
         let screen = by_symbol["cb_rt_screen"];
         assert_eq!(screen.name, "screen");
         assert_eq!(screen.params.len(), 2);
@@ -510,6 +528,7 @@ mod tests {
         assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
         assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
         assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
+        }
 
         let create = by_symbol["cb_rt_create_test_handle"];
         assert_eq!(create.name, "createtesthandle");

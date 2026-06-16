@@ -181,8 +181,14 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 
 static constexpr CbTypeDesc catalog_types[] = {
     { "TestHandle", ::cb_catalog::CB_TYPE_TEST_HANDLE },
+#ifndef CB_NO_ALLEGRO
+    // Image/Font are graphics handles; their operations live behind the
+    // Allegro guard below, so they're absent from the SDK-free catalog
+    // (FD-033). Advertising the type with no functions to make one would
+    // be inconsistent.
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
+#endif
 };
 
 // ─── Constant catalog (FD-029) ────────────────────────────────────────
@@ -293,6 +299,12 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("countwords",       cb_rt_count_words),
     CB_FN("getword",          cb_rt_get_word),
 
+    // Graphics, text, and input (cb_gfx.cpp / cb_font.cpp / cb_input.cpp) pull
+    // in Allegro. The SDK-free build (FD-033, -DCB_NO_ALLEGRO) compiles only the
+    // Allegro-free TUs, so these entries — and only these — are guarded out.
+    // Their symbols are the sole reason catalog.cpp would otherwise force a link
+    // against the Allegro closure (CB_FN takes each function's address).
+#ifndef CB_NO_ALLEGRO
     // Graphics & images (cb_gfx.cpp). Overloads (Screen, Color, ClsColor,
     // Circle, Box, Lock, Unlock, PutPixel, MaskImage) share a CB name across
     // multiple C symbols; sema resolves by arity/type. `Image` is the opaque
@@ -401,6 +413,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("positionmouse",    cb_rt_position_mouse),
     CB_FN("showmouse",        cb_rt_show_mouse),
     CB_FN("clearmouse",       cb_rt_clear_mouse),
+#endif // CB_NO_ALLEGRO
 
     // Test handles
     CB_FN("createtesthandle", cb_rt_create_test_handle),
