@@ -75,11 +75,10 @@ helper that skips when `!HAS_GRAPHICS`.
 | `crates/cb-runtime-sys/build.rs` | MODIFY | Auto-detect + env-override path selection; `cc`-based SDK-free build of the Allegro-free TUs; emit `cb_no_allegro` cfg |
 | `crates/cb-runtime-sys/Cargo.toml` | MODIFY | Add `cc` build-dependency |
 | `crates/cb-runtime-sys/src/lib.rs` | MODIFY | `pub const HAS_GRAPHICS`; gate the catalog unit test's graphics assertions behind `#[cfg(cb_no_allegro)]` |
-| `crates/cb-driver/Cargo.toml` | MODIFY | Add `cb-runtime-sys` dev-dependency (so the test crate can read `HAS_GRAPHICS`) |
 | `crates/cb-driver/tests/programs.rs` | MODIFY | `run_graphics` helper; route the 7 graphics/input fixtures through it |
 | `docs/cb_runtime.md` | MODIFY | Document the SDK-free build, the env vars, and `HAS_GRAPHICS` |
 
-No `mock_catalog.rs` was created (option (b) builds the real catalog, so a synthetic one is unnecessary).
+No `mock_catalog.rs` was created (option (b) builds the real catalog, so a synthetic one is unnecessary). `cb-driver/Cargo.toml` needed no change either: `cb-runtime-sys` is already a normal dependency, and integration tests can read `HAS_GRAPHICS` through it — no dev-dependency required.
 
 ## Verification
 
