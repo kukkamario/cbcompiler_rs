@@ -269,6 +269,12 @@ fn print_inst_kind(out: &mut String, kind: &InstKind, func_table: &[FuncDecl], t
                 write!(out, ", {d}").unwrap();
             }
         }
+        InstKind::ArrayTotalLen { array } => {
+            write!(out, "array_total_len {array}").unwrap();
+        }
+        InstKind::GetElementFlat { array, index } => {
+            write!(out, "get_element_flat {array}, {index}").unwrap();
+        }
     }
 }
 

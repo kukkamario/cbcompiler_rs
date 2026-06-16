@@ -1,10 +1,11 @@
 ---
 source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 394
 expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: arr (Array<TypeRef(p), 1>)
+    local0: arr (Array<StructVal(p), 1>)
     local1: r (Int)
 
   bb0:

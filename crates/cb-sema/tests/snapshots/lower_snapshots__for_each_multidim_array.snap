@@ -1,0 +1,48 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 484
+expression: ir
+---
+fn @main() -> Void {
+  locals:
+    local0: grid (Array<Int, 2>)
+    local1: sum (Int)
+    local2: v (Int)
+    local3: @foreach_idx_0 (Int)
+    local4: @foreach_len_1 (Int)
+
+  bb0:
+    r0 = const_int 2
+    r1 = const_int 3
+    r2 = new_array Int, r0, r1
+    store_local local0, r2
+    r3 = load_local local0
+    r4 = array_total_len r3
+    store_local local4, r4
+    r5 = const_int 0
+    store_local local3, r5
+    goto bb1
+  bb1:
+    r6 = load_local local3
+    r7 = load_local local4
+    r8 = lt r6, r7
+    branch_if r8, bb2, bb4
+  bb2:
+    r9 = load_local local3
+    r10 = load_local local0
+    r11 = get_element_flat r10, r9
+    store_local local2, r11
+    r12 = load_local local1
+    r13 = load_local local2
+    r14 = add r12, r13
+    store_local local1, r14
+    goto bb3
+  bb3:
+    r15 = load_local local3
+    r16 = const_int 1
+    r17 = add r15, r16
+    store_local local3, r17
+    goto bb1
+  bb4:
+    return
+}

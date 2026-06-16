@@ -227,6 +227,11 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
                 check(*d);
             }
         }
+        InstKind::ArrayTotalLen { array } => check(*array),
+        InstKind::GetElementFlat { array, index } => {
+            check(*array);
+            check(*index);
+        }
         InstKind::LoadLocal { .. }
         | InstKind::LoadGlobal { .. }
         | InstKind::NewType { .. }

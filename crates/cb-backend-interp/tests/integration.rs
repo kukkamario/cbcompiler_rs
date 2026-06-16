@@ -294,6 +294,74 @@ fn type_delete_and_continue_iteration() {
     assert_eq!(out, "4\n");
 }
 
+// FD-034 item 3: For Each over a rank-2 array visits every element in row-major
+// order (last index varies fastest), not just dimension 0. Before the fix this
+// trapped on the first iteration (single flat index into a 2-D array).
+#[test]
+fn for_each_multidim_array_row_major() {
+    let out = run(
+        "Dim grid As Int[,] = New Int[2, 3]\n\
+         grid[0, 0] = 1\n\
+         grid[0, 1] = 2\n\
+         grid[0, 2] = 3\n\
+         grid[1, 0] = 4\n\
+         grid[1, 1] = 5\n\
+         grid[1, 2] = 6\n\
+         For v = Each grid\n\
+           Print Str(v)\n\
+         Next v"
+    );
+    assert_eq!(out, "1\n2\n3\n4\n5\n6\n");
+}
+
+// FD-034 item 2: `Delete <field>` is an rvalue delete that actually frees the
+// node — it is no longer silently dropped. The freed node is unlinked from the
+// Type list, so a later For Each sees only the survivor. Before the fix the
+// statement emitted no IR and the node stayed in the list (total would be 3).
+#[test]
+fn delete_field_frees_node() {
+    let out = run(
+        "Type Node\n\
+           Field link As Node\n\
+           Field v As Int\n\
+         EndType\n\
+         Dim a As Node = New Node\n\
+         a.v = 1\n\
+         a.link = New Node\n\
+         a.link.v = 2\n\
+         Delete a.link\n\
+         Dim total As Int = 0\n\
+         For n = Each Node\n\
+           total = total + n.v\n\
+         Next n\n\
+         Print Str(total)"
+    );
+    assert_eq!(out, "1\n");
+}
+
+// FD-034 item 2: the same for `Delete <array element>` — the referenced node is
+// freed, leaving only the survivor in the Type list.
+#[test]
+fn delete_array_element_frees_node() {
+    let out = run(
+        "Type Node\n\
+           Field v As Int\n\
+         EndType\n\
+         Dim arr As Node[] = New Node[2]\n\
+         arr[0] = New Node\n\
+         arr[0].v = 1\n\
+         arr[1] = New Node\n\
+         arr[1].v = 2\n\
+         Delete arr[0]\n\
+         Dim total As Int = 0\n\
+         For n = Each Node\n\
+           total = total + n.v\n\
+         Next n\n\
+         Print Str(total)"
+    );
+    assert_eq!(out, "2\n");
+}
+
 #[test]
 fn array_new_and_index() {
     let out = run(

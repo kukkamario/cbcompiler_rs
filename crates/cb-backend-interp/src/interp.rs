@@ -700,6 +700,37 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
+            InstKind::GetElementFlat { array, index } => {
+                let frame = self.call_stack.last().unwrap();
+                let arr_val = frame.registers[array.0 as usize].clone();
+                let flat = self.value_to_i64(&frame.registers[index.0 as usize]) as usize;
+                match arr_val {
+                    Value::Array(rc) => {
+                        let arr = rc.borrow();
+                        match arr.data.get(flat) {
+                            Some(v) => Ok(v.clone()),
+                            None => Err(self.trap_error(TrapKind::IndexOutOfBounds, span)),
+                        }
+                    }
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("index on non-array".into()),
+                        span,
+                    )),
+                }
+            }
+            InstKind::ArrayTotalLen { array } => {
+                let frame = self.call_stack.last().unwrap();
+                let arr_val = frame.registers[array.0 as usize].clone();
+                match arr_val {
+                    Value::Array(rc) => Ok(Value::Int(rc.borrow().total_len() as i32)),
+                    Value::Null => Err(self.trap_error(TrapKind::NullDeref, span)),
+                    _ => Err(self.error_at(
+                        InterpErrorKind::RuntimeError("len on non-array".into()),
+                        span,
+                    )),
+                }
+            }
             InstKind::Redim { local, elem_type, dims } => {
                 let dim_sizes = self.resolve_dims(dims, span)?;
                 let new_val = self.make_array(dim_sizes, elem_type.clone(), span)?;

@@ -382,7 +382,7 @@ EndIf
 
 #### `Delete` semantics
 
-`Delete` removes a node from its `Type`'s linked list and frees it. The exact behaviour depends on whether the operand is an **lvalue** (variable, field, or array element) or an **rvalue** expression.
+`Delete` removes a node from its `Type`'s linked list and frees it. The exact behaviour depends on whether the operand is a plain **variable** (an lvalue delete, with rewind) or any other expression — including a field access (`n.link`) or an array element (`arr[0]`) — which is an **rvalue** delete (free only, no rewind). Only a bare variable has a slot the rewind/mark step can update; a field or element operand is treated exactly like `Delete First(MyType)` (see the rvalue case below).
 
 **`Delete v` where `v` is an lvalue:**
 
