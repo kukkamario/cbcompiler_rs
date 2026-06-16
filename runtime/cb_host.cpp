@@ -23,8 +23,15 @@ static const CbRuntimeHooks g_hooks = {
 };
 
 extern "C" const CbRuntimeHooks* cb_runtime_init(const CbHostApi* host) {
-    // Store unconditionally; the host fills `size`/`abi_version` as ABI guards
-    // that a future plugin loader can validate before trusting the table.
+    // Validate the host's ABI guards before trusting its callbacks (FD-024).
+    // A host that is null, too small, or built against a different host ABI is
+    // rejected: g_host stays null and the caller gets null back so it can fail
+    // loudly instead of dispatching through a stale/garbage table.
+    if (host == nullptr
+        || host->size < sizeof(CbHostApi)
+        || host->abi_version != CB_HOST_ABI_VERSION) {
+        return nullptr;
+    }
     g_host = host;
     return &g_hooks;
 }
