@@ -1,9 +1,10 @@
 # FD-032: Interpreter Hardening Tests
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-17
 **Priority:** Medium-High
 **Effort:** Medium (1-4 hours)
-**Impact:** The reference backend's untested execution paths — indirect calls, multi-dim arrays, heap lifecycle, narrow integer widths — get direct coverage before the LLVM backend needs them as an oracle. **Scope grew during implementation:** the function-pointer item required a small first-class-functions *feature* (address-of), because the interpreter's `CallIndirect` success arm was dead code — nothing constructed a non-null function pointer. The narrow-width item surfaced a pre-existing numeric bug, spun off to **[FD-035](FD-035_NARROW_UNSIGNED_NUMERIC_CORRECTNESS.md)**.
+**Impact:** The reference backend's untested execution paths — indirect calls, multi-dim arrays, heap lifecycle, narrow integer widths — get direct coverage before the LLVM backend needs them as an oracle. **Scope grew during implementation:** the function-pointer item required a small first-class-functions *feature* (address-of), because the interpreter's `CallIndirect` success arm was dead code — nothing constructed a non-null function pointer. The narrow-width item surfaced a pre-existing numeric bug, spun off to **[FD-035](../FD-035_NARROW_UNSIGNED_NUMERIC_CORRECTNESS.md)**.
 
 ## Problem
 

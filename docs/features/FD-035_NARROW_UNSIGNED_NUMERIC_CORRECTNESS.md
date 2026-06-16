@@ -80,6 +80,6 @@ A shift `u Shl 31` has a narrow/unsigned **LHS** and an `Int` **count** (sema de
 
 ## Related
 
-- **Surfaced by [FD-032](FD-032_INTERPRETER_HARDENING_TESTS.md)** — the narrow-width hardening tests (currently `#[ignore]`d with reasons pointing here).
+- **Surfaced by [FD-032](archive/FD-032_INTERPRETER_HARDENING_TESTS.md)** — the narrow-width hardening tests (currently `#[ignore]`d with reasons pointing here).
 - [FD-019](archive/FD-019_INTERPRETER_CORRECTNESS_FIXES.md) — shift width-correctness for `Int`/`Long` (the narrow widths got no equivalent fix).
 - [FD-020](archive/FD-020_SEMA_NUMERIC_AND_FOR_LOOP_SEMANTICS.md) — numeric coercion rules, the in-range-literal-silent rule, and the same-width-signed-tie promotion this revisits.
