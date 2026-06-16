@@ -1,6 +1,7 @@
 # FD-024: Runtime FFI ABI-Handshake & Catalog-Decode Hardening
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-16
 **Priority:** Medium
 **Effort:** Medium (2-4 hours)
 **Impact:** Makes the FD-015 ABI handshake actually run in shipped code (today it's validated only inside a test), handles the runtime-declines path the sole caller currently throws away, and refactors `load_catalog` so its (majority) defensive code becomes testable.
