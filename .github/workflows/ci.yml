@@ -23,7 +23,7 @@ jobs:
     env:
       CB_RUNTIME_FORCE_SDK_FREE: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable

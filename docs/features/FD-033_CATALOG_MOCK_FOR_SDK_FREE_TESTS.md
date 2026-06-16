@@ -90,7 +90,7 @@ Both build paths exercised on Windows 11 + MSVC (2026-06-16):
 - **Full path** (default `cargo test --workspace`): unchanged — CMake/Allegro build, complete catalog, all graphics fixtures run. No failures, no regressions.
 - `cargo clippy --workspace --all-targets`: exit 0, no lint warnings introduced (the per-crate "1 warning" lines are the Windows incremental-compilation "Access is denied" finalize quirk, not code).
 
-**Linux / SDK-less:** wired up via `.github/workflows/ci.yml` — a `ubuntu-latest` job that runs `cargo test --workspace` + clippy with `CB_RUNTIME_FORCE_SDK_FREE=1` (only Rust + g++, no CMake/vcpkg/Allegro). This both proves the non-Windows path under GCC and makes every PR exercise it. The SDK-free clippy (`-D warnings`) was confirmed clean locally before adding the workflow; the green CI run is the conclusive cross-platform proof.
+**Linux / SDK-less (confirmed green):** `.github/workflows/ci.yml` runs a `ubuntu-latest` job — `cargo test --workspace` + clippy `-D warnings` with `CB_RUNTIME_FORCE_SDK_FREE=1` (only Rust + g++, no CMake/vcpkg/Allegro). First run on PR [#6](https://github.com/kukkamario/cbcompiler_rs/pull/6) passed in 1m15s: the `cc`-compiled C++ runtime built and linked under GCC and the full suite + clippy went green. This is the conclusive cross-platform proof that the non-Windows path works, and every future PR now exercises it.
 
 Outstanding: record the `cargo llvm-cov` `lower.rs`/`interp.rs` baseline now that interp+driver tests run in coverage.
 
