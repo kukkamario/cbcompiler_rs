@@ -623,6 +623,26 @@ mod tests {
         assert!(hooks.about_to_exit.is_none());
     }
 
+    #[test]
+    fn runtime_init_rejects_abi_mismatch() {
+        // FD-024: a host advertising a different host ABI is declined by the C
+        // `cb_runtime_init` (returns null), surfaced as Err — never stored. The
+        // rejection path leaves g_host untouched, so this is safe to run beside
+        // the happy-path roundtrip test.
+        extern "C" fn noop_exit(_code: i32) {}
+        extern "C" fn noop_error(_msg: *const CbString) {}
+        static BAD_HOST: CbHostApi = CbHostApi {
+            size: std::mem::size_of::<CbHostApi>() as u32,
+            abi_version: CB_HOST_ABI_VERSION + 1,
+            request_exit: noop_exit,
+            raise_error: noop_error,
+        };
+        match runtime_init(&BAD_HOST) {
+            Err(e) => assert!(e.contains("declined"), "got: {e}"),
+            Ok(_) => panic!("expected the runtime to decline an ABI-mismatched host"),
+        }
+    }
+
     // ── type_tag_to_ir_type ─────────────────────────────────────────────
 
     #[test]
