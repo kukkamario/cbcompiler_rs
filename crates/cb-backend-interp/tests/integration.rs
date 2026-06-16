@@ -804,3 +804,189 @@ fn redim_negative_dimension_is_clean_error() {
         "unexpected error: {err:?}"
     );
 }
+
+// ── FD-032: first-class functions (address-of + indirect call) ─────────
+
+#[test]
+fn function_pointer_roundtrip() {
+    // Take a function's address with its bare name (cb_syntax.md §7.4), store it
+    // in a Function(...) variable, and call through it. Exercises the new
+    // FuncAddr instruction plus the CallIndirect success arm end-to-end.
+    let out = run("Function add(a As Integer, b As Integer) As Integer\n\
+           Return a + b\n\
+         EndFunction\n\
+         Dim fp As Function(Integer, Integer) As Integer\n\
+         fp = add\n\
+         Print Str(fp(2, 3))");
+    assert_eq!(out, "5\n");
+}
+
+#[test]
+fn function_pointer_as_argument() {
+    // A function name passed as an argument lowers to FuncAddr; the callee then
+    // invokes the fn-pointer parameter via CallIndirect (higher-order call).
+    let out = run("Function apply(f As Function(Integer) As Integer, x As Integer) As Integer\n\
+           Return f(x)\n\
+         EndFunction\n\
+         Function inc(n As Integer) As Integer\n\
+           Return n + 1\n\
+         EndFunction\n\
+         Print Str(apply(inc, 41))");
+    assert_eq!(out, "42\n");
+}
+
+#[test]
+fn function_pointer_reassigned_picks_right_target() {
+    // Two addresses through one variable must dispatch to the right function.
+    let out = run("Function pick_a(x As Integer) As Integer\n\
+           Return x + 10\n\
+         EndFunction\n\
+         Function pick_b(x As Integer) As Integer\n\
+           Return x + 20\n\
+         EndFunction\n\
+         Dim fp As Function(Integer) As Integer\n\
+         fp = pick_a\n\
+         Print Str(fp(5))\n\
+         fp = pick_b\n\
+         Print Str(fp(5))");
+    assert_eq!(out, "15\n25\n");
+}
+
+#[test]
+fn trap_null_function_pointer() {
+    // The sixth TrapKind, previously never fired in a test: calling a null
+    // fn-pointer traps NullFnPtr (cb_syntax.md §9.2).
+    let err = run_err(
+        "Dim fp As Function(Integer) As Integer\n\
+         fp = Null\n\
+         Print Str(fp(0))",
+    );
+    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::NullFnPtr)));
+}
+
+// ── FD-032: multi-dimensional arrays ───────────────────────────────────
+
+#[test]
+fn array_len_by_dimension() {
+    // Len(arr) is axis 0; Len(arr, n) selects dimension n — the Len{dim:Some}
+    // path, previously unexercised for a multi-dim array.
+    let out = run("Dim grid As Int[,] = New Int[2, 3]\n\
+         Print Str(Len(grid))\n\
+         Print Str(Len(grid, 0))\n\
+         Print Str(Len(grid, 1))");
+    assert_eq!(out, "2\n2\n3\n");
+}
+
+// ── FD-032: heap lifecycle under iteration ─────────────────────────────
+
+#[test]
+fn for_each_multiple_mid_list_deletes() {
+    // Delete-with-rewind must survive *several* deletions in one pass, not just
+    // one (extends type_delete_and_continue_iteration). Delete the 2nd and 4th
+    // of five siblings; the survivors (1, 3, 5) remain iterable -> total 9.
+    let out = run("Type Node\n\
+           Field v As Int\n\
+         EndType\n\
+         Dim a As Node = New Node\n\
+         a.v = 1\n\
+         Dim b As Node = New Node\n\
+         b.v = 2\n\
+         Dim c As Node = New Node\n\
+         c.v = 3\n\
+         Dim d As Node = New Node\n\
+         d.v = 4\n\
+         Dim e As Node = New Node\n\
+         e.v = 5\n\
+         For n = Each Node\n\
+           If n.v = 2 Or n.v = 4 Then\n\
+             Delete n\n\
+           EndIf\n\
+         Next n\n\
+         Dim total As Int = 0\n\
+         For m = Each Node\n\
+           total = total + m.v\n\
+         Next m\n\
+         Print Str(total)");
+    assert_eq!(out, "9\n");
+}
+
+// ── FD-032: narrow integer widths (cb_syntax.md §3.1/§3.4) ─────────────
+
+// NOTE: the following three tests are #[ignore]d because FD-032 surfaced a
+// pre-existing numeric bug now tracked as FD-035: `Dim x As <narrow/unsigned> =
+// <int literal>` is not coerced to the declared type (`check_dim` only checks
+// the init, never `coerce`s it), so the variable holds a plain `Int`. A shift on
+// it then dispatches as 32-bit signed (`eval_binop` also needs LHS-type dispatch
+// for shift counts). Un-ignore these as part of FD-035.
+
+#[test]
+#[ignore = "FD-035: Dim-init not coerced to declared narrow type; UInt holds Int -> signed shift"]
+fn uint_shift_stays_unsigned_32bit() {
+    // A UInt shift stays unsigned: 1 Shl 31 = 2147483648, which a signed Int
+    // could not represent (it would be -2147483648). Exercises uint_binop.
+    let out = run("Dim u As UInt = 1\nPrint Str(u Shl 31)");
+    assert_eq!(out, "2147483648\n");
+}
+
+#[test]
+#[ignore = "FD-035: Dim-init not coerced to declared narrow type; ULong holds Int -> signed 32-bit shift"]
+fn ulong_shift_stays_unsigned_64bit() {
+    // A ULong shift stays unsigned 64-bit: 1 Shl 63 overflows a signed Long.
+    let out = run("Dim u As ULong = 1\nPrint Str(u Shl 63)");
+    assert_eq!(out, "9223372036854775808\n");
+}
+
+#[test]
+#[ignore = "FD-035: Dim-init not coerced to declared type; `s` stays Int, so this would not actually test Short storage (also Value::Short(i16) vs documented unsigned)"]
+fn short_holds_documented_unsigned_range() {
+    // cb_syntax.md §3.1: Short is 16-bit UNSIGNED, so 40000 is in range. (Also
+    // probes the Value::Short(i16) signed-vs-documented-unsigned mismatch once
+    // the Dim-init coercion lands.)
+    let out = run("Dim s As Short = 40000\nPrint Str(s)");
+    assert_eq!(out, "40000\n");
+}
+
+#[test]
+fn byte_wraps_modulo_256_on_assignment() {
+    // Byte is 8-bit unsigned: `b + 100` (= 300) narrows to 44 (300 mod 256) on
+    // the store-back `Convert`. This exercises the assignment-narrowing path
+    // (which DOES coerce, unlike a Dim init), so it is unaffected by the Dim-init
+    // gap above. A non-literal value avoids the E0326 literal-overflow error.
+    let out = run("Dim b As Byte = 200\nb = b + 100\nPrint Str(b)");
+    assert_eq!(out, "44\n");
+}
+
+// ── FD-032: observer across nested calls ───────────────────────────────
+
+#[test]
+fn observer_sees_nested_call_results() {
+    // Deferred call-result delivery must work across nested calls, not just one
+    // level deep (extends observer_sees_call_result). inner returns first (21),
+    // then outer (42).
+    let (ir, interner) = compile_program(
+        "Function inner(x As Integer) As Integer\n\
+           Return x + 1\n\
+         EndFunction\n\
+         Function outer(y As Integer) As Integer\n\
+           Return inner(y) * 2\n\
+         EndFunction\n\
+         Print Str(outer(20))",
+    );
+    let recorder = CallResultRecorder {
+        call_results: Default::default(),
+    };
+    let seen = recorder.call_results.clone();
+    let mut output = Vec::new();
+    {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(recorder);
+        interp.run().expect("should succeed");
+    }
+    assert_eq!(String::from_utf8(output).unwrap(), "42\n");
+    assert_eq!(
+        *seen.borrow(),
+        vec![21, 42],
+        "after_inst should observe both nested call results, innermost first"
+    );
+}

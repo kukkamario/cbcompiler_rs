@@ -417,6 +417,7 @@ fn intrinsics_and_calls() {
                 args: vec![Reg(0)],
             },
         ),
+        inst(Some(7), InstKind::FuncAddr { func: FuncId(0) }),
         inst(
             None,
             InstKind::Redim {

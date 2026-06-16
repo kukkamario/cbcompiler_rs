@@ -252,6 +252,13 @@ fn print_inst_kind(
                 write!(out, ", {arg}").unwrap();
             }
         }
+        InstKind::FuncAddr { func } => {
+            let name = func_table
+                .get(func.0 as usize)
+                .map(|d| interner.resolve(d.name))
+                .unwrap_or("<unknown_func>");
+            write!(out, "func_addr {name}").unwrap();
+        }
         InstKind::ConstInt(v) => {
             write!(out, "const_int {v}").unwrap();
         }

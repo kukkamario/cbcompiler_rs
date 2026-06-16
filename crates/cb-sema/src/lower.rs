@@ -896,10 +896,23 @@ impl<'a> Lowerer<'a> {
 
         // Regular variable load.
         if let Some(var) = self.resolve_var(name) {
-            self.emit_load_var(var, span)
-        } else {
-            self.emit(InstKind::ConstNull, span)
+            return self.emit_load_var(var, span);
         }
+
+        // A bare function name in value position is its address — a fn-pointer
+        // (cb_syntax.md §7.4). The call path (see `lower_call`) intercepts a
+        // function name used as a callee before it reaches here, and bare 0-arg
+        // sub calls are intercepted in `lower_stmt`, so this only fires for
+        // genuine value uses. §7.2 forbids overloading, so the name resolves to
+        // exactly one `func_id`.
+        if let Some(decl) = self.symbols.lookup(self.current_scope, name)
+            && matches!(decl.kind, DeclKind::Function { .. })
+            && let Some(&func_id) = self.func_id_map.get(&name)
+        {
+            return self.emit(InstKind::FuncAddr { func: func_id }, span);
+        }
+
+        self.emit(InstKind::ConstNull, span)
     }
 
     fn lower_binary(&mut self, op: BinOp, lhs: NodeId, rhs: NodeId, span: Span) -> Reg {

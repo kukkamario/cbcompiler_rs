@@ -215,3 +215,103 @@ pub struct StructObj {
 }
 
 pub type ArrayRef = Rc<RefCell<ArrayObj>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A minimal non-sentinel instance carrying one `Int` field — enough to
+    /// exercise the slab without any catalog/SDK.
+    fn obj(field: i32) -> TypeInstanceObj {
+        TypeInstanceObj {
+            type_def: TypeDefId(0),
+            fields: vec![Value::Int(field)],
+            prev: None,
+            next: None,
+            is_sentinel: false,
+        }
+    }
+
+    /// `Value` has no `PartialEq`, so read the first field's `Int` out by match.
+    fn int_field(slab: &Slab, id: TypeInstanceId) -> Option<i32> {
+        match slab.get(id)?.fields.first()? {
+            Value::Int(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn alloc_then_get_resolves() {
+        let mut slab = Slab::new();
+        let id = slab.alloc(obj(7));
+        assert_eq!(int_field(&slab, id), Some(7));
+    }
+
+    #[test]
+    fn freed_handle_is_rejected() {
+        let mut slab = Slab::new();
+        let id = slab.alloc(obj(1));
+        slab.free(id);
+        assert!(slab.get(id).is_none(), "freed id must not resolve via get()");
+        assert!(
+            slab.get_mut(id).is_none(),
+            "freed id must not resolve via get_mut()"
+        );
+    }
+
+    #[test]
+    fn slot_reused_with_bumped_generation() {
+        let mut slab = Slab::new();
+        let id1 = slab.alloc(obj(1));
+        slab.free(id1);
+        let id2 = slab.alloc(obj(2));
+        // The free-list hands back the same physical slot...
+        assert_eq!(id2.index, id1.index, "freed slot should be reused");
+        // ...but with a bumped generation, so the old handle is now stale.
+        assert_eq!(
+            id2.generation,
+            id1.generation + 1,
+            "generation must bump on reuse so stale handles are caught"
+        );
+        assert!(
+            slab.get(id1).is_none(),
+            "stale handle (old generation) must be rejected after reuse"
+        );
+        assert_eq!(
+            int_field(&slab, id2),
+            Some(2),
+            "the fresh handle resolves to the new object"
+        );
+    }
+
+    #[test]
+    fn standalone_instance_lifecycle() {
+        // create -> mutate -> delete, outside any TypeList / For Each context.
+        let mut slab = Slab::new();
+        let id = slab.alloc(obj(0));
+        slab.get_mut(id).expect("live instance").fields[0] = Value::Int(42);
+        assert_eq!(int_field(&slab, id), Some(42), "mutation persists");
+        slab.free(id);
+        assert!(slab.get(id).is_none(), "deleted instance is gone");
+    }
+
+    #[test]
+    fn distinct_instances_reuse_in_lifo_order() {
+        // Two frees then two allocs reuse the freed slots (LIFO), each with its
+        // own bumped generation — no cross-talk between handles.
+        let mut slab = Slab::new();
+        let a = slab.alloc(obj(10));
+        let b = slab.alloc(obj(20));
+        assert_ne!(a.index, b.index, "distinct live instances use distinct slots");
+        slab.free(a);
+        slab.free(b);
+        let c = slab.alloc(obj(30));
+        let d = slab.alloc(obj(40));
+        // free_list is a stack: b was freed last, so c reuses b's slot.
+        assert_eq!(c.index, b.index);
+        assert_eq!(d.index, a.index);
+        assert_eq!(int_field(&slab, c), Some(30));
+        assert_eq!(int_field(&slab, d), Some(40));
+        assert!(slab.get(a).is_none() && slab.get(b).is_none());
+    }
+}

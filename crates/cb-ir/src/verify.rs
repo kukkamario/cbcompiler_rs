@@ -123,12 +123,18 @@ fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
 }
 
 fn verify_inst_func_ids(kind: &InstKind, func_table_len: u32) {
-    if let InstKind::Call { callee, .. } = kind {
+    let check = |id: crate::FuncId| {
         assert!(
-            callee.0 < func_table_len,
+            id.0 < func_table_len,
             "FuncId({}) out of range (func_table has {func_table_len} entries)",
-            callee.0,
+            id.0,
         );
+    };
+
+    match kind {
+        InstKind::Call { callee, .. } => check(*callee),
+        InstKind::FuncAddr { func } => check(*func),
+        _ => {}
     }
 }
 
@@ -245,6 +251,7 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
         | InstKind::NewType { .. }
         | InstKind::First { .. }
         | InstKind::Last { .. }
+        | InstKind::FuncAddr { .. }
         | InstKind::DeleteLvalue { .. }
         | InstKind::DeleteLvalueGlobal { .. }
         | InstKind::ConstInt(_)

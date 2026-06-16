@@ -781,7 +781,32 @@ impl<'a> Checker<'a> {
         let name = self.intern_ident(name_span, sigil);
         if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
             let decl_ty = decl.ty.clone();
-            // Sigil enforcement: if this use has a sigil, it must match the declaration type.
+            // A bare function name in value position takes the function's
+            // address: its type is a fn-pointer of the function's signature, not
+            // its return type (cb_syntax.md §7.4). `check_call` intercepts a
+            // callee ident before it reaches here, so this fires only for
+            // genuine value uses. Overloaded / built-in commands have no single
+            // address (§7.2) and are rejected as E0329 below.
+            let fnptr_ty = if let DeclKind::Function {
+                params, return_ty, ..
+            } = &decl.kind
+            {
+                Some(Type::FnPtr {
+                    params: params.iter().map(|p| p.ty.clone()).collect(),
+                    ret: match return_ty {
+                        Type::Void => None,
+                        t => Some(Box::new(t.clone())),
+                    },
+                })
+            } else {
+                None
+            };
+            let is_command = matches!(
+                decl.kind,
+                DeclKind::OverloadSet { .. } | DeclKind::RuntimeFn { .. }
+            );
+            // Sigil enforcement: if this use has a sigil, it must match the
+            // declared type (for a function name, its return type).
             if let Some(s) = sigil {
                 let sigil_ty = types::sigil_to_type(s);
                 if sigil_ty != decl_ty && !decl_ty.is_error() {
@@ -792,7 +817,18 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            decl_ty
+            if is_command {
+                self.diagnostics.push(Diagnostic::error(
+                    E_ADDRESS_OF_UNSUPPORTED,
+                    format!(
+                        "cannot take the address of overloaded or built-in command `{}`; only user-defined functions and subs have addresses",
+                        self.interner.resolve(name)
+                    ),
+                    Label::new(name_span),
+                ));
+                return Type::Error;
+            }
+            fnptr_ty.unwrap_or(decl_ty)
         } else {
             // Undeclared — will be handled as implicit declaration when
             // encountered as assignment target in check_stmt. When encountered
@@ -875,19 +911,15 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Regular function call.
-        let callee_ty = self.check_expr(callee);
-        if callee_ty.is_error() {
-            for &a in args {
-                self.check_expr(a);
-            }
-            return Type::Error;
-        }
-
-        // Check arg expressions regardless.
+        // Check arg expressions first; both the direct-call and indirect-call
+        // paths below need their types.
         let arg_types: Vec<Type> = args.iter().map(|&a| self.check_expr(a)).collect();
 
-        // Look up the callee in the scope if it's an ident.
+        // Direct call: a callee ident naming a function, runtime command, or
+        // overload set is resolved by name here — *without* typing the callee as
+        // a value. That distinction is what makes `print(...)` a call rather than
+        // an address-of (cb_syntax.md §7.4); typing the callee as a value first
+        // would mis-fire E0329 on every command call.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
             if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
@@ -955,6 +987,15 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+        }
+
+        // Indirect call: the callee is a value — an FnPtr variable, or an
+        // error / undeclared / non-callable. This is the only place a callee is
+        // typed as a value (so a function/command name handled above never goes
+        // through `check_ident`'s address-of path).
+        let callee_ty = self.check_expr(callee);
+        if callee_ty.is_error() {
+            return Type::Error;
         }
 
         // If callee is an FnPtr type, check it.
@@ -1297,7 +1338,33 @@ impl<'a> Checker<'a> {
                 self.check_assign(target, value);
             }
             Node::Stmt(Stmt::ExprStmt { expr }) => {
-                self.check_expr(expr);
+                // A bare function/command name as a complete statement is a
+                // 0-arg call (CoolBasic paren-less sub-call syntax), matching
+                // `lower_stmt`. Route it through call-checking so it is validated
+                // as a call rather than mistaken for an address-of value (§7.4).
+                let bare_call = if let Node::Expr(Expr::Ident { name_span, sigil }) =
+                    &self.arena[expr]
+                {
+                    let name = self.intern_ident(*name_span, *sigil);
+                    self.symbols
+                        .lookup(self.current_scope, name)
+                        .is_some_and(|d| {
+                            matches!(
+                                d.kind,
+                                DeclKind::Function { .. }
+                                    | DeclKind::RuntimeFn { .. }
+                                    | DeclKind::OverloadSet { .. }
+                            )
+                        })
+                } else {
+                    false
+                };
+                if bare_call {
+                    let span = self.arena.span_of(expr);
+                    self.check_call(expr, expr, &[], span);
+                } else {
+                    self.check_expr(expr);
+                }
             }
             Node::Stmt(Stmt::Dim { names, ty, init }) => {
                 self.check_dim(&names, ty, init);
