@@ -78,6 +78,7 @@ helper that skips when `!HAS_GRAPHICS`.
 | `crates/cb-driver/tests/programs.rs` | MODIFY | `run_graphics` helper; route the 7 graphics/input fixtures through it |
 | `docs/cb_runtime.md` | MODIFY | Document the SDK-free build, the env vars, and `HAS_GRAPHICS` |
 | `README.md` | MODIFY | Surface the SDK-free path in the front-door build docs so it's discoverable/used on non-Windows (Prerequisites callout + dedicated section + `CB_RUNTIME_FORCE_SDK_FREE` for CI) |
+| `.github/workflows/ci.yml` | CREATE | Linux GitHub Actions job that runs the suite with `CB_RUNTIME_FORCE_SDK_FREE=1` — proves the non-Windows path and makes CI exercise it on every PR |
 
 No `mock_catalog.rs` was created (option (b) builds the real catalog, so a synthetic one is unnecessary). `cb-driver/Cargo.toml` needed no change either: `cb-runtime-sys` is already a normal dependency, and integration tests can read `HAS_GRAPHICS` through it — no dev-dependency required.
 
@@ -89,7 +90,9 @@ Both build paths exercised on Windows 11 + MSVC (2026-06-16):
 - **Full path** (default `cargo test --workspace`): unchanged — CMake/Allegro build, complete catalog, all graphics fixtures run. No failures, no regressions.
 - `cargo clippy --workspace --all-targets`: exit 0, no lint warnings introduced (the per-crate "1 warning" lines are the Windows incremental-compilation "Access is denied" finalize quirk, not code).
 
-Outstanding for `/fd-verify`: confirm on a genuinely SDK-less machine (Linux container) that `cargo test --workspace` builds with no CMake/vcpkg present; record the `cargo llvm-cov` `lower.rs`/`interp.rs` baseline now that interp+driver tests run in coverage.
+**Linux / SDK-less:** wired up via `.github/workflows/ci.yml` — a `ubuntu-latest` job that runs `cargo test --workspace` + clippy with `CB_RUNTIME_FORCE_SDK_FREE=1` (only Rust + g++, no CMake/vcpkg/Allegro). This both proves the non-Windows path under GCC and makes every PR exercise it. The SDK-free clippy (`-D warnings`) was confirmed clean locally before adding the workflow; the green CI run is the conclusive cross-platform proof.
+
+Outstanding: record the `cargo llvm-cov` `lower.rs`/`interp.rs` baseline now that interp+driver tests run in coverage.
 
 ## Related
 
