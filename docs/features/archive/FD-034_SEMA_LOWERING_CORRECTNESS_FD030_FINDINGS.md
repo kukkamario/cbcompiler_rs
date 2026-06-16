@@ -1,6 +1,7 @@
 # FD-034: Sema/Lowering Correctness — FD-030 Findings
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-16
 **Priority:** Medium-High
 **Effort:** Medium (1-4 hours)
 **Impact:** Fixes three correctness defects in `cb-sema` surfaced by the FD-030 snapshot review: a type-table inconsistency for arrays of structs, a silently dropped `Delete` form, and a For-Each-over-multi-dim-array path that traps at runtime.
