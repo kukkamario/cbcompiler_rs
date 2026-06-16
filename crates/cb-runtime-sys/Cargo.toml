@@ -8,5 +8,10 @@ publish.workspace = true
 [dependencies]
 cb-ir = { path = "../cb-ir" }
 
+[build-dependencies]
+# SDK-free build path (FD-033): compile the Allegro-free runtime TUs directly
+# when the full CMake/Allegro toolchain is unavailable.
+cc = "1"
+
 [lints.rust]
 unsafe_code = "allow"

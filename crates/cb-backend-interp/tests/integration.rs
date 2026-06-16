@@ -1,8 +1,8 @@
 use std::io::Write;
 
 use cb_backend_interp::error::{InterpError, InterpErrorKind};
-use cb_backend_interp::observer::Observer;
 use cb_backend_interp::interp::Frame;
+use cb_backend_interp::observer::Observer;
 use cb_diagnostics::{SourceMap, Span};
 use cb_frontend::{LexerOptions, parse, tokenize};
 use cb_ir::FuncId;
@@ -14,13 +14,18 @@ fn run(src: &str) -> String {
 
     let (tokens, lex_diags) = tokenize(src, file, LexerOptions::default());
     assert!(
-        lex_diags.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        lex_diags
+            .iter()
+            .all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
         "lex errors: {lex_diags:?}"
     );
 
     let parse_result = parse(&tokens, src, file);
     assert!(
-        parse_result.diagnostics.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        parse_result
+            .diagnostics
+            .iter()
+            .all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
         "parse errors: {:?}",
         parse_result.diagnostics
     );
@@ -34,17 +39,14 @@ fn run(src: &str) -> String {
         &runtime_catalog,
     );
 
-    let sema_errors: Vec<_> = sema.diagnostics.iter()
+    let sema_errors: Vec<_> = sema
+        .diagnostics
+        .iter()
         .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
         .collect();
     assert!(sema_errors.is_empty(), "sema errors: {sema_errors:?}");
 
-    let ir = cb_sema::lower::lower(
-        &parse_result.arena,
-        &parse_result.program,
-        src,
-        &mut sema,
-    );
+    let ir = cb_sema::lower::lower(&parse_result.arena, &parse_result.program, src, &mut sema);
 
     #[cfg(debug_assertions)]
     cb_ir::verify::verify(&ir);
@@ -124,36 +126,30 @@ fn if_else_false() {
 
 #[test]
 fn while_loop() {
-    let out = run(
-        "Dim i As Int = 0\n\
+    let out = run("Dim i As Int = 0\n\
          While i < 3\n\
            i = i + 1\n\
          Wend\n\
-         Print Str(i)"
-    );
+         Print Str(i)");
     assert_eq!(out, "3\n");
 }
 
 #[test]
 fn for_loop() {
-    let out = run(
-        "Dim total As Int = 0\n\
+    let out = run("Dim total As Int = 0\n\
          For i = 1 To 5\n\
            total = total + i\n\
          Next i\n\
-         Print Str(total)"
-    );
+         Print Str(total)");
     assert_eq!(out, "15\n");
 }
 
 #[test]
 fn function_call() {
-    let out = run(
-        "Function double(x As Integer) As Integer\n\
+    let out = run("Function double(x As Integer) As Integer\n\
            Return x * 2\n\
          EndFunction\n\
-         Print Str(double(21))"
-    );
+         Print Str(double(21))");
     assert_eq!(out, "42\n");
 }
 
@@ -185,21 +181,17 @@ fn unary_plus_is_abs_float() {
 #[test]
 fn unary_plus_const_folds_to_abs() {
     // FD-028: `+` in a constant expression folds to the absolute value.
-    let out = run(
-        "Const c = +(-7)\n\
-         Print Str(c)"
-    );
+    let out = run("Const c = +(-7)\n\
+         Print Str(c)");
     assert_eq!(out, "7\n");
 }
 
 #[test]
 fn unary_plus_matches_abs() {
     // `+x` and `Abs(x)` must agree; their difference is 0.
-    let out = run(
-        "Dim x As Int\n\
+    let out = run("Dim x As Int\n\
          x = -42\n\
-         Print Str(+x - Abs(x))"
-    );
+         Print Str(+x - Abs(x))");
     assert_eq!(out, "0\n");
 }
 
@@ -219,21 +211,18 @@ fn multiple_prints() {
 
 #[test]
 fn type_new_and_field_access() {
-    let out = run(
-        "Type Enemy\n\
+    let out = run("Type Enemy\n\
            Field hp As Int\n\
          EndType\n\
          Dim e As Enemy = New Enemy\n\
          e.hp = 100\n\
-         Print Str(e.hp)"
-    );
+         Print Str(e.hp)");
     assert_eq!(out, "100\n");
 }
 
 #[test]
 fn type_linked_list_first_next() {
-    let out = run(
-        "Type Node\n\
+    let out = run("Type Node\n\
            Field val As Int\n\
          EndType\n\
          Dim a As Node = New Node\n\
@@ -246,15 +235,13 @@ fn type_linked_list_first_next() {
          While n <> Null\n\
            Print Str(n.val)\n\
            n = Next(n)\n\
-         Wend"
-    );
+         Wend");
     assert_eq!(out, "1\n2\n3\n");
 }
 
 #[test]
 fn type_for_each() {
-    let out = run(
-        "Type Item\n\
+    let out = run("Type Item\n\
            Field x As Int\n\
          EndType\n\
          Dim a As Item = New Item\n\
@@ -263,15 +250,13 @@ fn type_for_each() {
          b.x = 20\n\
          For n = Each Item\n\
            Print Str(n.x)\n\
-         Next n"
-    );
+         Next n");
     assert_eq!(out, "10\n20\n");
 }
 
 #[test]
 fn type_delete_and_continue_iteration() {
-    let out = run(
-        "Type Obj\n\
+    let out = run("Type Obj\n\
            Field v As Int\n\
          EndType\n\
          Dim a As Obj = New Obj\n\
@@ -289,8 +274,7 @@ fn type_delete_and_continue_iteration() {
          For m = Each Obj\n\
            total = total + m.v\n\
          Next m\n\
-         Print Str(total)"
-    );
+         Print Str(total)");
     assert_eq!(out, "4\n");
 }
 
@@ -299,8 +283,7 @@ fn type_delete_and_continue_iteration() {
 // trapped on the first iteration (single flat index into a 2-D array).
 #[test]
 fn for_each_multidim_array_row_major() {
-    let out = run(
-        "Dim grid As Int[,] = New Int[2, 3]\n\
+    let out = run("Dim grid As Int[,] = New Int[2, 3]\n\
          grid[0, 0] = 1\n\
          grid[0, 1] = 2\n\
          grid[0, 2] = 3\n\
@@ -309,8 +292,7 @@ fn for_each_multidim_array_row_major() {
          grid[1, 2] = 6\n\
          For v = Each grid\n\
            Print Str(v)\n\
-         Next v"
-    );
+         Next v");
     assert_eq!(out, "1\n2\n3\n4\n5\n6\n");
 }
 
@@ -320,8 +302,7 @@ fn for_each_multidim_array_row_major() {
 // statement emitted no IR and the node stayed in the list (total would be 3).
 #[test]
 fn delete_field_frees_node() {
-    let out = run(
-        "Type Node\n\
+    let out = run("Type Node\n\
            Field link As Node\n\
            Field v As Int\n\
          EndType\n\
@@ -334,8 +315,7 @@ fn delete_field_frees_node() {
          For n = Each Node\n\
            total = total + n.v\n\
          Next n\n\
-         Print Str(total)"
-    );
+         Print Str(total)");
     assert_eq!(out, "1\n");
 }
 
@@ -343,8 +323,7 @@ fn delete_field_frees_node() {
 // freed, leaving only the survivor in the Type list.
 #[test]
 fn delete_array_element_frees_node() {
-    let out = run(
-        "Type Node\n\
+    let out = run("Type Node\n\
            Field v As Int\n\
          EndType\n\
          Dim arr As Node[] = New Node[2]\n\
@@ -357,36 +336,30 @@ fn delete_array_element_frees_node() {
          For n = Each Node\n\
            total = total + n.v\n\
          Next n\n\
-         Print Str(total)"
-    );
+         Print Str(total)");
     assert_eq!(out, "2\n");
 }
 
 #[test]
 fn array_new_and_index() {
-    let out = run(
-        "Dim arr As Int[] = New Int[3]\n\
+    let out = run("Dim arr As Int[] = New Int[3]\n\
          arr[0] = 10\n\
          arr[1] = 20\n\
          arr[2] = 30\n\
-         Print Str(arr[1])"
-    );
+         Print Str(arr[1])");
     assert_eq!(out, "20\n");
 }
 
 #[test]
 fn array_len() {
-    let out = run(
-        "Dim arr As Int[] = New Int[5]\n\
-         Print Str(Len(arr))"
-    );
+    let out = run("Dim arr As Int[] = New Int[5]\n\
+         Print Str(Len(arr))");
     assert_eq!(out, "5\n");
 }
 
 #[test]
 fn null_comparison() {
-    let out = run(
-        "Type MyObj\n\
+    let out = run("Type MyObj\n\
            Field x As Int\n\
          EndType\n\
          Dim obj As MyObj\n\
@@ -394,8 +367,7 @@ fn null_comparison() {
            Print \"null\"\n\
          Else\n\
            Print \"not null\"\n\
-         EndIf"
-    );
+         EndIf");
     assert_eq!(out, "null\n");
 }
 
@@ -432,7 +404,12 @@ impl Observer for CountingObserver {
     ) {
         self.after_count += 1;
     }
-    fn on_call(&mut self, _caller: &Frame, _callee: FuncId, _args: &[cb_backend_interp::value::Value]) {
+    fn on_call(
+        &mut self,
+        _caller: &Frame,
+        _callee: FuncId,
+        _args: &[cb_backend_interp::value::Value],
+    ) {
         self.call_count += 1;
     }
     fn on_return(&mut self, _frame: &Frame, _value: &cb_backend_interp::value::Value) {
@@ -446,13 +423,18 @@ fn compile_program(src: &str) -> (cb_ir::Program, cb_diagnostics::Interner) {
 
     let (tokens, lex_diags) = tokenize(src, file, LexerOptions::default());
     assert!(
-        lex_diags.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        lex_diags
+            .iter()
+            .all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
         "lex errors: {lex_diags:?}"
     );
 
     let parse_result = parse(&tokens, src, file);
     assert!(
-        parse_result.diagnostics.iter().all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
+        parse_result
+            .diagnostics
+            .iter()
+            .all(|d| !matches!(d.severity, cb_diagnostics::Severity::Error)),
         "parse errors: {:?}",
         parse_result.diagnostics
     );
@@ -466,17 +448,14 @@ fn compile_program(src: &str) -> (cb_ir::Program, cb_diagnostics::Interner) {
         &runtime_catalog,
     );
 
-    let sema_errors: Vec<_> = sema.diagnostics.iter()
+    let sema_errors: Vec<_> = sema
+        .diagnostics
+        .iter()
         .filter(|d| matches!(d.severity, cb_diagnostics::Severity::Error))
         .collect();
     assert!(sema_errors.is_empty(), "sema errors: {sema_errors:?}");
 
-    let ir = cb_sema::lower::lower(
-        &parse_result.arena,
-        &parse_result.program,
-        src,
-        &mut sema,
-    );
+    let ir = cb_sema::lower::lower(&parse_result.arena, &parse_result.program, src, &mut sema);
 
     #[cfg(debug_assertions)]
     cb_ir::verify::verify(&ir);
@@ -505,7 +484,7 @@ fn observer_sees_function_calls() {
         "Function double(x As Integer) As Integer\n\
          Return x * 2\n\
          EndFunction\n\
-         Print Str(double(21))"
+         Print Str(double(21))",
     );
 
     let mut output = Vec::new();
@@ -549,10 +528,12 @@ fn observer_sees_call_result() {
         "Function double(x As Integer) As Integer\n\
          Return x * 2\n\
          EndFunction\n\
-         Print Str(double(21))"
+         Print Str(double(21))",
     );
 
-    let recorder = CallResultRecorder { call_results: Default::default() };
+    let recorder = CallResultRecorder {
+        call_results: Default::default(),
+    };
     let seen = recorder.call_results.clone();
     let mut output = Vec::new();
     {
@@ -585,7 +566,9 @@ impl Observer for ErrorRecorder {
 fn observer_sees_runtime_error() {
     let (ir, interner) = compile_program("TestRaiseError(\"boom\")\n");
 
-    let recorder = ErrorRecorder { errors: Default::default() };
+    let recorder = ErrorRecorder {
+        errors: Default::default(),
+    };
     let seen = recorder.errors.clone();
 
     let mut output = Vec::new();
@@ -617,7 +600,10 @@ fn run_err(src: &str) -> InterpError {
 #[test]
 fn trap_division_by_zero() {
     let err = run_err("Print Str(1 / 0)");
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DivisionByZero)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::DivisionByZero)
+    ));
 }
 
 #[test]
@@ -627,9 +613,12 @@ fn trap_null_deref_field_access() {
            Field x As Int\n\
          EndType\n\
          Dim o As Obj\n\
-         Print Str(o.x)"
+         Print Str(o.x)",
     );
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::NullDeref)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::NullDeref)
+    ));
 }
 
 #[test]
@@ -642,18 +631,24 @@ fn trap_deleted_access_field() {
          o.x = 42\n\
          Dim p As Obj = o\n\
          Delete p\n\
-         Print Str(o.x)"
+         Print Str(o.x)",
     );
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DeletedAccess)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::DeletedAccess)
+    ));
 }
 
 #[test]
 fn trap_index_out_of_bounds() {
     let err = run_err(
         "Dim arr As Int[] = New Int[3]\n\
-         arr[5] = 10"
+         arr[5] = 10",
     );
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::IndexOutOfBounds)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::IndexOutOfBounds)
+    ));
 }
 
 #[test]
@@ -662,9 +657,11 @@ fn trap_stack_overflow() {
         "Function recurse() As Integer\n\
            Return recurse()\n\
          EndFunction\n\
-         Print Str(recurse())"
+         Print Str(recurse())",
     );
-    assert!(matches!(err.kind, InterpErrorKind::RuntimeError(ref msg) if msg.contains("stack overflow")));
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref msg) if msg.contains("stack overflow"))
+    );
 }
 
 #[test]
@@ -675,9 +672,12 @@ fn trap_double_delete() {
          EndType\n\
          Dim o As Obj = New Obj\n\
          Delete o\n\
-         Delete o"
+         Delete o",
     );
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::DoubleDelete)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::DoubleDelete)
+    ));
 }
 
 // ── FD-019: interpreter correctness & memory-safety regressions ─────────
@@ -713,23 +713,20 @@ fn shift_right_basic() {
 fn value_struct_field_write_then_read() {
     // The defining FD-019 bug #2 case: a write to a value-struct field must
     // persist (it previously updated a throwaway register copy).
-    let out = run(
-        "Struct Vec2\n\
+    let out = run("Struct Vec2\n\
            Field x As Int\n\
            Field y As Int\n\
          EndStruct\n\
          Dim p As Vec2\n\
          p.x = 7\n\
          p.y = 9\n\
-         Print Str(p.x + p.y)"
-    );
+         Print Str(p.x + p.y)");
     assert_eq!(out, "16\n");
 }
 
 #[test]
 fn value_struct_nested_field_write() {
-    let out = run(
-        "Struct Inner\n\
+    let out = run("Struct Inner\n\
            Field v As Int\n\
          EndStruct\n\
          Struct Outer\n\
@@ -739,8 +736,7 @@ fn value_struct_nested_field_write() {
          Dim o As Outer\n\
          o.inner.v = 5\n\
          o.w = 3\n\
-         Print Str(o.inner.v + o.w)"
-    );
+         Print Str(o.inner.v + o.w)");
     assert_eq!(out, "8\n");
 }
 
@@ -748,29 +744,25 @@ fn value_struct_nested_field_write() {
 fn value_struct_copy_semantics() {
     // Assigning a struct copies it; mutating the copy must not affect the
     // original.
-    let out = run(
-        "Struct Vec2\n\
+    let out = run("Struct Vec2\n\
            Field x As Int\n\
          EndStruct\n\
          Dim p As Vec2\n\
          p.x = 1\n\
          Dim q As Vec2 = p\n\
          q.x = 99\n\
-         Print Str(p.x)"
-    );
+         Print Str(p.x)");
     assert_eq!(out, "1\n");
 }
 
 #[test]
 fn array_of_structs_field_write_read() {
-    let out = run(
-        "Struct P\n\
+    let out = run("Struct P\n\
            Field x As Int\n\
          EndStruct\n\
          Dim arr As P[] = New P[3]\n\
          arr[1].x = 42\n\
-         Print Str(arr[1].x)"
-    );
+         Print Str(arr[1].x)");
     assert_eq!(out, "42\n");
 }
 
@@ -778,13 +770,11 @@ fn array_of_structs_field_write_read() {
 fn array_of_structs_defaults_to_zero_struct() {
     // FD-019 bug #4: array-of-struct elements default to a zero-initialised
     // struct, not Null — field access must not trap.
-    let out = run(
-        "Struct P\n\
+    let out = run("Struct P\n\
            Field x As Int\n\
          EndStruct\n\
          Dim arr As P[] = New P[2]\n\
-         Print Str(arr[0].x)"
-    );
+         Print Str(arr[0].x)");
     assert_eq!(out, "0\n");
 }
 
@@ -794,7 +784,7 @@ fn array_negative_dimension_is_clean_error() {
     // multi-exabyte allocation that aborts the process.
     let err = run_err(
         "Dim n As Int = -1\n\
-         Dim arr As Int[] = New Int[n]"
+         Dim arr As Int[] = New Int[n]",
     );
     assert!(
         matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array dimension")),
@@ -807,7 +797,7 @@ fn redim_negative_dimension_is_clean_error() {
     let err = run_err(
         "Dim arr As Int[] = New Int[2]\n\
          Dim n As Int = -5\n\
-         Redim arr As Int[n]"
+         Redim arr As Int[n]",
     );
     assert!(
         matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array dimension")),

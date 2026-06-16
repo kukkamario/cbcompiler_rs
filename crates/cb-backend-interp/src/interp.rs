@@ -65,7 +65,7 @@ extern "C" fn host_raise_error(msg: *const CbString) {
 /// callbacks write to the thread-local `PENDING_TRAP` slot.
 static HOST_API: CbHostApi = CbHostApi {
     size: std::mem::size_of::<CbHostApi>() as u32,
-    abi_version: cb_runtime_sys::CB_CATALOG_VERSION,
+    abi_version: cb_runtime_sys::CB_HOST_ABI_VERSION,
     request_exit: host_request_exit,
     raise_error: host_raise_error,
 };
@@ -94,15 +94,23 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     /// literals/coercions and to dispatch concat. Lives in .rodata of the
     /// loaded runtime library; never moves, never drops.
     string_api: &'static CbStringApi,
+    /// Hook table returned by the FD-015 `cb_runtime_init` handshake. Held for
+    /// the reserved `about_to_exit` teardown the design leaves room for; null
+    /// for now, but stashing it keeps the channel wired end-to-end and proves
+    /// the handshake succeeded at construction.
+    #[allow(dead_code)]
+    runtime_hooks: &'static cb_runtime_sys::CbRuntimeHooks,
 }
 
 impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
         let string_api = cb_runtime_sys::string_api();
         // FD-015: hand the runtime the host trap-channel API once, before any
-        // runtime function runs. The returned hooks (about_to_exit) are
-        // reserved/unused for now. Clear any stale pending trap on this thread.
-        let _ = cb_runtime_sys::runtime_init(&HOST_API);
+        // runtime function runs. A failed handshake (declined / ABI-incompatible)
+        // is a fatal startup misconfiguration — fail loudly rather than dispatch
+        // through an unwired trap channel (FD-024). Clear any stale pending trap.
+        let runtime_hooks = cb_runtime_sys::runtime_init(&HOST_API)
+            .unwrap_or_else(|e| panic!("runtime trap-channel handshake failed: {e}"));
         PENDING_TRAP.with(|slot| slot.set(None));
         let struct_defs = &program.struct_defs;
         let globals = program
@@ -130,6 +138,7 @@ impl<'a> Interpreter<'a, NoopObserver> {
             stdout: Box::new(std::io::stdout()),
             observer: NoopObserver,
             string_api,
+            runtime_hooks,
         }
     }
 }
@@ -152,6 +161,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             stdout: self.stdout,
             observer,
             string_api: self.string_api,
+            runtime_hooks: self.runtime_hooks,
         }
     }
 
@@ -201,9 +211,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         return_reg: Option<Reg>,
     ) -> Result<(), InterpError> {
         if self.call_stack.len() >= MAX_CALL_DEPTH {
-            return Err(self.error(InterpErrorKind::RuntimeError(
-                format!("stack overflow: call depth exceeded {MAX_CALL_DEPTH}"),
-            )));
+            return Err(self.error(InterpErrorKind::RuntimeError(format!(
+                "stack overflow: call depth exceeded {MAX_CALL_DEPTH}"
+            ))));
         }
         let func = &self.program.functions[body_index];
         let (mut registers, mut locals) = self.frame_pool.pop().unwrap_or_default();
@@ -247,11 +257,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             if frame.pc < block.insts.len() {
                 let inst = block.insts[frame.pc].clone();
-                self.observer.before_inst(
-                    self.call_stack.last().unwrap(),
-                    &inst.kind,
-                    inst.span,
-                );
+                self.observer
+                    .before_inst(self.call_stack.last().unwrap(), &inst.kind, inst.span);
                 let prev_depth = self.call_stack.len();
                 let result = self.exec_inst(&inst.kind, inst.result, inst.span)?;
                 // If a user-defined Call pushed a new frame, don't store
@@ -317,10 +324,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             .unwrap_or(Value::Void);
                         let return_reg = frame.return_reg;
 
-                        self.observer.on_return(
-                            self.call_stack.last().unwrap(),
-                            &ret_val,
-                        );
+                        self.observer
+                            .on_return(self.call_stack.last().unwrap(), &ret_val);
 
                         let old_frame = self.call_stack.pop().unwrap();
                         self.frame_pool
@@ -345,11 +350,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         // caller's pc was advanced past the call, so the call
                         // instruction is at `pc - 1` of its current block.
                         let caller = self.call_stack.last().unwrap();
-                        let caller_block =
-                            &self.program.functions[caller.body_index].blocks
-                                [caller.current_block.0 as usize];
-                        if let Some(call_inst) =
-                            caller.pc.checked_sub(1).and_then(|i| caller_block.insts.get(i))
+                        let caller_block = &self.program.functions[caller.body_index].blocks
+                            [caller.current_block.0 as usize];
+                        if let Some(call_inst) = caller
+                            .pc
+                            .checked_sub(1)
+                            .and_then(|i| caller_block.insts.get(i))
                         {
                             self.observer.after_inst(
                                 caller,
@@ -366,17 +372,14 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         return Ok(code);
                     }
                     Some(Terminator::Trap(kind)) => {
-                        self.observer.on_trap(
-                            self.call_stack.last().unwrap(),
-                            &kind,
-                            term_span,
-                        );
+                        self.observer
+                            .on_trap(self.call_stack.last().unwrap(), &kind, term_span);
                         return Err(self.trap_error(kind, term_span));
                     }
                     None => {
-                        return Err(self.error(InterpErrorKind::RuntimeError(
-                            "unterminated block".into(),
-                        )));
+                        return Err(
+                            self.error(InterpErrorKind::RuntimeError("unterminated block".into()))
+                        );
                     }
                 }
             }
@@ -459,11 +462,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     .map(|r| frame.registers[r.0 as usize].clone())
                     .collect();
 
-                self.observer.on_call(
-                    self.call_stack.last().unwrap(),
-                    *callee,
-                    &arg_vals,
-                );
+                self.observer
+                    .on_call(self.call_stack.last().unwrap(), *callee, &arg_vals);
 
                 let decl = &self.program.func_table[callee.0 as usize];
                 match &decl.kind {
@@ -632,7 +632,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
                         };
                         match entry.prev {
-                            Some(prev_id) if self.heap.get(prev_id).is_some_and(|e| !e.is_sentinel) => {
+                            Some(prev_id)
+                                if self.heap.get(prev_id).is_some_and(|e| !e.is_sentinel) =>
+                            {
                                 Ok(Value::TypeInstance(prev_id))
                             }
                             _ => Ok(Value::Null),
@@ -731,14 +733,22 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     )),
                 }
             }
-            InstKind::Redim { local, elem_type, dims } => {
+            InstKind::Redim {
+                local,
+                elem_type,
+                dims,
+            } => {
                 let dim_sizes = self.resolve_dims(dims, span)?;
                 let new_val = self.make_array(dim_sizes, elem_type.clone(), span)?;
                 let frame = self.call_stack.last_mut().unwrap();
                 frame.locals[local.0 as usize] = (new_val, false);
                 Ok(Value::Void)
             }
-            InstKind::RedimGlobal { global, elem_type, dims } => {
+            InstKind::RedimGlobal {
+                global,
+                elem_type,
+                dims,
+            } => {
                 let dim_sizes = self.resolve_dims(dims, span)?;
                 let new_val = self.make_array(dim_sizes, elem_type.clone(), span)?;
                 self.globals[global.0 as usize] = (new_val, false);
@@ -747,7 +757,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::Len { array, dim } => {
                 let frame = self.call_stack.last().unwrap();
                 let arr_val = frame.registers[array.0 as usize].clone();
-                let dim_idx = dim.map(|d| self.value_to_i64(&frame.registers[d.0 as usize]) as usize);
+                let dim_idx =
+                    dim.map(|d| self.value_to_i64(&frame.registers[d.0 as usize]) as usize);
                 match arr_val {
                     Value::Array(rc) => {
                         let arr = rc.borrow();
@@ -798,11 +809,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             .map(|r| frame.registers[r.0 as usize].clone())
                             .collect();
 
-                        self.observer.on_call(
-                            self.call_stack.last().unwrap(),
-                            func_id,
-                            &arg_vals,
-                        );
+                        self.observer
+                            .on_call(self.call_stack.last().unwrap(), func_id, &arg_vals);
 
                         let decl = &self.program.func_table[func_id.0 as usize];
                         match &decl.kind {
@@ -823,7 +831,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         Err(self.trap_error(TrapKind::NullFnPtr, span))
                     }
                     _ => Err(self.error_at(
-                        InterpErrorKind::RuntimeError("call_indirect on non-function-pointer".into()),
+                        InterpErrorKind::RuntimeError(
+                            "call_indirect on non-function-pointer".into(),
+                        ),
                         span,
                     )),
                 }
@@ -903,9 +913,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         match (lhs, rhs) {
             (Value::Int(a), Value::Int(b)) => self.int_binop(op, *a as i64, *b as i64, span, false),
             (Value::Long(a), Value::Long(b)) => self.int_binop(op, *a, *b, span, true),
-            (Value::Byte(a), Value::Byte(b)) => self.int_binop(op, *a as i64, *b as i64, span, false),
-            (Value::Short(a), Value::Short(b)) => self.int_binop(op, *a as i64, *b as i64, span, false),
-            (Value::UInt(a), Value::UInt(b)) => self.uint_binop(op, *a as u64, *b as u64, span, false),
+            (Value::Byte(a), Value::Byte(b)) => {
+                self.int_binop(op, *a as i64, *b as i64, span, false)
+            }
+            (Value::Short(a), Value::Short(b)) => {
+                self.int_binop(op, *a as i64, *b as i64, span, false)
+            }
+            (Value::UInt(a), Value::UInt(b)) => {
+                self.uint_binop(op, *a as u64, *b as u64, span, false)
+            }
             (Value::ULong(a), Value::ULong(b)) => self.uint_binop(op, *a, *b, span, true),
 
             (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b, span),
@@ -926,7 +942,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 IrBinOp::Eq => Ok(Value::Bool(a == b)),
                 IrBinOp::NotEq => Ok(Value::Bool(a != b)),
                 _ => Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on type instances")),
+                    InterpErrorKind::RuntimeError(format!(
+                        "invalid binop: {op:?} on type instances"
+                    )),
                     span,
                 )),
             },
@@ -936,7 +954,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 IrBinOp::Eq => Ok(Value::Bool(a == b)),
                 IrBinOp::NotEq => Ok(Value::Bool(a != b)),
                 _ => Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on opaque handles")),
+                    InterpErrorKind::RuntimeError(format!(
+                        "invalid binop: {op:?} on opaque handles"
+                    )),
                     span,
                 )),
             },
@@ -954,7 +974,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 IrBinOp::Eq => Ok(Value::Bool(false)),
                 IrBinOp::NotEq => Ok(Value::Bool(true)),
                 _ => Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null and non-null values")),
+                    InterpErrorKind::RuntimeError(format!(
+                        "invalid binop: {op:?} on null and non-null values"
+                    )),
                     span,
                 )),
             },
@@ -977,7 +999,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         wide: bool,
     ) -> Result<Value, InterpError> {
         let wrap = |v: i64| -> Value {
-            if wide { Value::Long(v) } else { Value::Int(v as i32) }
+            if wide {
+                Value::Long(v)
+            } else {
+                Value::Int(v as i32)
+            }
         };
 
         match op {
@@ -1061,7 +1087,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         wide: bool,
     ) -> Result<Value, InterpError> {
         let wrap = |v: u64| -> Value {
-            if wide { Value::ULong(v) } else { Value::UInt(v as u32) }
+            if wide {
+                Value::ULong(v)
+            } else {
+                Value::UInt(v as u32)
+            }
         };
 
         match op {
@@ -1110,7 +1140,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
 
             _ => Err(self.error_at(
-                InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on unsigned integers")),
+                InterpErrorKind::RuntimeError(format!(
+                    "invalid binop: {op:?} on unsigned integers"
+                )),
                 span,
             )),
         }
@@ -1210,12 +1242,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
-    fn convert_value(
-        &self,
-        v: &Value,
-        from: &IrType,
-        to: &IrType,
-    ) -> Result<Value, InterpError> {
+    fn convert_value(&self, v: &Value, from: &IrType, to: &IrType) -> Result<Value, InterpError> {
         // Language-level conversion to an integer type uses CoolBasic's
         // `toInt` semantics (cb_runtime.md §Math): a Float is rounded to the
         // nearest integer with ties going **away from zero** (`10.5 → 11`,
@@ -1346,9 +1373,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     None => return Err(self.trap_error(TrapKind::DoubleDelete, span)),
                 };
 
-                let prev = entry.prev.unwrap_or(
-                    self.type_lists[entry.type_def.0 as usize].sentinel,
-                );
+                let prev = entry
+                    .prev
+                    .unwrap_or(self.type_lists[entry.type_def.0 as usize].sentinel);
                 let type_def = entry.type_def;
 
                 self.type_lists[type_def.0 as usize].unlink(&mut self.heap, id);

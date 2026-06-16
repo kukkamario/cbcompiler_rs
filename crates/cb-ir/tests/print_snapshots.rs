@@ -77,10 +77,21 @@ fn program(
 }
 
 /// A single-function, single-block program with no globals/types/func_table.
-fn single_fn_program(name: Symbol, locals: Vec<Local>, insts: Vec<Inst>, term: Terminator) -> Program {
+fn single_fn_program(
+    name: Symbol,
+    locals: Vec<Local>,
+    insts: Vec<Inst>,
+    term: Terminator,
+) -> Program {
     program(
         Vec::new(),
-        vec![func(name, Vec::new(), IrType::Void, locals, vec![block(0, insts, term)])],
+        vec![func(
+            name,
+            Vec::new(),
+            IrType::Void,
+            locals,
+            vec![block(0, insts, term)],
+        )],
         Vec::new(),
         Vec::new(),
     )
@@ -105,7 +116,10 @@ fn globals_locals_and_signature() {
             fname,
             vec![IrType::Float, IrType::Int],
             IrType::Int,
-            vec![local(dt, IrType::Float, true), local(tmp, IrType::Int, false)],
+            vec![
+                local(dt, IrType::Float, true),
+                local(tmp, IrType::Int, false),
+            ],
             vec![block(0, vec![], Terminator::Return { value: None })],
         )],
         vec![global(score, IrType::Int), global(hiscore, IrType::Long)],
@@ -219,7 +233,12 @@ fn memory_and_variable_insts() {
                 value: Reg(0),
             },
         ),
-        inst(Some(1), InstKind::LoadGlobal { global: GlobalId(0) }),
+        inst(
+            Some(1),
+            InstKind::LoadGlobal {
+                global: GlobalId(0),
+            },
+        ),
         inst(
             None,
             InstKind::StoreGlobal {
@@ -227,7 +246,12 @@ fn memory_and_variable_insts() {
                 value: Reg(1),
             },
         ),
-        inst(Some(2), InstKind::NewType { type_def: TypeDefId(0) }),
+        inst(
+            Some(2),
+            InstKind::NewType {
+                type_def: TypeDefId(0),
+            },
+        ),
         inst(
             Some(3),
             InstKind::NewArray {
@@ -255,7 +279,10 @@ fn memory_and_variable_insts() {
             None,
             InstKind::StorePlace {
                 root: PlaceRoot::Local(LocalId(0)),
-                path: vec![Projection::Field(hp), Projection::Index(vec![Reg(0), Reg(1)])],
+                path: vec![
+                    Projection::Field(hp),
+                    Projection::Index(vec![Reg(0), Reg(1)]),
+                ],
                 value: Reg(4),
             },
         ),
@@ -296,12 +323,27 @@ fn type_list_and_delete_insts() {
     let enemy = i.intern("Enemy");
 
     let insts = vec![
-        inst(Some(0), InstKind::First { type_def: TypeDefId(0) }),
-        inst(Some(1), InstKind::Last { type_def: TypeDefId(0) }),
+        inst(
+            Some(0),
+            InstKind::First {
+                type_def: TypeDefId(0),
+            },
+        ),
+        inst(
+            Some(1),
+            InstKind::Last {
+                type_def: TypeDefId(0),
+            },
+        ),
         inst(Some(2), InstKind::Next { object: Reg(0) }),
         inst(Some(3), InstKind::Previous { object: Reg(1) }),
         inst(None, InstKind::DeleteLvalue { local: LocalId(0) }),
-        inst(None, InstKind::DeleteLvalueGlobal { global: GlobalId(0) }),
+        inst(
+            None,
+            InstKind::DeleteLvalueGlobal {
+                global: GlobalId(0),
+            },
+        ),
         inst(None, InstKind::DeleteRvalue { value: Reg(0) }),
     ];
     let prog = program(
@@ -331,7 +373,13 @@ fn intrinsics_and_calls() {
     let garr = i.intern("garr");
 
     let insts = vec![
-        inst(Some(0), InstKind::Len { array: Reg(50), dim: None }),
+        inst(
+            Some(0),
+            InstKind::Len {
+                array: Reg(50),
+                dim: None,
+            },
+        ),
         inst(
             Some(1),
             InstKind::Len {
@@ -461,7 +509,9 @@ fn all_terminators() {
         block(
             2,
             vec![inst(Some(1), InstKind::ConstInt(0))],
-            Terminator::Return { value: Some(Reg(1)) },
+            Terminator::Return {
+                value: Some(Reg(1)),
+            },
         ),
         block(3, vec![], Terminator::Return { value: None }),
         block(4, vec![], Terminator::Halt { code: 1 }),

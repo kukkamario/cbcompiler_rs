@@ -16,10 +16,11 @@ language and runtime references.
 
 ## Prerequisites (all platforms)
 
-Building the workspace **always** compiles the C++ runtime in [`runtime/`](runtime/)
-(`cb-runtime-sys` is an unconditional dependency of the `cb` driver, even for the
-interp-only default build). That runtime links **Allegro 5** and its addons
-(`primitives`, `image`, `font`, `ttf`, `audio`, `acodec`). So every build needs:
+`cb-runtime-sys` is an unconditional dependency of the `cb` driver (even the
+interp-only default build), so building the workspace compiles the C++ runtime in
+[`runtime/`](runtime/). The **full** runtime — graphics, input, audio, and text —
+links **Allegro 5** and its addons (`primitives`, `image`, `font`, `ttf`, `audio`,
+`acodec`), which needs:
 
 | Tool | Minimum | Notes |
 |------|---------|-------|
@@ -27,6 +28,13 @@ interp-only default build). That runtime links **Allegro 5** and its addons
 | CMake | ≥ 3.20 | drives the runtime build |
 | C++ compiler | C++20 with `<format>` | MSVC on Windows; **GCC ≥ 13** on Linux (see note) |
 | Allegro 5 + addons | via vcpkg | see per-platform setup below |
+
+> **No Allegro toolchain?** You don't need it just to build the compiler and run
+> the language-core tests. `cb-runtime-sys` automatically falls back to an
+> [SDK-free build](#sdk-free-build-no-allegro-toolchain) — Rust + a C++ compiler,
+> no CMake/Allegro/vcpkg — so `cargo build` and `cargo test --workspace` work on
+> any machine (CI, cloud, containers). Graphics/input/audio are omitted and those
+> fixtures skip. Ideal for CI.
 
 ### Why vcpkg?
 
@@ -37,6 +45,40 @@ pkg-config and will **not** satisfy this build. The build script
 (`crates/cb-runtime-sys/build.rs`) automatically uses vcpkg when it finds
 `runtime/vcpkg/scripts/buildsystems/vcpkg.cmake`. The dependency set is declared
 in [`runtime/vcpkg.json`](runtime/vcpkg.json).
+
+---
+
+## SDK-free build (no Allegro toolchain)
+
+Everything above is only needed for the **full** runtime (graphics, input, audio,
+text). To just build the compiler and run the language-core tests — in CI, a cloud
+session, or a container without a graphics toolchain — you need **only Rust and a
+C++20 compiler**; no CMake, vcpkg, or Allegro. `cb-runtime-sys`'s build script
+picks the path automatically:
+
+| Situation | Build path |
+|-----------|-----------|
+| `cmake` present and Allegro configures cleanly | full Allegro build (complete catalog) |
+| `cmake` absent, or the Allegro configure/build fails | **SDK-free** `cc` build (language-core catalog) |
+| `CB_RUNTIME_FORCE_SDK_FREE=1` | SDK-free build, no probing — fastest for CI |
+| `CB_RUNTIME_REQUIRE_ALLEGRO=1` | full build, hard error if it fails (no fallback) |
+
+The SDK-free path compiles the Allegro-free runtime translation units plus the
+catalog (with `-DCB_NO_ALLEGRO`) directly via the
+[`cc`](https://crates.io/crates/cc) crate — a real `cb_runtime_get_catalog` for
+every language-core function, using the *same* string implementation as the full
+build (no mock). When taken it prints a `cargo:warning` and sets
+`cb_runtime_sys::HAS_GRAPHICS = false`; graphics/input fixtures gate on that and
+skip cleanly. (The GCC ≥ 13 `<format>` requirement above comes from Allegro's
+audio dependency and does **not** apply to the SDK-free build.)
+
+```sh
+# Force it explicitly — e.g. in CI — to skip the CMake/Allegro probe entirely:
+CB_RUNTIME_FORCE_SDK_FREE=1 cargo test --workspace
+```
+
+For the design and internals, see
+[`docs/cb_runtime.md`](docs/cb_runtime.md#sdk-free-build-fd-033).
 
 ---
 

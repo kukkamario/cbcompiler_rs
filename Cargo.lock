@@ -145,6 +145,7 @@ name = "cb-runtime-sys"
 version = "0.1.0"
 dependencies = [
  "cb-ir",
+ "cc",
 ]
 
 [[package]]

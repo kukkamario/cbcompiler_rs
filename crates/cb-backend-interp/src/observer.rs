@@ -1,6 +1,6 @@
 use cb_diagnostics::Span;
-use cb_ir::inst::{InstKind, TrapKind};
 use cb_ir::FuncId;
+use cb_ir::inst::{InstKind, TrapKind};
 
 use crate::interp::Frame;
 use crate::value::Value;

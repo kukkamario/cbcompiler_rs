@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Proves FD-033: the workspace builds and the full test suite runs on Linux
+  # with only a Rust toolchain + a C++ compiler — no CMake, vcpkg, or Allegro
+  # SDK. CB_RUNTIME_FORCE_SDK_FREE makes build.rs skip the CMake/Allegro probe
+  # and compile the Allegro-free runtime slice via the `cc` crate. Graphics /
+  # input / audio fixtures gate on HAS_GRAPHICS and skip cleanly.
+  linux-sdk-free:
+    name: Linux SDK-free runtime (no Allegro)
+    runs-on: ubuntu-latest
+    env:
+      CB_RUNTIME_FORCE_SDK_FREE: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test (workspace)
+        run: cargo test --workspace --locked
+
+      - name: Clippy (workspace, all targets)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings

@@ -19,11 +19,23 @@ pub enum Type {
     String,
 
     // Composite
-    Array { elem: Box<Type>, rank: u8 },
-    TypeRef { name: Symbol },
-    StructVal { name: Symbol },
-    FnPtr { params: Vec<Type>, ret: Option<Box<Type>> },
-    RuntimeType { name: Symbol },
+    Array {
+        elem: Box<Type>,
+        rank: u8,
+    },
+    TypeRef {
+        name: Symbol,
+    },
+    StructVal {
+        name: Symbol,
+    },
+    FnPtr {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
+    RuntimeType {
+        name: Symbol,
+    },
 
     // Special
     Null,
@@ -58,7 +70,10 @@ impl Type {
     }
 
     pub fn is_reference(&self) -> bool {
-        matches!(self, Type::TypeRef { .. } | Type::Array { .. } | Type::FnPtr { .. })
+        matches!(
+            self,
+            Type::TypeRef { .. } | Type::Array { .. } | Type::FnPtr { .. }
+        )
     }
 }
 
@@ -94,18 +109,11 @@ pub fn kw_to_type(kw: Kw) -> Option<Type> {
 /// that happens during pass 2 when all declarations are known. For now we
 /// return `TypeRef` for any `TypeExpr::Named`, which pass 2 may refine to
 /// `StructVal` once it knows the declaration kind.
-pub fn resolve_type_expr(
-    arena: &Arena,
-    id: NodeId,
-    interner: &mut Interner,
-    source: &str,
-) -> Type {
+pub fn resolve_type_expr(arena: &Arena, id: NodeId, interner: &mut Interner, source: &str) -> Type {
     use cb_frontend::SpanExt;
 
     match &arena[id] {
-        Node::TypeExpr(TypeExpr::Primitive { kw }) => {
-            kw_to_type(*kw).unwrap_or(Type::Error)
-        }
+        Node::TypeExpr(TypeExpr::Primitive { kw }) => kw_to_type(*kw).unwrap_or(Type::Error),
         Node::TypeExpr(TypeExpr::Named { name_span }) => {
             let name = name_span.slice(source);
             let sym = interner.intern(name);
@@ -152,10 +160,7 @@ pub fn resolve_type_expr(
 /// - Sigil only → sigil's type
 /// - As only → the As type
 /// - Both → must agree (error if not)
-pub fn resolve_var_type(
-    sigil: Option<Sigil>,
-    as_ty: Option<&Type>,
-) -> (Type, bool) {
+pub fn resolve_var_type(sigil: Option<Sigil>, as_ty: Option<&Type>) -> (Type, bool) {
     match (sigil, as_ty) {
         (None, None) => (Type::Int, false),
         (Some(s), None) => (sigil_to_type(s), false),
@@ -175,10 +180,7 @@ pub fn resolve_var_type(
 /// optional `As` return type annotation.
 ///
 /// If neither is present, the function is a Sub (returns Void).
-pub fn resolve_return_type(
-    return_sigil: Option<Sigil>,
-    return_ty: Option<&Type>,
-) -> (Type, bool) {
+pub fn resolve_return_type(return_sigil: Option<Sigil>, return_ty: Option<&Type>) -> (Type, bool) {
     match (return_sigil, return_ty) {
         (None, None) => (Type::Void, false),
         (Some(s), None) => (sigil_to_type(s), false),
@@ -307,8 +309,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
 
         // Logical
         BinOp::And | BinOp::Or | BinOp::Xor => {
-            if (*lhs == Type::Bool || lhs.is_numeric())
-                && (*rhs == Type::Bool || rhs.is_numeric())
+            if (*lhs == Type::Bool || lhs.is_numeric()) && (*rhs == Type::Bool || rhs.is_numeric())
             {
                 Some(Type::Bool)
             } else {
@@ -377,28 +378,58 @@ mod tests {
     #[test]
     fn binary_pow_is_float() {
         // `^` always yields Float (cb_syntax.md §3.4).
-        assert_eq!(binary_result_type(BinOp::Pow, &Type::Int, &Type::Int), Some(Type::Float));
-        assert_eq!(binary_result_type(BinOp::Pow, &Type::Float, &Type::Int), Some(Type::Float));
-        assert_eq!(binary_result_type(BinOp::Pow, &Type::Int, &Type::String), None);
+        assert_eq!(
+            binary_result_type(BinOp::Pow, &Type::Int, &Type::Int),
+            Some(Type::Float)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Pow, &Type::Float, &Type::Int),
+            Some(Type::Float)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Pow, &Type::Int, &Type::String),
+            None
+        );
     }
 
     #[test]
     fn binary_add_numeric() {
-        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::Int), Some(Type::Int));
-        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::Float), Some(Type::Float));
-        assert_eq!(binary_result_type(BinOp::Add, &Type::Byte, &Type::Long), Some(Type::Long));
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::Int, &Type::Int),
+            Some(Type::Int)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::Int, &Type::Float),
+            Some(Type::Float)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::Byte, &Type::Long),
+            Some(Type::Long)
+        );
     }
 
     #[test]
     fn binary_add_string() {
-        assert_eq!(binary_result_type(BinOp::Add, &Type::String, &Type::String), Some(Type::String));
-        assert_eq!(binary_result_type(BinOp::Add, &Type::Int, &Type::String), Some(Type::String));
-        assert_eq!(binary_result_type(BinOp::Add, &Type::String, &Type::Float), Some(Type::String));
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::String, &Type::String),
+            Some(Type::String)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::Int, &Type::String),
+            Some(Type::String)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Add, &Type::String, &Type::Float),
+            Some(Type::String)
+        );
     }
 
     #[test]
     fn binary_sub_requires_numeric() {
-        assert_eq!(binary_result_type(BinOp::Sub, &Type::Int, &Type::Float), Some(Type::Float));
+        assert_eq!(
+            binary_result_type(BinOp::Sub, &Type::Int, &Type::Float),
+            Some(Type::Float)
+        );
         assert!(binary_result_type(BinOp::Sub, &Type::String, &Type::Int).is_none());
     }
 
@@ -407,17 +438,38 @@ mod tests {
         // FD-028: `/` is integer division when both operands are integers, and
         // floating-point division when either operand is a Float (which
         // promotes both). There is no separate `\` integer-division operator.
-        assert_eq!(binary_result_type(BinOp::Div, &Type::Int, &Type::Int), Some(Type::Int));
-        assert_eq!(binary_result_type(BinOp::Div, &Type::Int, &Type::Float), Some(Type::Float));
-        assert_eq!(binary_result_type(BinOp::Div, &Type::Float, &Type::Float), Some(Type::Float));
+        assert_eq!(
+            binary_result_type(BinOp::Div, &Type::Int, &Type::Int),
+            Some(Type::Int)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Div, &Type::Int, &Type::Float),
+            Some(Type::Float)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Div, &Type::Float, &Type::Float),
+            Some(Type::Float)
+        );
     }
 
     #[test]
     fn binary_comparison_returns_bool() {
-        assert_eq!(binary_result_type(BinOp::Eq, &Type::Int, &Type::Int), Some(Type::Bool));
-        assert_eq!(binary_result_type(BinOp::Lt, &Type::Int, &Type::Float), Some(Type::Bool));
-        assert_eq!(binary_result_type(BinOp::Eq, &Type::String, &Type::String), Some(Type::Bool));
-        assert_eq!(binary_result_type(BinOp::Eq, &Type::Bool, &Type::Bool), Some(Type::Bool));
+        assert_eq!(
+            binary_result_type(BinOp::Eq, &Type::Int, &Type::Int),
+            Some(Type::Bool)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Lt, &Type::Int, &Type::Float),
+            Some(Type::Bool)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Eq, &Type::String, &Type::String),
+            Some(Type::Bool)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Eq, &Type::Bool, &Type::Bool),
+            Some(Type::Bool)
+        );
     }
 
     #[test]
@@ -428,27 +480,48 @@ mod tests {
 
     #[test]
     fn binary_logical() {
-        assert_eq!(binary_result_type(BinOp::And, &Type::Bool, &Type::Bool), Some(Type::Bool));
-        assert_eq!(binary_result_type(BinOp::Or, &Type::Int, &Type::Bool), Some(Type::Bool));
-        assert_eq!(binary_result_type(BinOp::Xor, &Type::Bool, &Type::Int), Some(Type::Bool));
+        assert_eq!(
+            binary_result_type(BinOp::And, &Type::Bool, &Type::Bool),
+            Some(Type::Bool)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Or, &Type::Int, &Type::Bool),
+            Some(Type::Bool)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Xor, &Type::Bool, &Type::Int),
+            Some(Type::Bool)
+        );
     }
 
     #[test]
     fn binary_bitwise_requires_integer() {
-        assert_eq!(binary_result_type(BinOp::BinAnd, &Type::Int, &Type::Int), Some(Type::Int));
+        assert_eq!(
+            binary_result_type(BinOp::BinAnd, &Type::Int, &Type::Int),
+            Some(Type::Int)
+        );
         assert!(binary_result_type(BinOp::BinAnd, &Type::Float, &Type::Int).is_none());
     }
 
     #[test]
     fn binary_shift_preserves_lhs() {
-        assert_eq!(binary_result_type(BinOp::Shl, &Type::Byte, &Type::Int), Some(Type::Byte));
-        assert_eq!(binary_result_type(BinOp::Shr, &Type::Long, &Type::Short), Some(Type::Long));
+        assert_eq!(
+            binary_result_type(BinOp::Shl, &Type::Byte, &Type::Int),
+            Some(Type::Byte)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Shr, &Type::Long, &Type::Short),
+            Some(Type::Long)
+        );
     }
 
     #[test]
     fn unary_result_types() {
         assert_eq!(unary_result_type(UnOp::Neg, &Type::Int), Some(Type::Int));
-        assert_eq!(unary_result_type(UnOp::Neg, &Type::Float), Some(Type::Float));
+        assert_eq!(
+            unary_result_type(UnOp::Neg, &Type::Float),
+            Some(Type::Float)
+        );
         assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
         assert_eq!(unary_result_type(UnOp::Not, &Type::Bool), Some(Type::Bool));
         assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Bool));
@@ -456,4 +529,3 @@ mod tests {
         assert!(unary_result_type(UnOp::BinNot, &Type::Float).is_none());
     }
 }
-

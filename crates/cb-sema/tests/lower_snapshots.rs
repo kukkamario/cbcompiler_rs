@@ -4,7 +4,7 @@
 //! the printed IR output via `insta`.
 
 use cb_diagnostics::FileId;
-use cb_frontend::lexer::{tokenize, LexerOptions};
+use cb_frontend::lexer::{LexerOptions, tokenize};
 use cb_frontend::parser::parse;
 
 fn empty_catalog() -> cb_sema::RuntimeCatalog {
@@ -20,11 +20,7 @@ fn lower_src(src: &str) -> String {
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
     let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog());
-    assert!(
-        !sema.has_errors(),
-        "sema errors: {:?}",
-        sema.diagnostics
-    );
+    assert!(!sema.has_errors(), "sema errors: {:?}", sema.diagnostics);
     let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, src, &mut sema);
     cb_ir::verify::verify(&ir);
     cb_ir::print::print_program(&ir, &sema.interner)
@@ -86,9 +82,7 @@ fn string_concat_mixed() {
 
 #[test]
 fn if_else() {
-    let ir = lower_src(
-        "Dim x As Int\nIf x = 0 Then\n  x = 1\nElse\n  x = 2\nEndIf\n",
-    );
+    let ir = lower_src("Dim x As Int\nIf x = 0 Then\n  x = 1\nElse\n  x = 2\nEndIf\n");
     insta::assert_snapshot!(ir);
 }
 
@@ -106,9 +100,8 @@ fn for_loop() {
 
 #[test]
 fn nested_for_loops() {
-    let ir = lower_src(
-        "Dim i As Int\nDim j As Int\nFor i = 0 To 3\n  For j = 0 To 5\n  Next\nNext\n",
-    );
+    let ir =
+        lower_src("Dim i As Int\nDim j As Int\nFor i = 0 To 3\n  For j = 0 To 5\n  Next\nNext\n");
     insta::assert_snapshot!(ir);
 }
 
@@ -172,9 +165,7 @@ fn short_circuit_and() {
 
 #[test]
 fn function_local_const() {
-    let ir = lower_src(
-        "Function Foo() As Int\n  Const X = 42\n  Return X\nEnd Function\n",
-    );
+    let ir = lower_src("Function Foo() As Int\n  Const X = 42\n  Return X\nEnd Function\n");
     insta::assert_snapshot!(ir);
 }
 
@@ -189,11 +180,7 @@ fn lower_with_catalog(src: &str, catalog: &cb_sema::RuntimeCatalog) -> String {
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
     let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, catalog);
-    assert!(
-        !sema.has_errors(),
-        "sema errors: {:?}",
-        sema.diagnostics
-    );
+    assert!(!sema.has_errors(), "sema errors: {:?}", sema.diagnostics);
     let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, src, &mut sema);
     cb_ir::verify::verify(&ir);
     cb_ir::print::print_program(&ir, &sema.interner)
@@ -230,8 +217,14 @@ fn runtime_function_call() {
 fn bare_overloaded_command_lowers_to_call() {
     let two_param = || {
         vec![
-            cb_sema::FuncParamDesc { name: None, ty: cb_ir::types::IrType::Int },
-            cb_sema::FuncParamDesc { name: None, ty: cb_ir::types::IrType::Int },
+            cb_sema::FuncParamDesc {
+                name: None,
+                ty: cb_ir::types::IrType::Int,
+            },
+            cb_sema::FuncParamDesc {
+                name: None,
+                ty: cb_ir::types::IrType::Int,
+            },
         ]
     };
     let catalog = cb_sema::RuntimeCatalog {

@@ -9,21 +9,50 @@ use crate::{BlockId, FuncId, GlobalId, LocalId, Reg, TypeDefId};
 #[derive(Clone, Debug, PartialEq)]
 pub enum InstKind {
     // ── Arithmetic & Logic ──────────────────────────────────────────
-    BinOp { op: IrBinOp, lhs: Reg, rhs: Reg },
-    UnOp { op: IrUnOp, operand: Reg },
+    BinOp {
+        op: IrBinOp,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    UnOp {
+        op: IrUnOp,
+        operand: Reg,
+    },
 
     // ── Memory & Variables ──────────────────────────────────────────
-    LoadLocal { local: LocalId },
-    StoreLocal { local: LocalId, value: Reg },
-    LoadGlobal { global: GlobalId },
-    StoreGlobal { global: GlobalId, value: Reg },
+    LoadLocal {
+        local: LocalId,
+    },
+    StoreLocal {
+        local: LocalId,
+        value: Reg,
+    },
+    LoadGlobal {
+        global: GlobalId,
+    },
+    StoreGlobal {
+        global: GlobalId,
+        value: Reg,
+    },
 
-    NewType { type_def: TypeDefId },
-    NewArray { elem_type: IrType, dims: Vec<Reg> },
+    NewType {
+        type_def: TypeDefId,
+    },
+    NewArray {
+        elem_type: IrType,
+        dims: Vec<Reg>,
+    },
 
-    GetField { object: Reg, field: Symbol, field_type: IrType },
+    GetField {
+        object: Reg,
+        field: Symbol,
+        field_type: IrType,
+    },
 
-    GetElement { array: Reg, indices: Vec<Reg> },
+    GetElement {
+        array: Reg,
+        indices: Vec<Reg>,
+    },
 
     /// Store `value` into the place rooted at a local/global variable,
     /// following a chain of field/index projections and mutating in place.
@@ -35,29 +64,65 @@ pub enum InstKind {
     /// mutate a throwaway copy; addressing the owning slot is what makes
     /// value-struct field writes persist. Array and type-instance steps along
     /// the path are reference types and are mutated through their handles.
-    StorePlace { root: PlaceRoot, path: Vec<Projection>, value: Reg },
+    StorePlace {
+        root: PlaceRoot,
+        path: Vec<Projection>,
+        value: Reg,
+    },
 
     // ── Type-Linked-List Operations ─────────────────────────────────
-    First { type_def: TypeDefId },
-    Last { type_def: TypeDefId },
-    Next { object: Reg },
-    Previous { object: Reg },
+    First {
+        type_def: TypeDefId,
+    },
+    Last {
+        type_def: TypeDefId,
+    },
+    Next {
+        object: Reg,
+    },
+    Previous {
+        object: Reg,
+    },
 
-    DeleteLvalue { local: LocalId },
-    DeleteLvalueGlobal { global: GlobalId },
-    DeleteRvalue { value: Reg },
+    DeleteLvalue {
+        local: LocalId,
+    },
+    DeleteLvalueGlobal {
+        global: GlobalId,
+    },
+    DeleteRvalue {
+        value: Reg,
+    },
 
     // ── Compiler Intrinsics ─────────────────────────────────────────
-    Len { array: Reg, dim: Option<Reg> },
+    Len {
+        array: Reg,
+        dim: Option<Reg>,
+    },
     /// `Len(s$)` — length of a string in Unicode codepoints. Distinct from
     /// `Len` (arrays) because the operand and length semantics differ.
-    StrLen { s: Reg },
-    ConvertExplicit { value: Reg, target: IrType },
-    Convert { value: Reg, from: IrType, to: IrType },
+    StrLen {
+        s: Reg,
+    },
+    ConvertExplicit {
+        value: Reg,
+        target: IrType,
+    },
+    Convert {
+        value: Reg,
+        from: IrType,
+        to: IrType,
+    },
 
     // ── Function Calls ──────────────────────────────────────────────
-    Call { callee: FuncId, args: Vec<Reg> },
-    CallIndirect { callee: Reg, args: Vec<Reg> },
+    Call {
+        callee: FuncId,
+        args: Vec<Reg>,
+    },
+    CallIndirect {
+        callee: Reg,
+        args: Vec<Reg>,
+    },
 
     // ── Constants ───────────────────────────────────────────────────
     ConstInt(i64),
@@ -68,14 +133,24 @@ pub enum InstKind {
     ConstNull,
 
     // ── Array ───────────────────────────────────────────────────────
-    Redim { local: LocalId, elem_type: IrType, dims: Vec<Reg> },
-    RedimGlobal { global: GlobalId, elem_type: IrType, dims: Vec<Reg> },
+    Redim {
+        local: LocalId,
+        elem_type: IrType,
+        dims: Vec<Reg>,
+    },
+    RedimGlobal {
+        global: GlobalId,
+        elem_type: IrType,
+        dims: Vec<Reg>,
+    },
 
     /// Total number of elements in an array across all dimensions (the product
     /// of every dimension length). Distinct from [`InstKind::Len`], which
     /// yields a single axis length: the `For Each` desugar uses this to walk an
     /// array of any rank in row-major order (cb_syntax.md §6.3).
-    ArrayTotalLen { array: Reg },
+    ArrayTotalLen {
+        array: Reg,
+    },
 
     /// Element access by a single flat (row-major) index into an array of any
     /// rank, bypassing per-dimension index decoding. Paired with
@@ -83,7 +158,10 @@ pub enum InstKind {
     /// backing store is row-major, visiting flat positions `0..total` yields
     /// elements last-index-fastest, matching §6.3. Unlike [`InstKind::GetElement`]
     /// (which requires one index per dimension), exactly one index is given.
-    GetElementFlat { array: Reg, index: Reg },
+    GetElementFlat {
+        array: Reg,
+        index: Reg,
+    },
 }
 
 /// The owning storage a [`InstKind::StorePlace`] path is rooted at. Every

@@ -1,6 +1,7 @@
 # FD-024: Runtime FFI ABI-Handshake & Catalog-Decode Hardening
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-16
 **Priority:** Medium
 **Effort:** Medium (2-4 hours)
 **Impact:** Makes the FD-015 ABI handshake actually run in shipped code (today it's validated only inside a test), handles the runtime-declines path the sole caller currently throws away, and refactors `load_catalog` so its (majority) defensive code becomes testable.
@@ -21,13 +22,21 @@ Coverage / consistency items folded in:
 - **`CbFuncDesc.flags` is decode-dead and unpinned** (`lib.rs:39`): present in the `repr(C)` mirror but never read into `FuncDesc`, with no static layout assertion to catch ABI drift in this trailing field.
 - **`build.rs::strip_unc` double-unwraps `to_str()`** (`build.rs:6-14`) and panics on a non-UTF-8 `OUT_DIR`/runtime path.
 
+## Resolved Decisions (2026-06-16)
+
+1. **`runtime_init` returns `Result<&'static CbRuntimeHooks, String>`** (not `Option`). This distinguishes "runtime declined" from "ABI-incompatible hook table" with a diagnostic string, matching `load_catalog`'s style.
+2. **Host-API ABI is decoupled from the catalog version.** Introduce a new `CB_HOST_ABI_VERSION` constant (C header + Rust mirror) for the trap-channel/host ABI; the host sets `abi_version = CB_HOST_ABI_VERSION` and `cb_runtime_init` validates against that, *not* `CB_CATALOG_VERSION`. A catalog data bump (e.g. FD-029 v6) no longer forces a host re-version.
+3. **Init failure is a hard-fail.** When `cb_runtime_init` returns null / ABI-incompatible, the interpreter aborts at startup (panic, like `string_api()`'s `assert!`), since proceeding risks a null `cb_host()` deref inside `cb_rt_*`.
+4. **Duplicate detection covers type tags ONLY.** *(Revised during implementation — supersedes the original "tags + c_symbols" decision.)* Duplicate type tags are a real bug: `tag_to_name.insert` silently overwrites, misresolving type references. But `c_symbol` is **not** a uniqueness key: the interpreter dispatches by `fn_ptr` + IR signature (`interp.rs:1412`), and the live catalog deliberately shares one C symbol across distinct CB names (`putpixel` / `putpixel2` → `cb_rt_put_pixel_argb`, `catalog.cpp:335-336`) as an alias. Function *names* are likewise overloaded by design (`abs` → `cb_rt_abs_int` / `cb_rt_abs_float`). So neither name nor symbol is deduped — only tags.
+5. **No scoped `#[allow(unsafe_code)]` needed for tests.** *(Revised — the original note assumed the crate denied unsafe.)* `cb-runtime-sys` already sets `unsafe_code = "allow"` crate-wide (`Cargo.toml:11-12`), so the decoder fixtures can construct raw `*const c_char` directly. The workspace-wide `deny` is overridden only for this FFI crate.
+
 ## Solution
 
 In `cb-runtime-sys` (+ a touch of C and the interp caller):
 
-- **Validate the handshake on the live path:** in `runtime_init`, return `None`/`Err` unless `hooks.size >= size_of::<CbRuntimeHooks>()` (and `abi_version` matches); move the size check out of the test into the wrapper. On the C side, have `cb_runtime_init` reject hosts whose `size`/`abi_version` don't meet the minimum.
-- **Handle the result at the caller:** in `cb-backend-interp`, inspect the `Option` — at minimum log/abort if `runtime_init` returns `None`, and stash the hooks for the `about_to_exit` teardown the FD-015 design reserves. If hooks are intentionally unused for now, document why instead of a bare `let _`.
-- **Duplicate detection:** check `HashMap::insert`'s returned previous value and return `Err` on a repeated tag; likewise detect duplicate `c_symbol`s (the interpreter dispatches by symbol).
+- **Validate the handshake on the live path:** `runtime_init` returns `Err` unless `hooks.size >= size_of::<CbRuntimeHooks>()`; move the size check out of the test into the wrapper. On the C side, have `cb_runtime_init` reject hosts whose `size`/`abi_version` don't meet the minimum (`size >= sizeof(CbHostApi)` and `abi_version == CB_HOST_ABI_VERSION`), returning null when rejected.
+- **Handle the result at the caller:** in `cb-backend-interp`, hard-fail (panic) if `runtime_init` returns `Err`, and stash the hooks for the `about_to_exit` teardown the FD-015 design reserves. If hooks are intentionally unused for now, document why instead of a bare `let _`.
+- **Duplicate detection (type tags only):** check `HashMap::insert`'s returned previous value and return `Err` on a repeated type tag. Do **not** dedup `c_symbol`s or function names — the interpreter dispatches by `fn_ptr`, and the catalog deliberately reuses both (aliases like `putpixel`/`putpixel2`, overloads like `abs`). See Resolved Decision #4.
 - **UTF-8 consistency:** make param-name decoding return `Err` on invalid UTF-8 to match the other three sites (or document the leniency).
 - **Testability refactor:** split the decode into a private fn taking `&CbCatalog` (or raw parts), leaving `load_catalog` a thin fetch+call. Unit-test the decoder against hand-built `CbCatalog` fixtures (version-mismatch, null pointers, reserved tag `<10`, bad UTF-8, duplicate tags), plus a `type_tag_to_ir_type` table test (each primitive, a custom-tag hit, an unknown-tag miss).
 - **Layout pinning:** add static `size_of`/`offset_of` assertions for `CbFuncDesc`/`CbCatalog`/`CbHostApi`/`CbRuntimeHooks` against the C definitions; mark `flags` as intentionally-unconsumed or wire it in.
@@ -50,6 +59,16 @@ In `cb-runtime-sys` (+ a touch of C and the interp caller):
   - `runtime_init` rejects a deliberately undersized/mismatched host.
   - Static layout assertions compile.
 - `cargo test --workspace` + `clippy -- -D warnings` green; the live interpreter still initializes against the real runtime.
+
+## Verification Results (2026-06-16)
+
+All steps from the plan above passed:
+
+- **`cargo test -p cb-runtime-sys`** — 19 passed. Covers `type_tag_to_ir_type` (each primitive, custom hit, unknown miss), the decoder against hand-built malformed catalogs (version mismatch, null pointers, reserved/duplicate tags, bad UTF-8 in type and param names, unsupported const tag), the legal alias/overload shapes (`putpixel`/`putpixel2`, `abs`), and `runtime_init` happy-path + ABI-mismatch rejection (the new C reject branch, exercised end-to-end).
+- **Static layout pins compiled** on both sides — the Rust `const`-assertions and the C `static_assert`s built clean, confirming `CbHostApi`/`CbRuntimeHooks`/`CbFuncDesc`/`CbCatalog` layouts agree.
+- **`cargo test --workspace`** — all suites green, no regressions (incl. `cb-backend-interp`, which now panics on a failed handshake instead of discarding the result).
+- **`cargo clippy --workspace --all-targets -- -D warnings`** — exit 0 (only the environmental Windows incremental-compilation file-lock notice, present on untouched crates too).
+- **Live interpreter** — `recursion_factorial.cb` (1/1/120/3628800) and `runtime_math.cb` ran correctly through the real `cb_runtime_init` handshake, confirming the validated host channel dispatches actual `cb_rt_*` runtime functions.
 
 ## Related
 

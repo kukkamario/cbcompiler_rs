@@ -114,7 +114,10 @@ fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
         InstKind::LoadLocal { local } | InstKind::StoreLocal { local, .. } => check(*local),
         InstKind::DeleteLvalue { local } => check(*local),
         InstKind::Redim { local, .. } => check(*local),
-        InstKind::StorePlace { root: PlaceRoot::Local(local), .. } => check(*local),
+        InstKind::StorePlace {
+            root: PlaceRoot::Local(local),
+            ..
+        } => check(*local),
         _ => {}
     }
 }
@@ -139,7 +142,9 @@ fn verify_inst_type_defs(kind: &InstKind, num_type_defs: u32) {
     };
 
     match kind {
-        InstKind::NewType { type_def } | InstKind::First { type_def } | InstKind::Last { type_def } => {
+        InstKind::NewType { type_def }
+        | InstKind::First { type_def }
+        | InstKind::Last { type_def } => {
             check(*type_def);
         }
         _ => {}
@@ -160,7 +165,10 @@ fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
         | InstKind::StoreGlobal { global, .. }
         | InstKind::DeleteLvalueGlobal { global }
         | InstKind::RedimGlobal { global, .. } => check(*global),
-        InstKind::StorePlace { root: PlaceRoot::Global(global), .. } => check(*global),
+        InstKind::StorePlace {
+            root: PlaceRoot::Global(global),
+            ..
+        } => check(*global),
         _ => {}
     }
 }
@@ -252,10 +260,7 @@ fn verify_terminator_targets(term: &Terminator, num_blocks: u32) {
     // Block ids are dense and index-aligned (see `verify`), so a target is
     // valid iff it is in range.
     let check = |id: BlockId| {
-        assert!(
-            id.0 < num_blocks,
-            "terminator references non-existent {id}",
-        );
+        assert!(id.0 < num_blocks, "terminator references non-existent {id}",);
     };
 
     match term {
@@ -290,11 +295,11 @@ fn verify_terminator_regs(term: &Terminator, defined: &HashSet<Reg>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cb_diagnostics::{Span, Symbol};
-    use cb_diagnostics::source::FileId;
     use crate::inst::{IrBinOp, TrapKind};
     use crate::types::{FnSig, IrType};
     use crate::{BasicBlock, FuncDecl, Function, Inst, Local, Program};
+    use cb_diagnostics::source::FileId;
+    use cb_diagnostics::{Span, Symbol};
 
     const DUMMY_SPAN: Span = Span::new(0, 0, FileId::SYNTHETIC);
 
@@ -428,7 +433,9 @@ mod tests {
         let prog = valid_one_block(
             vec![],
             vec![],
-            Terminator::Return { value: Some(Reg(0)) },
+            Terminator::Return {
+                value: Some(Reg(0)),
+            },
         );
         verify(&prog);
     }
@@ -664,31 +671,59 @@ mod tests {
     fn accept_consts_string_binop_and_convert() {
         let prog = valid_one_block(
             vec![
-                Inst { result: Some(Reg(0)), kind: InstKind::ConstInt(1), span: DUMMY_SPAN },
-                Inst { result: Some(Reg(1)), kind: InstKind::ConstLong(2), span: DUMMY_SPAN },
-                Inst { result: Some(Reg(2)), kind: InstKind::ConstFloat(3.0), span: DUMMY_SPAN },
+                Inst {
+                    result: Some(Reg(0)),
+                    kind: InstKind::ConstInt(1),
+                    span: DUMMY_SPAN,
+                },
+                Inst {
+                    result: Some(Reg(1)),
+                    kind: InstKind::ConstLong(2),
+                    span: DUMMY_SPAN,
+                },
+                Inst {
+                    result: Some(Reg(2)),
+                    kind: InstKind::ConstFloat(3.0),
+                    span: DUMMY_SPAN,
+                },
                 Inst {
                     result: Some(Reg(3)),
                     kind: InstKind::ConstString("hi".to_string()),
                     span: DUMMY_SPAN,
                 },
-                Inst { result: Some(Reg(4)), kind: InstKind::ConstNull, span: DUMMY_SPAN },
+                Inst {
+                    result: Some(Reg(4)),
+                    kind: InstKind::ConstNull,
+                    span: DUMMY_SPAN,
+                },
                 // String concatenation of two strings.
                 Inst {
                     result: Some(Reg(5)),
-                    kind: InstKind::BinOp { op: IrBinOp::StrConcat, lhs: Reg(3), rhs: Reg(3) },
+                    kind: InstKind::BinOp {
+                        op: IrBinOp::StrConcat,
+                        lhs: Reg(3),
+                        rhs: Reg(3),
+                    },
                     span: DUMMY_SPAN,
                 },
                 // Comparison binop (result is Bool).
                 Inst {
                     result: Some(Reg(6)),
-                    kind: InstKind::BinOp { op: IrBinOp::Lt, lhs: Reg(0), rhs: Reg(0) },
+                    kind: InstKind::BinOp {
+                        op: IrBinOp::Lt,
+                        lhs: Reg(0),
+                        rhs: Reg(0),
+                    },
                     span: DUMMY_SPAN,
                 },
                 // Numeric conversion.
                 Inst {
                     result: Some(Reg(7)),
-                    kind: InstKind::Convert { value: Reg(0), from: IrType::Int, to: IrType::Float },
+                    kind: InstKind::Convert {
+                        value: Reg(0),
+                        from: IrType::Int,
+                        to: IrType::Float,
+                    },
                     span: DUMMY_SPAN,
                 },
             ],
