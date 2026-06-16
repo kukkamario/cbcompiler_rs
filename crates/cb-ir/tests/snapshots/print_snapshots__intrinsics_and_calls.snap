@@ -17,6 +17,7 @@ fn calls() -> Void {
     r4 = convert r0: Int -> Long
     r5 = call spawn, r0, r1
     r6 = call_indirect r5, r0
+    r7 = func_addr spawn
     redim local0, Int, r0
     redim global0, Float, r0, r1
     return

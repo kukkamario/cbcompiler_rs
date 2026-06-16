@@ -337,6 +337,18 @@ fn array_multidim_and_len_dim() {
     insta::assert_snapshot!(ir);
 }
 
+// FD-032: a bare function name in value position takes the function's address
+// (cb_syntax.md §7.4), lowering to `func_addr <name>` — the sole producer of a
+// non-null function pointer, consumed by `call_indirect`.
+#[test]
+fn function_address_lowers_to_func_addr() {
+    let ir = lower_src(
+        "Function add(a As Integer, b As Integer) As Integer\n  Return a + b\nEndFunction\n\
+         Dim fp As Function(Integer, Integer) As Integer\nfp = add\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
 #[test]
 fn redim_local_and_global() {
     let ir = lower_src(

@@ -35,3 +35,7 @@ pub const E_CONST_FLOAT_DIV_ZERO: DiagnosticCode = DiagnosticCode::new("E0327");
 /// assignment. Implicit declarations may not shadow commands; an explicit
 /// `Dim` is required (FD-027).
 pub const E_RUNTIME_COMMAND_AS_VAR: DiagnosticCode = DiagnosticCode::new("E0328");
+/// A bare overloaded or built-in command name was used in value position to
+/// take its address. Only non-overloaded user-defined functions/subs have a
+/// single well-defined address (cb_syntax.md §7.2/§7.4).
+pub const E_ADDRESS_OF_UNSUPPORTED: DiagnosticCode = DiagnosticCode::new("E0329");

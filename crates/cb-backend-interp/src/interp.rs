@@ -404,6 +404,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             ))),
             InstKind::ConstNull => Ok(Value::Null),
 
+            // ── Function address ───────────────────────────────────
+            InstKind::FuncAddr { func } => Ok(Value::FnPtr(Some(*func))),
+
             // ── Local/Global load/store ────────────────────────────
             InstKind::LoadLocal { local } => {
                 let frame = self.call_stack.last().unwrap();

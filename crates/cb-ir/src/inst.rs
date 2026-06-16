@@ -123,6 +123,15 @@ pub enum InstKind {
         callee: Reg,
         args: Vec<Reg>,
     },
+    /// Materialize the address of a user-defined function as a fn-pointer
+    /// value. The result register holds a value of IR type `FnPtr(sig-of func)`
+    /// (interpreter: `Value::FnPtr(Some(func))`). This is the sole producer of a
+    /// non-null function pointer; calling through one routes to
+    /// [`InstKind::CallIndirect`]. `func` indexes `Program::func_table`, like
+    /// [`InstKind::Call`]'s `callee` (the verifier bounds-checks it).
+    FuncAddr {
+        func: FuncId,
+    },
 
     // ── Constants ───────────────────────────────────────────────────
     ConstInt(i64),
