@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn strip_unc(path: PathBuf) -> PathBuf {
-    // Strip \\?\ UNC prefix that confuses MSVC on Windows
-    PathBuf::from(
-        path.to_str()
-            .unwrap()
-            .strip_prefix(r"\\?\")
-            .unwrap_or(path.to_str().unwrap()),
-    )
+    // Strip the \\?\ UNC prefix that confuses MSVC on Windows. Only relevant
+    // on Windows; on a non-UTF-8 path we can't string-manipulate it, so leave
+    // it untouched rather than panicking (FD-024).
+    if !cfg!(windows) {
+        return path;
+    }
+    match path.to_str() {
+        Some(s) => PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s)),
+        None => path,
+    }
 }
 
 fn main() {

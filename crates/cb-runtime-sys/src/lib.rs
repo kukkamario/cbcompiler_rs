@@ -38,6 +38,10 @@ pub struct CbFuncDesc {
     pub params: *const CbParamDesc,
     pub param_count: u32,
     pub return_type: u32,
+    /// Catalog flag bits (`CB_FUNC_CAN_TRAP`, …). Intentionally **not** decoded
+    /// into `FuncDesc`: the interpreter drains the trap channel after every call
+    /// regardless, so it has no consumer today. Kept in the `repr(C)` mirror so
+    /// the layout matches C exactly; the static layout assert below pins it.
     pub flags: u32,
 }
 
@@ -110,9 +114,28 @@ pub struct CbRuntimeHooks {
     pub about_to_exit: Option<extern "C" fn()>,
 }
 
+// ── ABI layout pins (FD-024) ───────────────────────────────────────────
+// Mirror the C `static_assert`s in runtime/cb_runtime_core.h. Any drift in
+// either the Rust mirror or the C struct fails the build on its own side
+// before a mismatched layout can cross the FFI boundary. Offsets guard the
+// trailing fields most likely to drift (flags, the strings tail pointer).
+const _: () = {
+    assert!(std::mem::size_of::<CbHostApi>() == 24);
+    assert!(std::mem::size_of::<CbRuntimeHooks>() == 16);
+    assert!(std::mem::size_of::<CbFuncDesc>() == 48);
+    assert!(std::mem::size_of::<CbCatalog>() == 56);
+    assert!(std::mem::offset_of!(CbFuncDesc, flags) == 40);
+    assert!(std::mem::offset_of!(CbCatalog, strings) == 48);
+};
+
 // ── Constants ──────────────────────────────────────────────────────────
 
 pub const CB_CATALOG_VERSION: u32 = 6;
+
+/// Host trap-channel ABI version (FD-015/FD-024). Mirrors C `CB_HOST_ABI_VERSION`.
+/// Versions the `CbHostApi`/`CbRuntimeHooks` handshake independently of the
+/// catalog data format — see [`runtime_init`].
+pub const CB_HOST_ABI_VERSION: u32 = 1;
 const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
@@ -164,29 +187,59 @@ pub fn string_api() -> &'static CbStringApi {
 }
 
 /// Deliver the host API to the runtime (the Runtime Trap Channel handshake,
-/// FD-015) and return the hook table the runtime wants connected, or `None`
-/// if it declines. Call once at interpreter startup, before any runtime
-/// function runs. `host` must outlive every runtime call — pass a `&'static`.
-pub fn runtime_init(host: &'static CbHostApi) -> Option<&'static CbRuntimeHooks> {
+/// FD-015) and return the hook table the runtime wants connected. Call once at
+/// interpreter startup, before any runtime function runs. `host` must outlive
+/// every runtime call — pass a `&'static`.
+///
+/// Returns `Err` if the runtime declines the handshake (`cb_runtime_init`
+/// returns null — e.g. it rejected our `size`/`abi_version`) or hands back a
+/// hook table too small for our [`CbRuntimeHooks`] mirror (ABI-incompatible).
+/// Both are fatal startup misconfigurations the caller should surface, not
+/// absorb.
+pub fn runtime_init(host: &'static CbHostApi) -> Result<&'static CbRuntimeHooks, String> {
     let hooks = unsafe { cb_runtime_init(host) };
     if hooks.is_null() {
-        None
-    } else {
-        Some(unsafe { &*hooks })
+        return Err(
+            "cb_runtime_init declined the handshake (returned null — host ABI rejected)".to_string(),
+        );
     }
+    let hooks = unsafe { &*hooks };
+    let min = std::mem::size_of::<CbRuntimeHooks>();
+    if (hooks.size as usize) < min {
+        return Err(format!(
+            "runtime hook table too small: reported size {} < expected {min} (ABI mismatch)",
+            hooks.size
+        ));
+    }
+    Ok(hooks)
 }
 
 // ── Safe conversion ────────────────────────────────────────────────────
 
 /// Load the runtime catalog and convert it to a `RuntimeCatalog` suitable
-/// for passing to `cb_sema::analyze`.
+/// for passing to `cb_sema::analyze`. Thin wrapper: fetch the catalog pointer
+/// from the linked runtime, null-check it, and hand it to [`decode_catalog`],
+/// which holds all version/layout validation and is unit-testable against
+/// hand-built fixtures.
 pub fn load_catalog() -> Result<RuntimeCatalog, String> {
     let catalog_ptr = unsafe { cb_runtime_get_catalog() };
     if catalog_ptr.is_null() {
         return Err("cb_runtime_get_catalog() returned null".to_string());
     }
+    decode_catalog(unsafe { &*catalog_ptr })
+}
 
-    let catalog = unsafe { &*catalog_ptr };
+/// Decode a `CbCatalog` into a `RuntimeCatalog`, validating version, pointers,
+/// tags, UTF-8, and uniqueness. Split out from [`load_catalog`] so the
+/// defensive branches can be exercised by tests that build malformed catalogs
+/// directly (the real linked runtime always returns a valid one).
+///
+/// # Safety-adjacent contract
+/// `catalog` and every pointer it transitively references (name strings, the
+/// type/func/const/param arrays) must be valid for the duration of the call.
+/// The real caller satisfies this with the runtime's static catalog; tests
+/// satisfy it by keeping their fixture backing data alive across the call.
+fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
     if catalog.version != CB_CATALOG_VERSION {
         return Err(format!(
             "unsupported catalog version {} (expected {})",
@@ -219,7 +272,12 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
                     td.tag
                 ));
             }
-            tag_to_name.insert(td.tag, name.clone());
+            if tag_to_name.insert(td.tag, name.clone()).is_some() {
+                return Err(format!(
+                    "duplicate runtime type tag {} (type '{name}' collides with an earlier type)",
+                    td.tag
+                ));
+            }
             custom_types.push(RuntimeTypeDesc {
                 name,
                 tag: td.tag,
@@ -274,7 +332,9 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
                         Some(
                             unsafe { CStr::from_ptr(p.name) }
                                 .to_str()
-                                .unwrap_or("_")
+                                .map_err(|e| {
+                                    format!("invalid UTF-8 in param name for function '{name}': {e}")
+                                })?
                                 .to_string(),
                         )
                     };
@@ -554,12 +614,296 @@ mod tests {
         extern "C" fn noop_error(_msg: *const CbString) {}
         static HOST: CbHostApi = CbHostApi {
             size: std::mem::size_of::<CbHostApi>() as u32,
-            abi_version: CB_CATALOG_VERSION,
+            abi_version: CB_HOST_ABI_VERSION,
             request_exit: noop_exit,
             raise_error: noop_error,
         };
         let hooks = runtime_init(&HOST).expect("runtime_init should return a hook table");
         assert_eq!(hooks.size as usize, std::mem::size_of::<CbRuntimeHooks>());
         assert!(hooks.about_to_exit.is_none());
+    }
+
+    #[test]
+    fn runtime_init_rejects_abi_mismatch() {
+        // FD-024: a host advertising a different host ABI is declined by the C
+        // `cb_runtime_init` (returns null), surfaced as Err — never stored. The
+        // rejection path leaves g_host untouched, so this is safe to run beside
+        // the happy-path roundtrip test.
+        extern "C" fn noop_exit(_code: i32) {}
+        extern "C" fn noop_error(_msg: *const CbString) {}
+        static BAD_HOST: CbHostApi = CbHostApi {
+            size: std::mem::size_of::<CbHostApi>() as u32,
+            abi_version: CB_HOST_ABI_VERSION + 1,
+            request_exit: noop_exit,
+            raise_error: noop_error,
+        };
+        match runtime_init(&BAD_HOST) {
+            Err(e) => assert!(e.contains("declined"), "got: {e}"),
+            Ok(_) => panic!("expected the runtime to decline an ABI-mismatched host"),
+        }
+    }
+
+    // ── type_tag_to_ir_type ─────────────────────────────────────────────
+
+    #[test]
+    fn type_tag_maps_each_primitive() {
+        let empty = HashMap::new();
+        let cases = [
+            (CB_TYPE_VOID, IrType::Void),
+            (CB_TYPE_BYTE, IrType::Byte),
+            (CB_TYPE_SHORT, IrType::Short),
+            (CB_TYPE_INT, IrType::Int),
+            (CB_TYPE_UINT, IrType::UInt),
+            (CB_TYPE_LONG, IrType::Long),
+            (CB_TYPE_ULONG, IrType::ULong),
+            (CB_TYPE_FLOAT, IrType::Float),
+            (CB_TYPE_BOOL, IrType::Bool),
+            (CB_TYPE_STRING, IrType::String),
+        ];
+        for (tag, expected) in cases {
+            assert_eq!(type_tag_to_ir_type(tag, &empty).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn type_tag_custom_hit_and_unknown_miss() {
+        let mut custom = HashMap::new();
+        custom.insert(42u32, "Widget".to_string());
+        assert_eq!(
+            type_tag_to_ir_type(42, &custom).unwrap(),
+            IrType::RuntimeType("Widget".to_string())
+        );
+        let err = type_tag_to_ir_type(99, &custom).unwrap_err();
+        assert!(err.contains("unknown type tag"), "got: {err}");
+    }
+
+    // ── decode_catalog fixtures ─────────────────────────────────────────
+    //
+    // The crate sets `unsafe_code = "allow"`, so tests can hand `decode_catalog`
+    // hand-built `CbCatalog`s with raw pointers into test-owned backing data.
+    // Every fixture keeps its CStrings / arrays in locals that outlive the call.
+
+    use std::ffi::{CString, c_char};
+
+    unsafe extern "C" fn dummy_fn() {}
+
+    fn empty_catalog() -> CbCatalog {
+        CbCatalog {
+            version: CB_CATALOG_VERSION,
+            type_count: 0,
+            types: std::ptr::null(),
+            func_count: 0,
+            funcs: std::ptr::null(),
+            const_count: 0,
+            consts: std::ptr::null(),
+            strings: std::ptr::null(),
+        }
+    }
+
+    #[test]
+    fn decode_accepts_empty_catalog() {
+        let cat = decode_catalog(&empty_catalog()).expect("empty catalog is valid");
+        assert!(cat.types.is_empty() && cat.functions.is_empty() && cat.constants.is_empty());
+    }
+
+    #[test]
+    fn decode_rejects_version_mismatch() {
+        let mut c = empty_catalog();
+        c.version = CB_CATALOG_VERSION + 1;
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("unsupported catalog version"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_null_types_ptr() {
+        let mut c = empty_catalog();
+        c.type_count = 1; // pointer stays null
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("null types pointer"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_null_type_name() {
+        let types = [CbTypeDesc { name: std::ptr::null(), tag: 10 }];
+        let mut c = empty_catalog();
+        c.type_count = 1;
+        c.types = types.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("null type name"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_reserved_tag() {
+        let name = CString::new("Bad").unwrap();
+        let types = [CbTypeDesc { name: name.as_ptr(), tag: 9 }];
+        let mut c = empty_catalog();
+        c.type_count = 1;
+        c.types = types.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("reserved tag"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_bad_utf8_type_name() {
+        // 0xFF is not valid UTF-8; NUL-terminated so CStr reads exactly [0xFF].
+        let bad: [u8; 2] = [0xFF, 0x00];
+        let types = [CbTypeDesc { name: bad.as_ptr() as *const c_char, tag: 10 }];
+        let mut c = empty_catalog();
+        c.type_count = 1;
+        c.types = types.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("invalid UTF-8 in type name"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_duplicate_tag() {
+        let a = CString::new("Alpha").unwrap();
+        let b = CString::new("Beta").unwrap();
+        let types = [
+            CbTypeDesc { name: a.as_ptr(), tag: 10 },
+            CbTypeDesc { name: b.as_ptr(), tag: 10 },
+        ];
+        let mut c = empty_catalog();
+        c.type_count = 2;
+        c.types = types.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("duplicate runtime type tag"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_null_fn_ptr() {
+        let name = CString::new("foo").unwrap();
+        let sym = CString::new("cb_rt_foo").unwrap();
+        let funcs = [CbFuncDesc {
+            name: name.as_ptr(),
+            symbol: sym.as_ptr(),
+            fn_ptr: None,
+            params: std::ptr::null(),
+            param_count: 0,
+            return_type: CB_TYPE_VOID,
+            flags: 0,
+        }];
+        let mut c = empty_catalog();
+        c.func_count = 1;
+        c.funcs = funcs.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("null fn_ptr"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_allows_overloaded_names() {
+        // Same name, distinct symbols — the legal `abs` overload shape.
+        let name = CString::new("abs").unwrap();
+        let s1 = CString::new("cb_rt_abs_int").unwrap();
+        let s2 = CString::new("cb_rt_abs_float").unwrap();
+        let funcs = [
+            CbFuncDesc {
+                name: name.as_ptr(),
+                symbol: s1.as_ptr(),
+                fn_ptr: Some(dummy_fn),
+                params: std::ptr::null(),
+                param_count: 0,
+                return_type: CB_TYPE_INT,
+                flags: 0,
+            },
+            CbFuncDesc {
+                name: name.as_ptr(),
+                symbol: s2.as_ptr(),
+                fn_ptr: Some(dummy_fn),
+                params: std::ptr::null(),
+                param_count: 0,
+                return_type: CB_TYPE_FLOAT,
+                flags: 0,
+            },
+        ];
+        let mut c = empty_catalog();
+        c.func_count = 2;
+        c.funcs = funcs.as_ptr();
+        let cat = decode_catalog(&c).expect("overloaded names are valid");
+        assert_eq!(cat.functions.len(), 2);
+        assert!(cat.functions.iter().all(|f| f.name == "abs"));
+    }
+
+    #[test]
+    fn decode_allows_shared_symbol_aliases() {
+        // Two distinct CB names backed by ONE C symbol — the real catalog's
+        // putpixel/putpixel2 → cb_rt_put_pixel_argb shape. Dispatch is by
+        // fn_ptr, not symbol, so this is legal and must not be rejected.
+        let n1 = CString::new("putpixel").unwrap();
+        let n2 = CString::new("putpixel2").unwrap();
+        let sym = CString::new("cb_rt_put_pixel_argb").unwrap();
+        let mk = |name: &CString| CbFuncDesc {
+            name: name.as_ptr(),
+            symbol: sym.as_ptr(),
+            fn_ptr: Some(dummy_fn),
+            params: std::ptr::null(),
+            param_count: 0,
+            return_type: CB_TYPE_VOID,
+            flags: 0,
+        };
+        let funcs = [mk(&n1), mk(&n2)];
+        let mut c = empty_catalog();
+        c.func_count = 2;
+        c.funcs = funcs.as_ptr();
+        let cat = decode_catalog(&c).expect("shared-symbol aliases are valid");
+        assert_eq!(cat.functions.len(), 2);
+        assert!(cat.functions.iter().all(|f| f.c_symbol == "cb_rt_put_pixel_argb"));
+    }
+
+    #[test]
+    fn decode_rejects_bad_utf8_param_name() {
+        let name = CString::new("foo").unwrap();
+        let sym = CString::new("cb_rt_foo").unwrap();
+        let bad: [u8; 2] = [0xFF, 0x00];
+        let params = [CbParamDesc { name: bad.as_ptr() as *const c_char, ty: CB_TYPE_INT }];
+        let funcs = [CbFuncDesc {
+            name: name.as_ptr(),
+            symbol: sym.as_ptr(),
+            fn_ptr: Some(dummy_fn),
+            params: params.as_ptr(),
+            param_count: 1,
+            return_type: CB_TYPE_VOID,
+            flags: 0,
+        }];
+        let mut c = empty_catalog();
+        c.func_count = 1;
+        c.funcs = funcs.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("invalid UTF-8 in param name"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_unsupported_const_tag() {
+        let name = CString::new("Greeting").unwrap();
+        let consts = [CbConstDesc { name: name.as_ptr(), tag: CB_TYPE_STRING, value_bits: 0 }];
+        let mut c = empty_catalog();
+        c.const_count = 1;
+        c.consts = consts.as_ptr();
+        let err = decode_catalog(&c).unwrap_err();
+        assert!(err.contains("unsupported type tag"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_accepts_int_and_float_consts() {
+        let on = CString::new("On").unwrap();
+        let pi = CString::new("PI").unwrap();
+        let consts = [
+            CbConstDesc { name: on.as_ptr(), tag: CB_TYPE_INT, value_bits: 1 },
+            CbConstDesc {
+                name: pi.as_ptr(),
+                tag: CB_TYPE_FLOAT,
+                value_bits: std::f64::consts::PI.to_bits(),
+            },
+        ];
+        let mut c = empty_catalog();
+        c.const_count = 2;
+        c.consts = consts.as_ptr();
+        let cat = decode_catalog(&c).expect("int/float consts are valid");
+        assert_eq!(cat.constants.len(), 2);
+        assert_eq!(cat.constants[0].value, RuntimeConstValue::Int(1));
+        match cat.constants[1].value {
+            RuntimeConstValue::Float(v) => assert!((v - std::f64::consts::PI).abs() < 1e-12),
+            ref other => panic!("expected Float, got {other:?}"),
+        }
     }
 }

@@ -65,7 +65,7 @@ extern "C" fn host_raise_error(msg: *const CbString) {
 /// callbacks write to the thread-local `PENDING_TRAP` slot.
 static HOST_API: CbHostApi = CbHostApi {
     size: std::mem::size_of::<CbHostApi>() as u32,
-    abi_version: cb_runtime_sys::CB_CATALOG_VERSION,
+    abi_version: cb_runtime_sys::CB_HOST_ABI_VERSION,
     request_exit: host_request_exit,
     raise_error: host_raise_error,
 };
@@ -94,15 +94,23 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     /// literals/coercions and to dispatch concat. Lives in .rodata of the
     /// loaded runtime library; never moves, never drops.
     string_api: &'static CbStringApi,
+    /// Hook table returned by the FD-015 `cb_runtime_init` handshake. Held for
+    /// the reserved `about_to_exit` teardown the design leaves room for; null
+    /// for now, but stashing it keeps the channel wired end-to-end and proves
+    /// the handshake succeeded at construction.
+    #[allow(dead_code)]
+    runtime_hooks: &'static cb_runtime_sys::CbRuntimeHooks,
 }
 
 impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
         let string_api = cb_runtime_sys::string_api();
         // FD-015: hand the runtime the host trap-channel API once, before any
-        // runtime function runs. The returned hooks (about_to_exit) are
-        // reserved/unused for now. Clear any stale pending trap on this thread.
-        let _ = cb_runtime_sys::runtime_init(&HOST_API);
+        // runtime function runs. A failed handshake (declined / ABI-incompatible)
+        // is a fatal startup misconfiguration — fail loudly rather than dispatch
+        // through an unwired trap channel (FD-024). Clear any stale pending trap.
+        let runtime_hooks = cb_runtime_sys::runtime_init(&HOST_API)
+            .unwrap_or_else(|e| panic!("runtime trap-channel handshake failed: {e}"));
         PENDING_TRAP.with(|slot| slot.set(None));
         let struct_defs = &program.struct_defs;
         let globals = program
@@ -130,6 +138,7 @@ impl<'a> Interpreter<'a, NoopObserver> {
             stdout: Box::new(std::io::stdout()),
             observer: NoopObserver,
             string_api,
+            runtime_hooks,
         }
     }
 }
@@ -152,6 +161,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             stdout: self.stdout,
             observer,
             string_api: self.string_api,
+            runtime_hooks: self.runtime_hooks,
         }
     }
 

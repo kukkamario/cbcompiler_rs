@@ -23,6 +23,12 @@
 
 #define CB_CATALOG_VERSION 6
 
+/* Host trap-channel ABI version (FD-015). Versions the CbHostApi/CbRuntimeHooks
+ * handshake independently of the catalog data format: a catalog bump (e.g. v6
+ * for runtime constants) must NOT force hosts to re-version when CbHostApi is
+ * unchanged. cb_runtime_init rejects hosts whose abi_version != this. */
+#define CB_HOST_ABI_VERSION 1
+
 typedef uint32_t CbTypeTag;
 #define CB_TYPE_VOID    0
 #define CB_TYPE_BYTE    1
@@ -140,7 +146,7 @@ typedef struct {
 
 typedef struct {
     uint32_t size;             /* sizeof(CbHostApi) — caller-set ABI guard */
-    uint32_t abi_version;      /* == CB_CATALOG_VERSION */
+    uint32_t abi_version;      /* == CB_HOST_ABI_VERSION */
     void (*request_exit)(int32_t code);        /* clean exit; host → Ok(code) */
     void (*raise_error)(const CbString* msg);  /* fatal runtime error → exit 1 */
     /* grow by appending; readers gate on `size` */
@@ -158,6 +164,15 @@ typedef struct {
    interpreter drains the channel unconditionally after every call and ignores
    this bit. */
 #define CB_FUNC_CAN_TRAP 0x1u
+
+/* ABI layout pins (FD-024). These sizes are mirrored by `const`-assertions in
+   crates/cb-runtime-sys/src/lib.rs; any drift fails the build on both sides
+   before a mismatched struct can reach the FFI boundary. Sizes are the LP64 /
+   Win64 repr(C) layout (8-byte pointers, natural alignment). */
+static_assert(sizeof(CbHostApi)      == 24, "CbHostApi ABI drift");
+static_assert(sizeof(CbRuntimeHooks) == 16, "CbRuntimeHooks ABI drift");
+static_assert(sizeof(CbFuncDesc)     == 48, "CbFuncDesc ABI drift");
+static_assert(sizeof(CbCatalog)      == 56, "CbCatalog ABI drift");
 
 #ifdef __cplusplus
 extern "C" {
