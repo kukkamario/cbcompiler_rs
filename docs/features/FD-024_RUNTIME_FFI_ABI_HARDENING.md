@@ -1,6 +1,6 @@
 # FD-024: Runtime FFI ABI-Handshake & Catalog-Decode Hardening
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** Medium (2-4 hours)
 **Impact:** Makes the FD-015 ABI handshake actually run in shipped code (today it's validated only inside a test), handles the runtime-declines path the sole caller currently throws away, and refactors `load_catalog` so its (majority) defensive code becomes testable.
@@ -58,6 +58,16 @@ In `cb-runtime-sys` (+ a touch of C and the interp caller):
   - `runtime_init` rejects a deliberately undersized/mismatched host.
   - Static layout assertions compile.
 - `cargo test --workspace` + `clippy -- -D warnings` green; the live interpreter still initializes against the real runtime.
+
+## Verification Results (2026-06-16)
+
+All steps from the plan above passed:
+
+- **`cargo test -p cb-runtime-sys`** — 19 passed. Covers `type_tag_to_ir_type` (each primitive, custom hit, unknown miss), the decoder against hand-built malformed catalogs (version mismatch, null pointers, reserved/duplicate tags, bad UTF-8 in type and param names, unsupported const tag), the legal alias/overload shapes (`putpixel`/`putpixel2`, `abs`), and `runtime_init` happy-path + ABI-mismatch rejection (the new C reject branch, exercised end-to-end).
+- **Static layout pins compiled** on both sides — the Rust `const`-assertions and the C `static_assert`s built clean, confirming `CbHostApi`/`CbRuntimeHooks`/`CbFuncDesc`/`CbCatalog` layouts agree.
+- **`cargo test --workspace`** — all suites green, no regressions (incl. `cb-backend-interp`, which now panics on a failed handshake instead of discarding the result).
+- **`cargo clippy --workspace --all-targets -- -D warnings`** — exit 0 (only the environmental Windows incremental-compilation file-lock notice, present on untouched crates too).
+- **Live interpreter** — `recursion_factorial.cb` (1/1/120/3628800) and `runtime_math.cb` ran correctly through the real `cb_runtime_init` handshake, confirming the validated host channel dispatches actual `cb_rt_*` runtime functions.
 
 ## Related
 
