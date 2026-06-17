@@ -910,40 +910,47 @@ fn for_each_multiple_mid_list_deletes() {
     assert_eq!(out, "9\n");
 }
 
-// ── FD-032: narrow integer widths (cb_syntax.md §3.1/§3.4) ─────────────
-
-// NOTE: the following three tests are #[ignore]d because FD-032 surfaced a
-// pre-existing numeric bug now tracked as FD-035: `Dim x As <narrow/unsigned> =
-// <int literal>` is not coerced to the declared type (`check_dim` only checks
-// the init, never `coerce`s it), so the variable holds a plain `Int`. A shift on
-// it then dispatches as 32-bit signed (`eval_binop` also needs LHS-type dispatch
-// for shift counts). Un-ignore these as part of FD-035.
+// ── FD-035: narrow integer widths + Int-as-boolean (cb_syntax.md §3.1/§3.4) ──
 
 #[test]
-#[ignore = "FD-035: Dim-init not coerced to declared narrow type; UInt holds Int -> signed shift"]
-fn uint_shift_stays_unsigned_32bit() {
-    // A UInt shift stays unsigned: 1 Shl 31 = 2147483648, which a signed Int
-    // could not represent (it would be -2147483648). Exercises uint_binop.
-    let out = run("Dim u As UInt = 1\nPrint Str(u Shl 31)");
-    assert_eq!(out, "2147483648\n");
-}
-
-#[test]
-#[ignore = "FD-035: Dim-init not coerced to declared narrow type; ULong holds Int -> signed 32-bit shift"]
-fn ulong_shift_stays_unsigned_64bit() {
-    // A ULong shift stays unsigned 64-bit: 1 Shl 63 overflows a signed Long.
-    let out = run("Dim u As ULong = 1\nPrint Str(u Shl 63)");
-    assert_eq!(out, "9223372036854775808\n");
-}
-
-#[test]
-#[ignore = "FD-035: Dim-init not coerced to declared type; `s` stays Int, so this would not actually test Short storage (also Value::Short(i16) vs documented unsigned)"]
 fn short_holds_documented_unsigned_range() {
-    // cb_syntax.md §3.1: Short is 16-bit UNSIGNED, so 40000 is in range. (Also
-    // probes the Value::Short(i16) signed-vs-documented-unsigned mismatch once
-    // the Dim-init coercion lands.)
+    // cb_syntax.md §3.1: Short is 16-bit UNSIGNED, so 40000 is in range. The
+    // Dim initializer is now coerced to the declared type (FD-035), so `s`
+    // genuinely holds a Value::Short(u16) rather than a plain Int.
     let out = run("Dim s As Short = 40000\nPrint Str(s)");
     assert_eq!(out, "40000\n");
+}
+
+#[test]
+fn short_wraps_modulo_65536_on_assignment() {
+    // Short is 16-bit unsigned: 40000 + 30000 = 70000 narrows to 4464
+    // (70000 mod 65536) on the store-back Convert. A non-literal value avoids
+    // the E0326 literal-overflow error (FD-035 widen-to-Int + narrow-on-store).
+    let out = run("Dim s As Short = 40000\ns = s + 30000\nPrint Str(s)");
+    assert_eq!(out, "4464\n");
+}
+
+#[test]
+fn true_false_are_int_one_and_zero() {
+    // There is no Bool type: True/False are the Int constants 1/0, so they add
+    // like integers (FD-035, cb_syntax.md §1.6).
+    let out = run("Print Str(True + True)");
+    assert_eq!(out, "2\n");
+}
+
+#[test]
+fn comparison_yields_int_one_or_zero() {
+    // Comparisons yield Int 1/0 (FD-035), printable as plain integers.
+    assert_eq!(run("Print Str(5 > 3)"), "1\n");
+    assert_eq!(run("Print Str(5 < 3)"), "0\n");
+}
+
+#[test]
+fn dim_float_from_int_literal_coerces() {
+    // `Dim x As Float = 1` coerces the Int literal to Float on init (FD-035
+    // broadened the Dim-init coercion). Float 1.0 prints as "1".
+    let out = run("Dim x As Float = 1\nPrint Str(x)");
+    assert_eq!(out, "1\n");
 }
 
 #[test]

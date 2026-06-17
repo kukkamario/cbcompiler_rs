@@ -108,18 +108,18 @@ impl<'a> Checker<'a> {
         // Reject reserved-but-unsupported type names (Bool/Boolean/UInt/
         // UInteger/ULong) with a clear diagnostic (FD-035). They parse as type
         // atoms, so we catch them here instead of as a generic parse error.
-        if let Node::TypeExpr(cb_frontend::ast::TypeExpr::Primitive { kw }) = &self.arena[id] {
-            if types::is_reserved_type_kw(*kw) {
-                self.diagnostics.push(Diagnostic::error(
-                    E_RESERVED_TYPE,
-                    format!(
-                        "`{}` is a reserved type name but is not a supported type",
-                        kw.as_str()
-                    ),
-                    Label::new(self.arena.span_of(id)),
-                ));
-                return Type::Error;
-            }
+        if let Node::TypeExpr(cb_frontend::ast::TypeExpr::Primitive { kw }) = &self.arena[id]
+            && types::is_reserved_type_kw(*kw)
+        {
+            self.diagnostics.push(Diagnostic::error(
+                E_RESERVED_TYPE,
+                format!(
+                    "`{}` is a reserved type name but is not a supported type",
+                    kw.as_str()
+                ),
+                Label::new(self.arena.span_of(id)),
+            ));
+            return Type::Error;
         }
         let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
         self.refine_type(ty)
@@ -2437,6 +2437,26 @@ mod tests {
                 error_codes(&result)
             );
         }
+    }
+
+    #[test]
+    fn pass2_dim_byte_literal_overflow_e0326() {
+        // An out-of-range integer literal in a Dim initializer is a hard error
+        // now that Dim initializers are coerced to the declared type (FD-035).
+        let result = analyze_src("Dim b As Byte = 300\n");
+        assert!(
+            error_codes(&result).contains(&"E0326"),
+            "expected E0326, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_dim_in_range_narrow_literal_is_silent() {
+        // An in-range literal coerces silently — a known-safe constant
+        // (FD-020/FD-035): Short is 16-bit unsigned, 40000 fits.
+        let result = analyze_src("Dim s As Short = 40000\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     // ── pass 2 tests: function calls ────────────────────────────────────

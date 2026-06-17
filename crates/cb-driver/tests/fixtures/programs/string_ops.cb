@@ -8,7 +8,7 @@ Print "count: " + Str(n)
 Dim piApprox As Float = 3.14
 Print "pi ~ " + Str(piApprox)
 
-Dim flag As Bool = True
+Dim flag As Integer = True
 Print "flag: " + Str(flag)
 
 Dim empty As String = ""
