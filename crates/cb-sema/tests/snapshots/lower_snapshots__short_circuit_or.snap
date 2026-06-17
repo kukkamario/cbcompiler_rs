@@ -1,33 +1,32 @@
 ---
 source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 451
 expression: ir
 ---
 fn @main() -> Void {
   locals:
     local0: a (Int)
     local1: b (Int)
-    local2: @sc_0 (Bool)
+    local2: @sc_0 (Int)
 
   bb0:
     r0 = load_local local0
-    r1 = convert r0: Int -> Bool
-    branch_if r1, bb4, bb3
+    branch_if r0, bb4, bb3
   bb1:
     return
   bb2:
-    r6 = const_int 1
-    store_local local0, r6
+    r4 = const_int 1
+    store_local local0, r4
     goto bb1
   bb3:
-    r3 = load_local local1
-    r4 = convert r3: Int -> Bool
-    store_local local2, r4
-    goto bb5
-  bb4:
-    r2 = const_bool true
+    r2 = load_local local1
     store_local local2, r2
     goto bb5
+  bb4:
+    r1 = const_int 1
+    store_local local2, r1
+    goto bb5
   bb5:
-    r5 = load_local local2
-    branch_if r5, bb2, bb1
+    r3 = load_local local2
+    branch_if r3, bb2, bb1
 }

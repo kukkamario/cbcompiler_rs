@@ -12,8 +12,6 @@ pub enum Conversion {
     NumericWiden,
     IntToFloat,
     FloatToInt,
-    BoolToNumeric,
-    NumericToBool,
     NumericToString,
     NullToRef,
 }
@@ -50,8 +48,8 @@ fn int_rank(t: &Type) -> Option<u8> {
     match t {
         Type::Byte => Some(1),
         Type::Short => Some(2),
-        Type::Int | Type::UInt => Some(3),
-        Type::Long | Type::ULong => Some(4),
+        Type::Int => Some(3),
+        Type::Long => Some(4),
         _ => None,
     }
 }
@@ -72,17 +70,8 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
         // Float → Int (narrowing)
         (Type::Float, t) if t.is_integer() => Some(Conversion::FloatToInt),
 
-        // Bool → numeric
-        (Type::Bool, t) if t.is_numeric() => Some(Conversion::BoolToNumeric),
-
-        // Numeric → Bool
-        (f, Type::Bool) if f.is_numeric() => Some(Conversion::NumericToBool),
-
         // Numeric → String (implicit in + context)
         (f, Type::String) if f.is_numeric() => Some(Conversion::NumericToString),
-
-        // Bool → String
-        (Type::Bool, Type::String) => Some(Conversion::NumericToString),
 
         // Null → any reference type
         (Type::Null, t) if t.is_reference() => Some(Conversion::NullToRef),
@@ -95,17 +84,15 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
 }
 
 /// Inclusive value range `[min, max]` of an integer `Type`, in `i128` so every
-/// bound (including `ULong`'s `u64::MAX`) is representable. Returns `None` for
-/// non-integer types. Used to range-check integer literals against a narrower
-/// target type (cb_syntax.md §1.6/§3.4).
+/// bound is representable. Returns `None` for non-integer types. Used to
+/// range-check integer literals against a narrower target type
+/// (cb_syntax.md §1.6/§3.4).
 pub fn int_range(ty: &Type) -> Option<(i128, i128)> {
     let (min, max): (i128, i128) = match ty {
         Type::Byte => (0, u8::MAX as i128),
         Type::Short => (0, u16::MAX as i128),
         Type::Int => (i32::MIN as i128, i32::MAX as i128),
-        Type::UInt => (0, u32::MAX as i128),
         Type::Long => (i64::MIN as i128, i64::MAX as i128),
-        Type::ULong => (0, u64::MAX as i128),
         _ => return None,
     };
     Some((min, max))
@@ -135,7 +122,6 @@ mod tests {
         assert!(find_implicit_conversion(&Type::Int, &Type::Int).is_none());
         assert!(find_implicit_conversion(&Type::Float, &Type::Float).is_none());
         assert!(find_implicit_conversion(&Type::String, &Type::String).is_none());
-        assert!(find_implicit_conversion(&Type::Bool, &Type::Bool).is_none());
     }
 
     #[test]
@@ -178,30 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn bool_to_numeric() {
-        assert_eq!(
-            find_implicit_conversion(&Type::Bool, &Type::Int),
-            Some(Conversion::BoolToNumeric)
-        );
-        assert_eq!(
-            find_implicit_conversion(&Type::Bool, &Type::Float),
-            Some(Conversion::BoolToNumeric)
-        );
-    }
-
-    #[test]
-    fn numeric_to_bool() {
-        assert_eq!(
-            find_implicit_conversion(&Type::Int, &Type::Bool),
-            Some(Conversion::NumericToBool)
-        );
-        assert_eq!(
-            find_implicit_conversion(&Type::Float, &Type::Bool),
-            Some(Conversion::NumericToBool)
-        );
-    }
-
-    #[test]
     fn numeric_to_string() {
         assert_eq!(
             find_implicit_conversion(&Type::Int, &Type::String),
@@ -209,14 +171,6 @@ mod tests {
         );
         assert_eq!(
             find_implicit_conversion(&Type::Float, &Type::String),
-            Some(Conversion::NumericToString)
-        );
-    }
-
-    #[test]
-    fn bool_to_string() {
-        assert_eq!(
-            find_implicit_conversion(&Type::Bool, &Type::String),
             Some(Conversion::NumericToString)
         );
     }
@@ -245,12 +199,10 @@ mod tests {
             int_range(&Type::Int),
             Some((i32::MIN as i128, i32::MAX as i128))
         );
-        assert_eq!(int_range(&Type::UInt), Some((0, u32::MAX as i128)));
         assert_eq!(
             int_range(&Type::Long),
             Some((i64::MIN as i128, i64::MAX as i128))
         );
-        assert_eq!(int_range(&Type::ULong), Some((0, u64::MAX as i128)));
         assert_eq!(int_range(&Type::Float), None);
         assert_eq!(int_range(&Type::String), None);
     }

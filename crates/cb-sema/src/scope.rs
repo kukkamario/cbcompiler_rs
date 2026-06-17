@@ -82,7 +82,6 @@ pub struct OverloadVariant {
 pub enum ConstValue {
     Int(i64),
     Float(f64),
-    Bool(bool),
     String(std::string::String),
 }
 

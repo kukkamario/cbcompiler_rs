@@ -11,11 +11,8 @@ pub enum Type {
     Byte,
     Short,
     Int,
-    UInt,
     Long,
-    ULong,
     Float,
-    Bool,
     String,
 
     // Composite
@@ -52,20 +49,14 @@ impl Type {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Type::Byte
-                | Type::Short
-                | Type::Int
-                | Type::UInt
-                | Type::Long
-                | Type::ULong
-                | Type::Float
+            Type::Byte | Type::Short | Type::Int | Type::Long | Type::Float
         )
     }
 
     pub fn is_integer(&self) -> bool {
         matches!(
             self,
-            Type::Byte | Type::Short | Type::Int | Type::UInt | Type::Long | Type::ULong
+            Type::Byte | Type::Short | Type::Int | Type::Long
         )
     }
 
@@ -83,7 +74,6 @@ pub fn sigil_to_type(sigil: Sigil) -> Type {
         Sigil::Integer => Type::Int,
         Sigil::Float => Type::Float,
         Sigil::String => Type::String,
-        Sigil::Bool => Type::Bool,
     }
 }
 
@@ -93,14 +83,21 @@ pub fn kw_to_type(kw: Kw) -> Option<Type> {
         Kw::Byte => Some(Type::Byte),
         Kw::Short => Some(Type::Short),
         Kw::Int | Kw::Integer => Some(Type::Int),
-        Kw::UInt | Kw::UInteger => Some(Type::UInt),
         Kw::Long => Some(Type::Long),
-        Kw::ULong => Some(Type::ULong),
         Kw::Float => Some(Type::Float),
-        Kw::Bool => Some(Type::Bool),
         Kw::String => Some(Type::String),
         _ => None,
     }
+}
+
+/// Whether a keyword is a reserved-but-unsupported type name (FD-035). These
+/// parse as type atoms (`is_primitive_type_kw`) but resolve to no type; sema
+/// rejects them with a clear diagnostic instead of a generic parse error.
+pub fn is_reserved_type_kw(kw: Kw) -> bool {
+    matches!(
+        kw,
+        Kw::Bool | Kw::Boolean | Kw::UInt | Kw::UInteger | Kw::ULong
+    )
 }
 
 /// Resolve a `TypeExpr` AST node to a semantic `Type`.
@@ -196,33 +193,26 @@ pub fn resolve_return_type(return_sigil: Option<Sigil>, return_ty: Option<&Type>
     }
 }
 
-/// Numeric promotion: given two numeric types, return the wider one.
+/// Numeric promotion for a binary operation: return the wider of the two
+/// types, floored at `Int` for integers. `Byte`/`Short` are storage-only and
+/// widen to `Int` for all arithmetic (FD-035 / cb_syntax.md §3.4); `Float`
+/// beats every integer.
 pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
     fn rank(t: &Type) -> u8 {
         match t {
             Type::Byte => 1,
             Type::Short => 2,
-            Type::Int | Type::UInt => 3,
-            Type::Long | Type::ULong => 4,
+            Type::Int => 3,
+            Type::Long => 4,
             Type::Float => 5,
             _ => 0,
         }
     }
-    // Signed types are preferred on a same-width tie (cb_syntax.md §3.4). The
-    // only ties are Int/UInt and Long/ULong, so this yields the signed sibling
-    // regardless of operand order (Int + UInt == UInt + Int == Int).
-    fn is_signed(t: &Type) -> bool {
-        matches!(t, Type::Int | Type::Long)
-    }
-    let (ra, rb) = (rank(a), rank(b));
-    if ra > rb {
-        a.clone()
-    } else if rb > ra {
-        b.clone()
-    } else if is_signed(a) {
-        a.clone()
-    } else {
-        b.clone()
+    let wider = if rank(a) >= rank(b) { a } else { b };
+    match wider {
+        // Byte/Short never compute in their own width — widen to Int.
+        Type::Byte | Type::Short => Type::Int,
+        other => other.clone(),
     }
 }
 
@@ -265,19 +255,24 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
                 None
             }
         }
+        // Shifts dispatch on the (widened) LHS: Byte/Short shift in Int width.
+        // The count may be any integer; check_binary does not coerce shift
+        // operands, so the interpreter widens the LHS (FD-035).
         BinOp::Shl | BinOp::Shr | BinOp::Sar => {
             if lhs.is_integer() && rhs.is_integer() {
-                Some(lhs.clone())
+                Some(match lhs {
+                    Type::Byte | Type::Short => Type::Int,
+                    other => other.clone(),
+                })
             } else {
                 None
             }
         }
 
-        // Equality — result is always Bool
+        // Equality — result is Int (1/0); there is no Bool type (FD-035)
         BinOp::Eq | BinOp::NotEq => {
             if (lhs.is_numeric() && rhs.is_numeric())
                 || (*lhs == Type::String && *rhs == Type::String)
-                || (*lhs == Type::Bool && *rhs == Type::Bool)
                 || (lhs.is_reference() && rhs.is_reference())
                 || (*lhs == Type::Null && rhs.is_reference())
                 || (lhs.is_reference() && *rhs == Type::Null)
@@ -286,7 +281,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
                 || (matches!(lhs, Type::RuntimeType { .. }) && *rhs == Type::Null)
                 || (*lhs == Type::Null && matches!(rhs, Type::RuntimeType { .. }))
             {
-                Some(Type::Bool)
+                Some(Type::Int)
             } else {
                 None
             }
@@ -295,23 +290,21 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
         BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
             if (lhs.is_numeric() && rhs.is_numeric())
                 || (*lhs == Type::String && *rhs == Type::String)
-                || (*lhs == Type::Bool && *rhs == Type::Bool)
                 || (lhs.is_reference() && rhs.is_reference())
                 || (*lhs == Type::Null && rhs.is_reference())
                 || (lhs.is_reference() && *rhs == Type::Null)
                 || (*lhs == Type::Null && *rhs == Type::Null)
             {
-                Some(Type::Bool)
+                Some(Type::Int)
             } else {
                 None
             }
         }
 
-        // Logical
+        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035)
         BinOp::And | BinOp::Or | BinOp::Xor => {
-            if (*lhs == Type::Bool || lhs.is_numeric()) && (*rhs == Type::Bool || rhs.is_numeric())
-            {
-                Some(Type::Bool)
+            if lhs.is_numeric() && rhs.is_numeric() {
+                Some(Type::Int)
             } else {
                 None
             }
@@ -330,8 +323,8 @@ pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
             }
         }
         UnOp::Not => {
-            if *operand == Type::Bool || operand.is_numeric() {
-                Some(Type::Bool)
+            if operand.is_numeric() {
+                Some(Type::Int)
             } else {
                 None
             }
@@ -366,13 +359,11 @@ mod tests {
     }
 
     #[test]
-    fn numeric_promote_same_width_prefers_signed() {
-        // Mixed same-width signed/unsigned: result is the signed type, regardless
-        // of operand order (cb_syntax.md §3.4).
-        assert_eq!(numeric_promote(&Type::Int, &Type::UInt), Type::Int);
-        assert_eq!(numeric_promote(&Type::UInt, &Type::Int), Type::Int);
-        assert_eq!(numeric_promote(&Type::Long, &Type::ULong), Type::Long);
-        assert_eq!(numeric_promote(&Type::ULong, &Type::Long), Type::Long);
+    fn numeric_promote_narrow_floors_at_int() {
+        // Byte/Short are storage-only: arithmetic widens to Int (FD-035).
+        assert_eq!(numeric_promote(&Type::Byte, &Type::Byte), Type::Int);
+        assert_eq!(numeric_promote(&Type::Short, &Type::Short), Type::Int);
+        assert_eq!(numeric_promote(&Type::Byte, &Type::Short), Type::Int);
     }
 
     #[test]
@@ -453,45 +444,44 @@ mod tests {
     }
 
     #[test]
-    fn binary_comparison_returns_bool() {
+    fn binary_comparison_returns_int() {
+        // Comparisons yield Int 1/0 — there is no Bool type (FD-035).
         assert_eq!(
             binary_result_type(BinOp::Eq, &Type::Int, &Type::Int),
-            Some(Type::Bool)
+            Some(Type::Int)
         );
         assert_eq!(
             binary_result_type(BinOp::Lt, &Type::Int, &Type::Float),
-            Some(Type::Bool)
+            Some(Type::Int)
         );
         assert_eq!(
             binary_result_type(BinOp::Eq, &Type::String, &Type::String),
-            Some(Type::Bool)
-        );
-        assert_eq!(
-            binary_result_type(BinOp::Eq, &Type::Bool, &Type::Bool),
-            Some(Type::Bool)
+            Some(Type::Int)
         );
     }
 
     #[test]
     fn binary_comparison_incompatible() {
         assert!(binary_result_type(BinOp::Eq, &Type::String, &Type::Int).is_none());
-        assert!(binary_result_type(BinOp::Lt, &Type::Bool, &Type::Int).is_none());
+        assert!(binary_result_type(BinOp::Lt, &Type::String, &Type::Int).is_none());
     }
 
     #[test]
     fn binary_logical() {
+        // Logical ops take numeric operands and yield Int 1/0 (FD-035).
         assert_eq!(
-            binary_result_type(BinOp::And, &Type::Bool, &Type::Bool),
-            Some(Type::Bool)
+            binary_result_type(BinOp::And, &Type::Int, &Type::Int),
+            Some(Type::Int)
         );
         assert_eq!(
-            binary_result_type(BinOp::Or, &Type::Int, &Type::Bool),
-            Some(Type::Bool)
+            binary_result_type(BinOp::Or, &Type::Int, &Type::Byte),
+            Some(Type::Int)
         );
         assert_eq!(
-            binary_result_type(BinOp::Xor, &Type::Bool, &Type::Int),
-            Some(Type::Bool)
+            binary_result_type(BinOp::Xor, &Type::Long, &Type::Int),
+            Some(Type::Int)
         );
+        assert!(binary_result_type(BinOp::And, &Type::String, &Type::Int).is_none());
     }
 
     #[test]
@@ -504,14 +494,19 @@ mod tests {
     }
 
     #[test]
-    fn binary_shift_preserves_lhs() {
+    fn binary_shift_widens_narrow_lhs() {
+        // Byte/Short shift in Int width; Int/Long keep their width (FD-035).
         assert_eq!(
             binary_result_type(BinOp::Shl, &Type::Byte, &Type::Int),
-            Some(Type::Byte)
+            Some(Type::Int)
         );
         assert_eq!(
             binary_result_type(BinOp::Shr, &Type::Long, &Type::Short),
             Some(Type::Long)
+        );
+        assert_eq!(
+            binary_result_type(BinOp::Shl, &Type::Int, &Type::Int),
+            Some(Type::Int)
         );
     }
 
@@ -523,8 +518,9 @@ mod tests {
             Some(Type::Float)
         );
         assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
-        assert_eq!(unary_result_type(UnOp::Not, &Type::Bool), Some(Type::Bool));
-        assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Bool));
+        assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Int));
+        assert_eq!(unary_result_type(UnOp::Not, &Type::Float), Some(Type::Int));
+        assert!(unary_result_type(UnOp::Not, &Type::String).is_none());
         assert_eq!(unary_result_type(UnOp::BinNot, &Type::Int), Some(Type::Int));
         assert!(unary_result_type(UnOp::BinNot, &Type::Float).is_none());
     }
