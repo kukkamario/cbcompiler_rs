@@ -1,6 +1,6 @@
 # FD-035: Type System Simplification — Classic Types + Long
 
-**Status:** In Progress
+**Status:** Pending Verification
 **Priority:** Medium-High
 **Effort:** Large (cross-crate: frontend, sema, IR, interp, FFI, spec, tests)
 **Impact:** Aligns the scalar type set with **classic CoolBasic** (as evidenced by the `../cbEnchanted` reference), plus a single deliberate extension (`Long`). Removes the over-engineered unsigned-32/64 and `Bool` types that the current spec invented. This both simplifies the language and dissolves most of the original FD-035 defects — they were bugs in types we are now removing.
