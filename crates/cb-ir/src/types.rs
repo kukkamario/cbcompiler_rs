@@ -9,11 +9,8 @@ pub enum IrType {
     Byte,
     Short,
     Int,
-    UInt,
     Long,
-    ULong,
     Float,
-    Bool,
     String,
     Array { elem: Box<IrType>, rank: u8 },
     TypeRef(Symbol),
@@ -35,20 +32,14 @@ impl IrType {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Self::Byte
-                | Self::Short
-                | Self::Int
-                | Self::UInt
-                | Self::Long
-                | Self::ULong
-                | Self::Float
+            Self::Byte | Self::Short | Self::Int | Self::Long | Self::Float
         )
     }
 
     pub fn is_integer(&self) -> bool {
         matches!(
             self,
-            Self::Byte | Self::Short | Self::Int | Self::UInt | Self::Long | Self::ULong
+            Self::Byte | Self::Short | Self::Int | Self::Long
         )
     }
 }

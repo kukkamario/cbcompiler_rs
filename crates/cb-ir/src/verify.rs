@@ -257,7 +257,6 @@ fn verify_inst_regs(kind: &InstKind, defined: &HashSet<Reg>) {
         | InstKind::ConstInt(_)
         | InstKind::ConstLong(_)
         | InstKind::ConstFloat(_)
-        | InstKind::ConstBool(_)
         | InstKind::ConstString(_)
         | InstKind::ConstNull => {}
     }
@@ -421,7 +420,7 @@ mod tests {
         let prog = valid_one_block(
             vec![Inst {
                 result: Some(Reg(0)),
-                kind: InstKind::ConstBool(true),
+                kind: InstKind::ConstInt(1),
                 span: DUMMY_SPAN,
             }],
             vec![],
@@ -459,7 +458,7 @@ mod tests {
                     id: BlockId(0),
                     insts: vec![Inst {
                         result: Some(Reg(0)),
-                        kind: InstKind::ConstBool(true),
+                        kind: InstKind::ConstInt(1),
                         span: DUMMY_SPAN,
                     }],
                     terminator: Some(Terminator::BranchIf {
@@ -757,7 +756,7 @@ mod tests {
                     id: BlockId(0),
                     insts: vec![Inst {
                         result: Some(Reg(0)),
-                        kind: InstKind::ConstBool(true),
+                        kind: InstKind::ConstInt(1),
                         span: DUMMY_SPAN,
                     }],
                     terminator: Some(Terminator::Goto(BlockId(1))),

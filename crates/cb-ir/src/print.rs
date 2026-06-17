@@ -268,9 +268,6 @@ fn print_inst_kind(
         InstKind::ConstFloat(v) => {
             write!(out, "const_float {v}").unwrap();
         }
-        InstKind::ConstBool(v) => {
-            write!(out, "const_bool {v}").unwrap();
-        }
         InstKind::ConstString(v) => {
             write!(out, "const_string {v:?}").unwrap();
         }
@@ -387,11 +384,8 @@ fn format_type(ty: &IrType, interner: &Interner) -> String {
         IrType::Byte => "Byte".to_string(),
         IrType::Short => "Short".to_string(),
         IrType::Int => "Int".to_string(),
-        IrType::UInt => "UInt".to_string(),
         IrType::Long => "Long".to_string(),
-        IrType::ULong => "ULong".to_string(),
         IrType::Float => "Float".to_string(),
-        IrType::Bool => "Bool".to_string(),
         IrType::String => "String".to_string(),
         IrType::Array { elem, rank } => {
             format!("Array<{}, {rank}>", format_type(elem, interner))
