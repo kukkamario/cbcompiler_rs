@@ -1,11 +1,12 @@
 # FD-035: Type System Simplification — Classic Types + Long
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-17
 **Priority:** Medium-High
 **Effort:** Large (cross-crate: frontend, sema, IR, interp, FFI, spec, tests)
 **Impact:** Aligns the scalar type set with **classic CoolBasic** (as evidenced by the `../cbEnchanted` reference), plus a single deliberate extension (`Long`). Removes the over-engineered unsigned-32/64 and `Bool` types that the current spec invented. This both simplifies the language and dissolves most of the original FD-035 defects — they were bugs in types we are now removing.
 
-> **Supersedes** the original FD-035 ("Narrow/Unsigned Numeric Correctness"). That FD fixed `UInt`/`ULong`/`Short`-signedness behaviour inside the rich type model; this FD removes the rich model instead. The one surviving piece is `Short` → `u16`. See *Relationship to the original FD-035* below. (Filename retained as-is to avoid disrupting an open editor; rename to `FD-035_TYPE_SYSTEM_SIMPLIFICATION.md` at close time.)
+> **Supersedes** the original FD-035 ("Narrow/Unsigned Numeric Correctness"). That FD fixed `UInt`/`ULong`/`Short`-signedness behaviour inside the rich type model; this FD removes the rich model instead. The one surviving piece is `Short` → `u16`. See *Relationship to the original FD-035* below. (Renamed to `FD-035_TYPE_SYSTEM_SIMPLIFICATION.md` on archival, per the original close-time note.)
 
 ## Motivation
 
