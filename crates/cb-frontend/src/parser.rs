@@ -2725,10 +2725,11 @@ fn is_expr_start(k: TokenKind) -> bool {
             | TokenKind::Op(Op::Plus | Op::Minus)
             | TokenKind::Keyword(Kw::True | Kw::False | Kw::Null | Kw::Not | Kw::BinNot | Kw::New)
             // Keywords that double as builtin calls when followed by `(`
-            // (Int(v), Float(v), Bool(v), String(s,n)). Treating them as
-            // expression starts lets them appear as a paren-less call argument
+            // (Int(v), Float(v), String(s,n)). Treating them as expression
+            // starts lets them appear as a paren-less call argument
             // (`Print String("ab", 3)`); parse_primary still requires the `(`.
-            | TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::String)
+            // (`Bool(v)` was removed with the Bool type — FD-035.)
+            | TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::String)
     )
 }
 
