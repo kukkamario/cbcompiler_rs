@@ -165,18 +165,15 @@ mod ident {
     }
 
     #[test]
-    fn ident_with_bool_sigil() {
-        let toks = lex("x!");
-        assert_eq!(
-            kinds(&toks),
-            vec![
-                TokenKind::Ident {
-                    sigil: Some(Sigil::Bool)
-                },
-                TokenKind::Eof
-            ]
-        );
-        assert_eq!(toks[0].span.end, 2);
+    fn bang_is_reserved_not_a_sigil() {
+        // `!` was formerly the Bool sigil; it is now a reserved symbol with no
+        // meaning (FD-035). `x!` lexes as the bare identifier `x` (no sigil)
+        // followed by an error token for the stray `!`.
+        let (toks, diags) = lex_with_diags("x!");
+        assert_eq!(toks[0].kind, TokenKind::Ident { sigil: None });
+        assert_eq!(toks[0].span.end, 1);
+        assert!(matches!(toks[1].kind, TokenKind::Error(_)));
+        assert!(!diags.is_empty());
     }
 
     #[test]

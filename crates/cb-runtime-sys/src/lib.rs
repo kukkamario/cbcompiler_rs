@@ -147,6 +147,9 @@ const CB_TYPE_VOID: u32 = 0;
 const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
 const CB_TYPE_INT: u32 = 3;
+// UInt/ULong/Bool are reserved wire codes for types the language no longer
+// supports (FD-035). Kept numerically stable for ABI compatibility with the
+// C++ runtime header; decoding one is a hard error (no catalog entry uses them).
 const CB_TYPE_UINT: u32 = 4;
 const CB_TYPE_LONG: u32 = 5;
 const CB_TYPE_ULONG: u32 = 6;
@@ -416,12 +419,15 @@ fn type_tag_to_ir_type(tag: u32, custom_types: &HashMap<u32, String>) -> Result<
         CB_TYPE_BYTE => Ok(IrType::Byte),
         CB_TYPE_SHORT => Ok(IrType::Short),
         CB_TYPE_INT => Ok(IrType::Int),
-        CB_TYPE_UINT => Ok(IrType::UInt),
         CB_TYPE_LONG => Ok(IrType::Long),
-        CB_TYPE_ULONG => Ok(IrType::ULong),
         CB_TYPE_FLOAT => Ok(IrType::Float),
-        CB_TYPE_BOOL => Ok(IrType::Bool),
         CB_TYPE_STRING => Ok(IrType::String),
+        // Reserved, unsupported types (FD-035). The wire codes stay stable for
+        // ABI compatibility, but no catalog entry uses them, so decoding one is
+        // a hard error rather than a silent fallback.
+        CB_TYPE_UINT | CB_TYPE_ULONG | CB_TYPE_BOOL => {
+            Err(format!("type tag {tag} is a reserved, unsupported type"))
+        }
         other => {
             if let Some(name) = custom_types.get(&other) {
                 Ok(IrType::RuntimeType(name.clone()))
@@ -702,15 +708,22 @@ mod tests {
             (CB_TYPE_BYTE, IrType::Byte),
             (CB_TYPE_SHORT, IrType::Short),
             (CB_TYPE_INT, IrType::Int),
-            (CB_TYPE_UINT, IrType::UInt),
             (CB_TYPE_LONG, IrType::Long),
-            (CB_TYPE_ULONG, IrType::ULong),
             (CB_TYPE_FLOAT, IrType::Float),
-            (CB_TYPE_BOOL, IrType::Bool),
             (CB_TYPE_STRING, IrType::String),
         ];
         for (tag, expected) in cases {
             assert_eq!(type_tag_to_ir_type(tag, &empty).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn reserved_type_tags_are_rejected() {
+        // UInt/ULong/Bool wire codes are kept for ABI stability but are no
+        // longer supported types (FD-035) — decoding one must be an error.
+        let empty = HashMap::new();
+        for tag in [CB_TYPE_UINT, CB_TYPE_ULONG, CB_TYPE_BOOL] {
+            assert!(type_tag_to_ir_type(tag, &empty).is_err());
         }
     }
 

@@ -190,11 +190,8 @@ fn all_types() {
         IrType::Byte,
         IrType::Short,
         IrType::Int,
-        IrType::UInt,
         IrType::Long,
-        IrType::ULong,
         IrType::Float,
-        IrType::Bool,
         IrType::String,
         IrType::Array {
             elem: Box::new(IrType::Int),
@@ -204,7 +201,7 @@ fn all_types() {
         IrType::StructVal(vec2),
         IrType::FnPtr(Box::new(FnSig {
             params: vec![IrType::Int, IrType::Float],
-            ret: Box::new(IrType::Bool),
+            ret: Box::new(IrType::Int),
         })),
         IrType::RuntimeType("Image".to_string()),
         IrType::Null,
@@ -478,10 +475,9 @@ fn all_consts() {
         inst(Some(0), InstKind::ConstInt(42)),
         inst(Some(1), InstKind::ConstLong(9_000_000_000)),
         inst(Some(2), InstKind::ConstFloat(2.5)),
-        inst(Some(3), InstKind::ConstBool(true)),
         // Exercises the `{:?}` escaping path (embedded newline + quotes).
-        inst(Some(4), InstKind::ConstString("hi\n\"there\"".to_string())),
-        inst(Some(5), InstKind::ConstNull),
+        inst(Some(3), InstKind::ConstString("hi\n\"there\"".to_string())),
+        inst(Some(4), InstKind::ConstNull),
     ];
     let prog = single_fn_program(fname, Vec::new(), insts, Terminator::Return { value: None });
     insta::assert_snapshot!(print_program(&prog, &i));
@@ -495,7 +491,7 @@ fn all_terminators() {
     let blocks = vec![
         block(
             0,
-            vec![inst(Some(0), InstKind::ConstBool(true))],
+            vec![inst(Some(0), InstKind::ConstInt(1))],
             Terminator::Goto(BlockId(1)),
         ),
         block(

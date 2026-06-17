@@ -82,7 +82,6 @@ pub enum Node {
 pub enum Expr {
     IntLit(u64),
     FloatLit(FloatBits),
-    BoolLit(bool),
     NullLit,
     StrLit {
         value: String,

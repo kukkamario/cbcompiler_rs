@@ -1,10 +1,11 @@
 ---
 source: crates/cb-ir/tests/print_snapshots.rs
+assertion_line: 522
 expression: "print_program(&prog, &i)"
 ---
 fn terms() -> Int {
   bb0:
-    r0 = const_bool true
+    r0 = const_int 1
     goto bb1
   bb1:
     branch_if r0, bb2, bb3

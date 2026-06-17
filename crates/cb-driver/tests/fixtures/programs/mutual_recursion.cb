@@ -1,11 +1,11 @@
-Function IsEven(n As Int) As Bool
+Function IsEven(n As Int) As Integer
     If n = 0 Then
         Return True
     EndIf
     Return IsOdd(n - 1)
 EndFunction
 
-Function IsOdd(n As Int) As Bool
+Function IsOdd(n As Int) As Integer
     If n = 0 Then
         Return False
     EndIf

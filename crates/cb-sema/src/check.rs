@@ -19,7 +19,6 @@ const INTRINSIC_INT: &str = "int";
 const INTRINSIC_INTEGER: &str = "integer";
 const INTRINSIC_FLOAT: &str = "float";
 const INTRINSIC_STR: &str = "str";
-const INTRINSIC_BOOL: &str = "bool";
 const INTRINSIC_FIRST: &str = "first";
 const INTRINSIC_LAST: &str = "last";
 const INTRINSIC_NEXT: &str = "next";
@@ -106,6 +105,22 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
+        // Reject reserved-but-unsupported type names (Bool/Boolean/UInt/
+        // UInteger/ULong) with a clear diagnostic (FD-035). They parse as type
+        // atoms, so we catch them here instead of as a generic parse error.
+        if let Node::TypeExpr(cb_frontend::ast::TypeExpr::Primitive { kw }) = &self.arena[id]
+            && types::is_reserved_type_kw(*kw)
+        {
+            self.diagnostics.push(Diagnostic::error(
+                E_RESERVED_TYPE,
+                format!(
+                    "`{}` is a reserved type name but is not a supported type",
+                    kw.as_str()
+                ),
+                Label::new(self.arena.span_of(id)),
+            ));
+            return Type::Error;
+        }
         let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
         self.refine_type(ty)
     }
@@ -210,11 +225,8 @@ impl<'a> Checker<'a> {
             cb_ir::types::IrType::Byte => Type::Byte,
             cb_ir::types::IrType::Short => Type::Short,
             cb_ir::types::IrType::Int => Type::Int,
-            cb_ir::types::IrType::UInt => Type::UInt,
             cb_ir::types::IrType::Long => Type::Long,
-            cb_ir::types::IrType::ULong => Type::ULong,
             cb_ir::types::IrType::Float => Type::Float,
-            cb_ir::types::IrType::Bool => Type::Bool,
             cb_ir::types::IrType::String => Type::String,
             cb_ir::types::IrType::Void => Type::Void,
             cb_ir::types::IrType::RuntimeType(name) => {
@@ -712,7 +724,6 @@ impl<'a> Checker<'a> {
         let placeholder = match &const_ty {
             Type::Int => ConstValue::Int(0),
             Type::Float => ConstValue::Float(0.0),
-            Type::Bool => ConstValue::Bool(false),
             Type::String => ConstValue::String(std::string::String::new()),
             _ => ConstValue::Int(0),
         };
@@ -740,7 +751,6 @@ impl<'a> Checker<'a> {
         let ty = match self.arena[id].clone() {
             Node::Expr(Expr::IntLit(_)) => Type::Int,
             Node::Expr(Expr::FloatLit(_)) => Type::Float,
-            Node::Expr(Expr::BoolLit(_)) => Type::Bool,
             Node::Expr(Expr::StrLit { .. }) => Type::String,
             Node::Expr(Expr::NullLit) => Type::Null,
 
@@ -868,7 +878,7 @@ impl<'a> Checker<'a> {
                         lty.clone()
                     }
                 }
-                BinOp::And | BinOp::Or | BinOp::Xor => Type::Bool,
+                BinOp::And | BinOp::Or | BinOp::Xor => Type::Int,
                 _ => result_ty.clone(),
             };
             if lty != operand_ty {
@@ -1149,7 +1159,6 @@ impl<'a> Checker<'a> {
             }
             INTRINSIC_FLOAT => self.check_conversion_intrinsic(args, span, Type::Float),
             INTRINSIC_STR => self.check_conversion_intrinsic(args, span, Type::String),
-            INTRINSIC_BOOL => self.check_conversion_intrinsic(args, span, Type::Bool),
             INTRINSIC_FIRST | INTRINSIC_LAST => {
                 if args.len() != 1 {
                     self.diagnostics.push(Diagnostic::error(
@@ -1370,11 +1379,21 @@ impl<'a> Checker<'a> {
                 self.check_dim(&names, ty, init);
             }
             Node::Stmt(Stmt::Global {
-                names: _,
-                ty: _,
+                names,
+                ty,
                 init: Some(init_id),
             }) => {
-                self.check_expr(init_id);
+                let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
+                let init_ty = self.check_expr(init_id);
+                // Coerce the initializer to the declared type (mirror check_dim
+                // / check_assign) so lowering emits the right Convert (FD-035).
+                // Global-with-initializer is single-name.
+                if let Some(dn) = names.first() {
+                    let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
+                    if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
+                        self.coerce(init_id, &init_ty, &var_ty);
+                    }
+                }
             }
             Node::Stmt(Stmt::Global { .. }) => {}
             Node::Stmt(Stmt::Const {
@@ -1565,7 +1584,6 @@ impl<'a> Checker<'a> {
         match self.arena[id].clone() {
             Node::Expr(Expr::IntLit(v)) => Some(ConstValue::Int(v as i64)),
             Node::Expr(Expr::FloatLit(v)) => Some(ConstValue::Float(v.to_f64())),
-            Node::Expr(Expr::BoolLit(v)) => Some(ConstValue::Bool(v)),
             Node::Expr(Expr::StrLit { value, .. }) => Some(ConstValue::String(value)),
             Node::Expr(Expr::Paren { inner }) => self.eval_const_expr(inner),
             Node::Expr(Expr::Unary { op, operand }) => {
@@ -1576,7 +1594,8 @@ impl<'a> Checker<'a> {
                     // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028).
                     (UnOp::Plus, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_abs())),
                     (UnOp::Plus, ConstValue::Float(v)) => Some(ConstValue::Float(v.abs())),
-                    (UnOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
+                    // `Not` yields Int 1/0 (FD-035): non-zero → 0, 0 → 1.
+                    (UnOp::Not, ConstValue::Int(v)) => Some(ConstValue::Int((v == 0) as i64)),
                     _ => None,
                 }
             }
@@ -1731,16 +1750,25 @@ impl<'a> Checker<'a> {
         }
 
         if let Some(init_id) = init {
-            self.check_expr(init_id);
+            let init_ty = self.check_expr(init_id);
+            // Coerce the initializer to the declared type (mirror check_assign)
+            // so lowering emits the right Convert and narrowing is range-checked
+            // / warned (FD-035). Dim-with-initializer is single-name.
+            if let Some(dn) = names.first() {
+                let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
+                if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
+                    self.coerce(init_id, &init_ty, &var_ty);
+                }
+            }
         }
     }
 
     fn check_condition(&mut self, cond: NodeId) {
         let cty = self.check_expr(cond);
-        if !cty.is_error() && cty != Type::Bool && !cty.is_numeric() {
+        if !cty.is_error() && !cty.is_numeric() {
             self.diagnostics.push(Diagnostic::error(
                 E_TYPE_MISMATCH,
-                format!("condition must be Bool or numeric, got `{cty:?}`"),
+                format!("condition must be numeric, got `{cty:?}`"),
                 Label::new(self.arena.span_of(cond)),
             ));
         }
@@ -2106,18 +2134,30 @@ fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstV
             Some(ConstValue::String(format!("{a}{b}")))
         }
 
-        // Integer comparison
-        (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a == b)),
-        (BinOp::NotEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a != b)),
-        (BinOp::Lt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a < b)),
-        (BinOp::Gt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a > b)),
-        (BinOp::LtEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a <= b)),
-        (BinOp::GtEq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Bool(a >= b)),
+        // Integer comparison — yields Int 1/0 (FD-035)
+        (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a == b) as i64)),
+        (BinOp::NotEq, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a != b) as i64))
+        }
+        (BinOp::Lt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a < b) as i64)),
+        (BinOp::Gt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a > b) as i64)),
+        (BinOp::LtEq, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a <= b) as i64))
+        }
+        (BinOp::GtEq, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a >= b) as i64))
+        }
 
-        // Bool logic
-        (BinOp::And, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a && *b)),
-        (BinOp::Or, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a || *b)),
-        (BinOp::Xor, ConstValue::Bool(a), ConstValue::Bool(b)) => Some(ConstValue::Bool(*a ^ *b)),
+        // Integer logical ops — operands tested as `<> 0`, result Int 1/0 (FD-035)
+        (BinOp::And, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(((*a != 0) && (*b != 0)) as i64))
+        }
+        (BinOp::Or, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(((*a != 0) || (*b != 0)) as i64))
+        }
+        (BinOp::Xor, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int(((*a != 0) ^ (*b != 0)) as i64))
+        }
 
         _ => None,
     }
@@ -2128,7 +2168,6 @@ fn sigil_char(s: Sigil) -> char {
         Sigil::Integer => '%',
         Sigil::Float => '#',
         Sigil::String => '$',
-        Sigil::Bool => '!',
     }
 }
 
@@ -2369,14 +2408,54 @@ mod tests {
     }
 
     #[test]
-    fn pass2_comparison_returns_bool() {
-        let result = analyze_src("Dim x As Bool\nx = 1 > 2\n");
+    fn pass2_comparison_returns_int() {
+        // Comparisons yield Int 1/0 — there is no Bool type (FD-035).
+        let result = analyze_src("Dim x As Integer\nx = 1 > 2\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn pass2_logical_and_or() {
-        let result = analyze_src("Dim x As Bool\nx = True And False\n");
+        // Logical ops yield Int; True/False are Int 1/0 (FD-035).
+        let result = analyze_src("Dim x As Integer\nx = True And False\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_reserved_type_names_are_e0330() {
+        // Bool/Boolean/UInt/UInteger/ULong are reserved but unsupported (FD-035).
+        for src in [
+            "Dim x As Bool\n",
+            "Dim x As Boolean\n",
+            "Dim x As UInt\n",
+            "Dim x As ULong\n",
+        ] {
+            let result = analyze_src(src);
+            assert!(
+                error_codes(&result).contains(&"E0330"),
+                "expected E0330 for `{src}`, got {:?}",
+                error_codes(&result)
+            );
+        }
+    }
+
+    #[test]
+    fn pass2_dim_byte_literal_overflow_e0326() {
+        // An out-of-range integer literal in a Dim initializer is a hard error
+        // now that Dim initializers are coerced to the declared type (FD-035).
+        let result = analyze_src("Dim b As Byte = 300\n");
+        assert!(
+            error_codes(&result).contains(&"E0326"),
+            "expected E0326, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_dim_in_range_narrow_literal_is_silent() {
+        // An in-range literal coerces silently — a known-safe constant
+        // (FD-020/FD-035): Short is 16-bit unsigned, 40000 fits.
+        let result = analyze_src("Dim s As Short = 40000\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 

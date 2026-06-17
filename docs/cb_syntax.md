@@ -67,9 +67,8 @@ Type sigils annotate an identifier with a built-in type at its declaration or fi
 | `%`   | Integer |
 | `#`   | Float   |
 | `$`   | String  |
-| `!`   | Bool    |
 
-Sigils exist **only** for these four common types. `Byte`, `Short`, `UInt`/`UInteger`, `Long`, `ULong`, user-defined types, and arrays must use `As` syntax.
+Sigils exist **only** for these three common types. `Byte`, `Short`, `Long`, user-defined types, and arrays must use `As` syntax. `!` is a **reserved** symbol with no current meaning (formerly the `Bool` sigil); using it as a sigil or operator is a compile error.
 
 A variable's type is fixed at its first reference and cannot change later. If a sigil and an `As Type` clause are both given, they must agree:
 
@@ -86,7 +85,7 @@ Reserved words. Case-insensitive like all identifiers.
 
 ```
 And, As
-BinAnd, BinNot, BinOr, BinXor, Bool, Break, Byte
+BinAnd, BinNot, BinOr, BinXor, Bool, Boolean, Break, Byte
 Case, Const, Continue
 Default, Dim
 Each, Else, ElseIf, End, EndFunction, EndIf, EndSelect, EndStruct, EndType
@@ -104,6 +103,8 @@ UInt, UInteger, ULong
 Wend, While
 Xor
 ```
+
+`Bool`, `Boolean`, `UInt`, `UInteger`, and `ULong` are **reserved but unsupported** type names — invalid in a type position (§3.1). They stay reserved so the names remain free for future use and so legacy code using them fails with a clear diagnostic instead of silently parsing them as identifiers.
 
 Any `End <Keyword>` pair may also be written as a single token: `End If` == `EndIf`, `End Function` == `EndFunction`, etc. Parsers matching a block closer accept both forms interchangeably.
 `ElseIf` can also be written as `Else If`.
@@ -192,13 +193,15 @@ msg$ = """
 
 If a line in the content block has less indentation than the closing `"""`, that is a compile error.
 
-#### Bool and Null literals
+#### Integer truth literals and Null
 
 ```
-True
-False
+True      // the Integer 1
+False     // the Integer 0
 Null      // valid value for any reference-typed variable (arrays, Type, Function pointers)
 ```
+
+There is no `Bool` type — `True` and `False` are simply the `Integer` constants `1` and `0` (§3.1).
 
 ### 1.7 Operators and punctuation
 
@@ -211,10 +214,10 @@ Bitwise (binary): `BinAnd`, `BinOr`, `BinXor`, `Shl`, `Shr`, `Sar`
 - `Shl`/`Shr`/`Sar` shift by an integer count. `Shr` is logical right shift, `Sar` is arithmetic shift.
 
 Comparison: `=`, `<>`, `<`, `>`, `<=`, `>=`
-- Defined for all numeric types, `Bool`, `String` (lexicographic by Unicode code point), and reference types (`=`/`<>` only, by identity).
+- Defined for all numeric types, `String` (lexicographic by Unicode code point), and reference types (`=`/`<>` only, by identity). A comparison yields `Integer` `1` (true) or `0` (false); there is no `Bool` type.
 
 Logical: `And`, `Or`, `Xor`, `Not`
-- `And` and `Or` short-circuit (§5.2). `Xor` evaluates both operands.
+- `And` and `Or` short-circuit (§5.2). `Xor` evaluates both operands. Operands are tested as `<> 0`; the result is `Integer` `1`/`0`.
 
 Unary: `+`, `-`, `Not`, `BinNot`
 - Unary `+` is **absolute value**, identical to the `Abs` function: `+x` ≡ `Abs(x)` (e.g. `+(-5)` is `5`). It is **not** a no-op. The result keeps the operand's numeric type.
@@ -263,14 +266,13 @@ Implicit. Compilation starts from the main file given on the command line; execu
 | `Byte`           | 8-bit        | unsigned   | —     |
 | `Short`          | 16-bit       | unsigned   | —     |
 | `Int`/`Integer`  | 32-bit       | signed     | `%`   |
-| `UInt`/`UInteger`| 32-bit       | unsigned   | —     |
 | `Long`           | 64-bit       | signed     | —     |
-| `ULong`          | 64-bit       | unsigned   | —     |
 | `Float`          | 64-bit IEEE  | —          | `#`   |
-| `Bool`           | 1 bit (bool) | —          | `!`   |
 | `String`         | UTF-8 string | —          | `$`   |
 
-`Int` and `Integer` are exact aliases; same for `UInt`/`UInteger`. There is **no 32-bit float type** in the language — `Float` is always 64-bit. A future `Single` type can be added without changing this.
+`Int` and `Integer` are exact aliases. `Byte` and `Short` are **storage-only**: they widen to `Int` for all arithmetic, and a value is narrowed back only when stored into a `Byte`/`Short` location (§3.4). There is **no 32-bit float type** — `Float` is always 64-bit. A future `Single` type can be added without changing this.
+
+There is **no `Bool` type**: comparison and logical operators yield `Integer` `1`/`0`, and `True`/`False` are the `Integer` constants `1`/`0` (§1.6). The names `Bool`, `Boolean`, `UInt`, `UInteger`, and `ULong` are **reserved but unsupported** — using any of them in a type position is a compile error (§1.5).
 
 ### 3.2 Arrays
 
@@ -285,7 +287,7 @@ a = New Integer[10]      // 1-D, length 10, indices 0..9
 b = New Float[4, 8]      // 2-D, 4*8 = 32 elements
 ```
 
-A newly declared array has **length 0** until assigned. A `New T[…]` array's elements are zero-initialised (numerics = 0, Bool = False, String = "", reference types = Null).
+A newly declared array has **length 0** until assigned. A `New T[…]` array's elements are zero-initialised (numerics = 0, String = "", reference types = Null).
 
 Indexing uses one bracketed expression with comma-separated indices per dimension:
 
@@ -490,16 +492,14 @@ Structs may contain other Structs by value, arrays by reference, and Type refere
 
 #### Implicit conversions
 
-- Numeric widening between integer types: always implicit (`Byte` → `Short` → `Int` → `Long`, and the unsigned chain `Byte` → `Short` → `UInt` → `ULong`).
-- Same-width signed↔unsigned: implicit, reinterprets the bit pattern.
-- **Mixed same-width signed/unsigned arithmetic yields the signed type.** When the two operands of an arithmetic operator are the same width but differ in signedness (`Int`+`UInt`, `Long`+`ULong`), the result is the *signed* type, independent of operand order (`Int + UInt` and `UInt + Int` both produce `Int`). `Int` is the language's default numeric type, so this is the least-surprising default; force unsigned arithmetic with an explicit conversion if needed.
+- `Byte`/`Short` are **storage-only**: an operand of either widens to `Int` before any arithmetic, bitwise, shift, or comparison. The integer result is `Long` if an operand is `Long`, otherwise `Int`; a value narrows back to `Byte`/`Short` only on assignment to such a variable.
+- Numeric widening between integer types: always implicit (`Byte` → `Short` → `Int` → `Long`).
 - **An integer literal assigned/coerced to a narrower integer type is range-checked at compile time.** If the literal value does not fit the target type's range it is a hard error (e.g. `Dim b As Byte : b = 300`, or `b = -1`). An in-range literal converts silently — because the value is a known-safe constant, it does *not* produce the narrowing warning that a runtime value would.
 - Integer → Float: implicit.
 - Float → Integer: implicit, **rounds to the nearest integer with ties away from zero** — matching the `Int()` runtime function, **not** a straight truncation toward zero (so `10.5 → 11`, `-1.5 → -2`, `-2.5 → -3`; see `cb_runtime.md` §Math). Both implicit conversions and explicit `Int(x)` use this same rule. The compiler emits a **narrowing-conversion warning** at the implicit conversion site; suppress by writing `Int(x)` explicitly.
 - Long → Int, Int → Byte/Short, etc.: implicit but **warned** as a narrowing conversion.
 - Any numeric → String: implicit when used as a `+` operand on a String. Float → String uses the shortest decimal representation that round-trips, switching to scientific notation outside a sensible range. Integer → String uses decimal.
-- `Bool` → numeric: implicit, False = 0, True = 1.
-- Numeric → `Bool`: implicit, 0 = False, anything else = True.
+- Comparison and logical operators yield `Integer` `1`/`0`; any numeric is truthy when `<> 0` (used by `If`/`While`/`Until` conditions). There is no `Bool` type to convert to or from.
 
 `Null` is implicitly assignable to any reference type.
 
@@ -511,7 +511,6 @@ The compiler-intrinsic conversion functions are:
 Int(val)         // to Integer (32-bit signed)
 Float(val)       // to Float
 Str(val)         // to String
-Bool(val)        // to Bool
 ```
 
 `Int("123")` returns 123. `Float("1.5e2")` returns 150.0. A `Str`-to-numeric conversion that fails to parse returns 0 (or 0.0) — it does not throw. To distinguish "0" from "parse failed", parse and check explicitly via runtime-library helpers.
@@ -666,7 +665,7 @@ a + b BinAnd mask    // = (a + b) BinAnd mask        (bitwise below arithmetic)
 a = b And c = d      // = (a = b) And (c = d)        (comparison tighter than And)
 ```
 
-Comparison operators do **not chain**: `1 < x < 10` parses as `(1 < x) < 10`, comparing a `Bool` to `10`, which is a type warning (Bool→Int implicit) and almost certainly a bug. Use `x > 1 And x < 10` instead.
+Comparison operators do **not chain**: `1 < x < 10` parses as `(1 < x) < 10` — the `1 < x` yields `Integer` `0` or `1`, which is then compared to `10`, almost certainly a bug. Use `x > 1 And x < 10` instead.
 
 ### 5.2 Short-circuit evaluation
 
@@ -703,7 +702,7 @@ Several constructs take a **type expression** — a piece of syntax that names a
 
 A type expression is one of:
 
-- **A primitive type** — `Byte`, `Short`, `Int`/`Integer`, `UInt`/`UInteger`, `Long`, `ULong`, `Float`, `Bool`, `String` (§3.1).
+- **A primitive type** — `Byte`, `Short`, `Int`/`Integer`, `Long`, `Float`, `String` (§3.1).
 - **A user-defined type name** — any identifier that resolves at sema time to a `Type` or `Struct` (§3.3), e.g. `MyType`, `Vec2`.
 - **An array of T with N dimensions** — the element type followed by `[]` (1-D), `[,]` (2-D), `[,,]` (3-D), and so on: `Integer[]`, `Float[,]`, `String[,,]`. The element type may itself be any non-array type expression.
 - **A function-pointer type** — `Function(<param-types>)` with an optional `As <return-type>`. Parameters use the same syntax as a function declaration (§7.2): each parameter is `name As Type` or `name<sigil>`, with names optional in a type position.
@@ -756,10 +755,10 @@ arr[i, j] = compute()
 node.field = value
 ```
 
-Because comparison also uses a single `=`, an expression like `a = b = c` parses as `a = (b = c)` — assigning to `a` the Bool result of comparing `b` and `c`. **Assignment is not chainable**:
+Because comparison also uses a single `=`, an expression like `a = b = c` parses as `a = (b = c)` — assigning to `a` the `Integer` (`0`/`1`) result of comparing `b` and `c`. **Assignment is not chainable**:
 
 ```cb
-a = b = 5            // a := (b = 5), i.e. a is Bool, b is unchanged — NOT a chain
+a = b = 5            // a := (b = 5), i.e. a is Integer (0 or 1), b is unchanged — NOT a chain
 ```
 
 There are no compound-assignment operators (`+=`, `-=`, …); write the operation out:
@@ -1033,7 +1032,7 @@ A null function pointer call traps at runtime (§9.2).
 
 **The compiler itself ships only the language**, including these compiler-known intrinsics:
 
-- Conversion: `Int`, `Float`, `Str`, `Bool`
+- Conversion: `Int`, `Float`, `Str`
 - Array operations: `Len`, `New`, `Redim`
 - `Type` linked-list operations: `First`, `Last`, `Next`, `Previous`, `New`, `Delete`
 

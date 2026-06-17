@@ -2,7 +2,7 @@ Type Player
     Field hp As Int
     Field speed As Float
     Field name As String
-    Field alive As Bool
+    Field alive As Integer
 EndType
 
 Dim p As Player = New Player

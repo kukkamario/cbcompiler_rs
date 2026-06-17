@@ -39,3 +39,8 @@ pub const E_RUNTIME_COMMAND_AS_VAR: DiagnosticCode = DiagnosticCode::new("E0328"
 /// take its address. Only non-overloaded user-defined functions/subs have a
 /// single well-defined address (cb_syntax.md §7.2/§7.4).
 pub const E_ADDRESS_OF_UNSUPPORTED: DiagnosticCode = DiagnosticCode::new("E0329");
+/// A reserved-but-unsupported type name (`Bool`, `Boolean`, `UInt`,
+/// `UInteger`, `ULong`) was used in a type position. These names stay reserved
+/// (cb_syntax.md §1.5/§3.1) but denote no type since FD-035 narrowed the
+/// scalar set to Byte/Short/Int/Long/Float/String.
+pub const E_RESERVED_TYPE: DiagnosticCode = DiagnosticCode::new("E0330");

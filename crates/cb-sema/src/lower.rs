@@ -247,11 +247,8 @@ impl<'a> Lowerer<'a> {
             Type::Byte => IrType::Byte,
             Type::Short => IrType::Short,
             Type::Int => IrType::Int,
-            Type::UInt => IrType::UInt,
             Type::Long => IrType::Long,
-            Type::ULong => IrType::ULong,
             Type::Float => IrType::Float,
-            Type::Bool => IrType::Bool,
             Type::String => IrType::String,
             Type::Array { elem, rank } => IrType::Array {
                 elem: Box::new(self.sema_type_to_ir(elem)),
@@ -738,7 +735,6 @@ impl<'a> Lowerer<'a> {
                 }
             }
             Node::Expr(Expr::FloatLit(v)) => self.emit(InstKind::ConstFloat(v.to_f64()), span),
-            Node::Expr(Expr::BoolLit(v)) => self.emit(InstKind::ConstBool(v), span),
             Node::Expr(Expr::StrLit { value, .. }) => self.emit(InstKind::ConstString(value), span),
             Node::Expr(Expr::NullLit) => self.emit(InstKind::ConstNull, span),
 
@@ -889,7 +885,6 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 ConstValue::Float(v) => self.emit(InstKind::ConstFloat(v), span),
-                ConstValue::Bool(v) => self.emit(InstKind::ConstBool(v), span),
                 ConstValue::String(ref v) => self.emit(InstKind::ConstString(v.clone()), span),
             };
         }
@@ -982,8 +977,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_short_circuit(&mut self, op: BinOp, lhs: NodeId, rhs: NodeId, span: Span) -> Reg {
-        // Allocate a unique temp local for the result.
-        let tmp = self.alloc_temp("@sc", IrType::Bool);
+        // Allocate a unique temp local for the result. Logical ops yield Int
+        // 1/0 (FD-035), so the temp and both short-circuit constants are Int.
+        let tmp = self.alloc_temp("@sc", IrType::Int);
 
         let lhs_reg = self.lower_expr(lhs);
 
@@ -1003,9 +999,9 @@ impl<'a> Lowerer<'a> {
                     span,
                 );
 
-                // Short-circuit block: result = false
+                // Short-circuit block: result = 0 (false)
                 self.switch_to(short_block);
-                let false_reg = self.emit(InstKind::ConstBool(false), span);
+                let false_reg = self.emit(InstKind::ConstInt(0), span);
                 self.emit_void(
                     InstKind::StoreLocal {
                         local: tmp,
@@ -1026,9 +1022,9 @@ impl<'a> Lowerer<'a> {
                     span,
                 );
 
-                // Short-circuit block: result = true
+                // Short-circuit block: result = 1 (true)
                 self.switch_to(short_block);
-                let true_reg = self.emit(InstKind::ConstBool(true), span);
+                let true_reg = self.emit(InstKind::ConstInt(1), span);
                 self.emit_void(
                     InstKind::StoreLocal {
                         local: tmp,
@@ -1114,16 +1110,6 @@ impl<'a> Lowerer<'a> {
                         InstKind::ConvertExplicit {
                             value: val,
                             target: IrType::String,
-                        },
-                        span,
-                    );
-                }
-                "bool" => {
-                    let val = self.lower_expr(args[0]);
-                    return self.emit(
-                        InstKind::ConvertExplicit {
-                            value: val,
-                            target: IrType::Bool,
                         },
                         span,
                     );

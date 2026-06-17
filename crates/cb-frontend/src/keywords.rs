@@ -12,6 +12,7 @@ static KEYWORDS: phf::Map<&'static str, Kw> = phf_map! {
     "binor" => Kw::BinOr,
     "binxor" => Kw::BinXor,
     "bool" => Kw::Bool,
+    "boolean" => Kw::Boolean,
     "break" => Kw::Break,
     "byte" => Kw::Byte,
     "case" => Kw::Case,

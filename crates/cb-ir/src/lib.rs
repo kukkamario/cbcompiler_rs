@@ -253,6 +253,5 @@ mod tests {
         assert!(IrType::Byte.is_integer());
         assert!(!IrType::Float.is_integer());
         assert!(!IrType::String.is_numeric());
-        assert!(!IrType::Bool.is_numeric());
     }
 }
