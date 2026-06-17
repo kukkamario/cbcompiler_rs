@@ -13,7 +13,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 | [FD-025](FD-025_DRIVER_BACKEND_SELECTION_AND_EXIT_CODES.md) | Driver Backend-Selection & Exit-Code Correctness | Open | Low | Medium |
 | [FD-026](FD-026_INTERNER_SPEC_COMPLIANCE.md) | Identifier Interner Spec Compliance | Open | Low-Medium | Medium |
 | [FD-031](FD-031_DIAGNOSTIC_ASSERTION_SWEEP.md) | Diagnostic Assertion Sweep | Open | Medium | Medium |
-| [FD-035](FD-035_NARROW_UNSIGNED_NUMERIC_CORRECTNESS.md) | Narrow/Unsigned Numeric Correctness | Open | Medium | Medium-High |
+| [FD-035](FD-035_NARROW_UNSIGNED_NUMERIC_CORRECTNESS.md) | Type System Simplification — Classic Types + Long | In Progress | Large | Medium-High |
 
 ## Completed
 
