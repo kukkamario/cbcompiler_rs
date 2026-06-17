@@ -314,10 +314,18 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
 
 /// Determine the result type of a unary operation.
 pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
+    // Byte/Short widen to Int for unary arithmetic/bitwise, mirroring binary
+    // promotion (FD-035): e.g. negating a Byte yields a signed Int.
+    fn widen(t: &Type) -> Type {
+        match t {
+            Type::Byte | Type::Short => Type::Int,
+            other => other.clone(),
+        }
+    }
     match op {
         UnOp::Plus | UnOp::Neg => {
             if operand.is_numeric() {
-                Some(operand.clone())
+                Some(widen(operand))
             } else {
                 None
             }
@@ -331,7 +339,7 @@ pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
         }
         UnOp::BinNot => {
             if operand.is_integer() {
-                Some(operand.clone())
+                Some(widen(operand))
             } else {
                 None
             }
@@ -518,6 +526,9 @@ mod tests {
             Some(Type::Float)
         );
         assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
+        // Byte/Short widen to Int for unary arithmetic/bitwise (FD-035).
+        assert_eq!(unary_result_type(UnOp::Neg, &Type::Byte), Some(Type::Int));
+        assert_eq!(unary_result_type(UnOp::BinNot, &Type::Short), Some(Type::Int));
         assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Int));
         assert_eq!(unary_result_type(UnOp::Not, &Type::Float), Some(Type::Int));
         assert!(unary_result_type(UnOp::Not, &Type::String).is_none());

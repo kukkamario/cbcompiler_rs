@@ -11,7 +11,6 @@
 //!     CB Float is conceptually 32-bit at the language level, but every C
 //!     runtime function takes/returns `double` so libffi can dispatch with
 //!     one uniform float ABI.
-//!   - `IrType::Bool` passes as `u8` (Rust's `bool` ABI).
 //!   - `IrType::String` passes as `*mut CbString` — the opaque refcounted
 //!     handle defined in `cb_string.cpp`. Inputs are borrowed (the handle
 //!     stays owned by the caller for the duration of the call); returned
@@ -39,11 +38,8 @@ enum Marshaled {
     I8(i8),
     I16(i16),
     I32(i32),
-    U32(u32),
     I64(i64),
-    U64(u64),
     F64(f64),
-    Bool(u8),
     /// Owned string handle plus the raw pointer libffi reads. Holding the
     /// handle here keeps the refcount > 0 across the call even if the
     /// source value was a coercion (e.g. `print(5)` → `Convert(Int, String)`
@@ -62,11 +58,8 @@ impl Marshaled {
             Marshaled::I8(v) => Arg::new(v),
             Marshaled::I16(v) => Arg::new(v),
             Marshaled::I32(v) => Arg::new(v),
-            Marshaled::U32(v) => Arg::new(v),
             Marshaled::I64(v) => Arg::new(v),
-            Marshaled::U64(v) => Arg::new(v),
             Marshaled::F64(v) => Arg::new(v),
-            Marshaled::Bool(v) => Arg::new(v),
             Marshaled::CbStringArg { ptr, .. } => Arg::new(ptr),
             Marshaled::Ptr(p) => Arg::new(p),
         }
@@ -79,11 +72,8 @@ fn ir_to_ffi_type(ty: &IrType) -> Type {
         IrType::Byte => Type::i8(),
         IrType::Short => Type::i16(),
         IrType::Int => Type::i32(),
-        IrType::UInt => Type::u32(),
         IrType::Long => Type::i64(),
-        IrType::ULong => Type::u64(),
         IrType::Float => Type::f64(),
-        IrType::Bool => Type::u8(),
         IrType::String | IrType::RuntimeType(_) => Type::pointer(),
         other => panic!("unsupported runtime ABI type: {other:?}"),
     }
@@ -94,12 +84,8 @@ fn value_as_i64(v: &Value) -> i64 {
         Value::Byte(x) => *x as i64,
         Value::Short(x) => *x as i64,
         Value::Int(x) => *x as i64,
-        Value::UInt(x) => *x as i64,
         Value::Long(x) => *x,
-        Value::ULong(x) => *x as i64,
         Value::Float(x) => *x as i64,
-        Value::Bool(true) => 1,
-        Value::Bool(false) => 0,
         _ => 0,
     }
 }
@@ -109,12 +95,8 @@ fn value_as_f64(v: &Value) -> f64 {
         Value::Byte(x) => *x as f64,
         Value::Short(x) => *x as f64,
         Value::Int(x) => *x as f64,
-        Value::UInt(x) => *x as f64,
         Value::Long(x) => *x as f64,
-        Value::ULong(x) => *x as f64,
         Value::Float(x) => *x,
-        Value::Bool(true) => 1.0,
-        Value::Bool(false) => 0.0,
         _ => 0.0,
     }
 }
@@ -124,11 +106,8 @@ fn marshal(value: &Value, ty: &IrType, string_api: &'static CbStringApi) -> Mars
         IrType::Byte => Marshaled::I8(value_as_i64(value) as i8),
         IrType::Short => Marshaled::I16(value_as_i64(value) as i16),
         IrType::Int => Marshaled::I32(value_as_i64(value) as i32),
-        IrType::UInt => Marshaled::U32(value_as_i64(value) as u32),
         IrType::Long => Marshaled::I64(value_as_i64(value)),
-        IrType::ULong => Marshaled::U64(value_as_i64(value) as u64),
         IrType::Float => Marshaled::F64(value_as_f64(value)),
-        IrType::Bool => Marshaled::Bool(if value.is_truthy() { 1 } else { 0 }),
         IrType::String => {
             // Always go through `as_cb_string` — for Value::String this is
             // a free retain; for anything else it allocates a coerced handle
@@ -188,13 +167,10 @@ pub unsafe fn call(
             Value::Void
         }
         IrType::Byte => Value::Byte(unsafe { cif.call::<i8>(code, &arg_refs) } as u8),
-        IrType::Short => Value::Short(unsafe { cif.call::<i16>(code, &arg_refs) }),
+        IrType::Short => Value::Short(unsafe { cif.call::<i16>(code, &arg_refs) } as u16),
         IrType::Int => Value::Int(unsafe { cif.call::<i32>(code, &arg_refs) }),
-        IrType::UInt => Value::UInt(unsafe { cif.call::<u32>(code, &arg_refs) }),
         IrType::Long => Value::Long(unsafe { cif.call::<i64>(code, &arg_refs) }),
-        IrType::ULong => Value::ULong(unsafe { cif.call::<u64>(code, &arg_refs) }),
         IrType::Float => Value::Float(unsafe { cif.call::<f64>(code, &arg_refs) }),
-        IrType::Bool => Value::Bool(unsafe { cif.call::<u8>(code, &arg_refs) } != 0),
         IrType::String => {
             let p = unsafe { cif.call::<*mut CbString>(code, &arg_refs) };
             // Per ABI, runtime string-returning functions never produce null —

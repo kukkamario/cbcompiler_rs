@@ -397,7 +397,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::ConstInt(v) => Ok(Value::Int(*v as i32)),
             InstKind::ConstLong(v) => Ok(Value::Long(*v)),
             InstKind::ConstFloat(v) => Ok(Value::Float(*v)),
-            InstKind::ConstBool(v) => Ok(Value::Bool(*v)),
             InstKind::ConstString(v) => Ok(Value::String(CbStringHandle::from_bytes(
                 self.string_api,
                 v.as_bytes(),
@@ -913,37 +912,33 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         rhs: &Value,
         span: Span,
     ) -> Result<Value, InterpError> {
+        // Shifts dispatch on the (widened) LHS and read the count from any
+        // integer RHS; sema does not coerce shift operands (FD-035). Byte/Short
+        // shift in 32-bit (Int) width, Long in 64-bit.
+        if matches!(op, IrBinOp::Shl | IrBinOp::Shr | IrBinOp::Sar)
+            && matches!(
+                lhs,
+                Value::Byte(_) | Value::Short(_) | Value::Int(_) | Value::Long(_)
+            )
+        {
+            let wide = matches!(lhs, Value::Long(_));
+            let a = self.value_to_i64(lhs);
+            let count = self.value_to_i64(rhs);
+            return self.int_binop(op, a, count, span, wide);
+        }
+
         match (lhs, rhs) {
             (Value::Int(a), Value::Int(b)) => self.int_binop(op, *a as i64, *b as i64, span, false),
             (Value::Long(a), Value::Long(b)) => self.int_binop(op, *a, *b, span, true),
-            (Value::Byte(a), Value::Byte(b)) => {
-                self.int_binop(op, *a as i64, *b as i64, span, false)
-            }
-            (Value::Short(a), Value::Short(b)) => {
-                self.int_binop(op, *a as i64, *b as i64, span, false)
-            }
-            (Value::UInt(a), Value::UInt(b)) => {
-                self.uint_binop(op, *a as u64, *b as u64, span, false)
-            }
-            (Value::ULong(a), Value::ULong(b)) => self.uint_binop(op, *a, *b, span, true),
 
             (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b, span),
 
             (Value::String(a), Value::String(b)) => self.string_binop(op, a, b, span),
 
-            (Value::Bool(a), Value::Bool(b)) => match op {
-                IrBinOp::Eq => Ok(Value::Bool(a == b)),
-                IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-                _ => Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on booleans")),
-                    span,
-                )),
-            },
-
-            // Type instance identity comparison
+            // Type instance identity comparison — yields Int 1/0 (FD-035)
             (Value::TypeInstance(a), Value::TypeInstance(b)) => match op {
-                IrBinOp::Eq => Ok(Value::Bool(a == b)),
-                IrBinOp::NotEq => Ok(Value::Bool(a != b)),
+                IrBinOp::Eq => Ok(Value::Int((a == b) as i32)),
+                IrBinOp::NotEq => Ok(Value::Int((a != b) as i32)),
                 _ => Err(self.error_at(
                     InterpErrorKind::RuntimeError(format!(
                         "invalid binop: {op:?} on type instances"
@@ -954,8 +949,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // Opaque handle identity comparison
             (Value::OpaqueHandle(a), Value::OpaqueHandle(b)) => match op {
-                IrBinOp::Eq => Ok(Value::Bool(a == b)),
-                IrBinOp::NotEq => Ok(Value::Bool(a != b)),
+                IrBinOp::Eq => Ok(Value::Int((a == b) as i32)),
+                IrBinOp::NotEq => Ok(Value::Int((a != b) as i32)),
                 _ => Err(self.error_at(
                     InterpErrorKind::RuntimeError(format!(
                         "invalid binop: {op:?} on opaque handles"
@@ -966,16 +961,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // Null comparisons
             (Value::Null, Value::Null) => match op {
-                IrBinOp::Eq => Ok(Value::Bool(true)),
-                IrBinOp::NotEq => Ok(Value::Bool(false)),
+                IrBinOp::Eq => Ok(Value::Int(1)),
+                IrBinOp::NotEq => Ok(Value::Int(0)),
                 _ => Err(self.error_at(
                     InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null values")),
                     span,
                 )),
             },
             (Value::Null, _) | (_, Value::Null) => match op {
-                IrBinOp::Eq => Ok(Value::Bool(false)),
-                IrBinOp::NotEq => Ok(Value::Bool(true)),
+                IrBinOp::Eq => Ok(Value::Int(0)),
+                IrBinOp::NotEq => Ok(Value::Int(1)),
                 _ => Err(self.error_at(
                     InterpErrorKind::RuntimeError(format!(
                         "invalid binop: {op:?} on null and non-null values"
@@ -1067,85 +1062,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 }
             }
 
-            IrBinOp::Eq => Ok(Value::Bool(a == b)),
-            IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-            IrBinOp::Lt => Ok(Value::Bool(a < b)),
-            IrBinOp::Gt => Ok(Value::Bool(a > b)),
-            IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
-            IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
+            IrBinOp::Eq => Ok(Value::Int((a == b) as i32)),
+            IrBinOp::NotEq => Ok(Value::Int((a != b) as i32)),
+            IrBinOp::Lt => Ok(Value::Int((a < b) as i32)),
+            IrBinOp::Gt => Ok(Value::Int((a > b) as i32)),
+            IrBinOp::LtEq => Ok(Value::Int((a <= b) as i32)),
+            IrBinOp::GtEq => Ok(Value::Int((a >= b) as i32)),
 
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on integers")),
-                span,
-            )),
-        }
-    }
-
-    fn uint_binop(
-        &self,
-        op: IrBinOp,
-        a: u64,
-        b: u64,
-        span: Span,
-        wide: bool,
-    ) -> Result<Value, InterpError> {
-        let wrap = |v: u64| -> Value {
-            if wide {
-                Value::ULong(v)
-            } else {
-                Value::UInt(v as u32)
-            }
-        };
-
-        match op {
-            IrBinOp::Add => Ok(wrap(a.wrapping_add(b))),
-            IrBinOp::Sub => Ok(wrap(a.wrapping_sub(b))),
-            IrBinOp::Mul => Ok(wrap(a.wrapping_mul(b))),
-            IrBinOp::Div => {
-                if b == 0 {
-                    return Err(self.trap_error(TrapKind::DivisionByZero, span));
-                }
-                Ok(wrap(a / b))
-            }
-            IrBinOp::Mod => {
-                if b == 0 {
-                    return Err(self.trap_error(TrapKind::DivisionByZero, span));
-                }
-                Ok(wrap(a % b))
-            }
-            IrBinOp::Pow => Ok(wrap(a.wrapping_pow(b as u32))),
-
-            IrBinOp::BinAnd => Ok(wrap(a & b)),
-            IrBinOp::BinOr => Ok(wrap(a | b)),
-            IrBinOp::BinXor => Ok(wrap(a ^ b)),
-            // Width-correct, count reduced modulo the operand width. For an
-            // unsigned operand `Sar` is identical to the logical `Shr`.
-            IrBinOp::Shl => {
-                if wide {
-                    Ok(wrap(a.wrapping_shl((b as u32) & 63)))
-                } else {
-                    Ok(wrap((a as u32).wrapping_shl((b as u32) & 31) as u64))
-                }
-            }
-            IrBinOp::Shr | IrBinOp::Sar => {
-                if wide {
-                    Ok(wrap(a.wrapping_shr((b as u32) & 63)))
-                } else {
-                    Ok(wrap((a as u32).wrapping_shr((b as u32) & 31) as u64))
-                }
-            }
-
-            IrBinOp::Eq => Ok(Value::Bool(a == b)),
-            IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-            IrBinOp::Lt => Ok(Value::Bool(a < b)),
-            IrBinOp::Gt => Ok(Value::Bool(a > b)),
-            IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
-            IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
-
-            _ => Err(self.error_at(
-                InterpErrorKind::RuntimeError(format!(
-                    "invalid binop: {op:?} on unsigned integers"
-                )),
                 span,
             )),
         }
@@ -1160,12 +1085,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             IrBinOp::Mod => Ok(Value::Float(a % b)),
             IrBinOp::Pow => Ok(Value::Float(a.powf(b))),
 
-            IrBinOp::Eq => Ok(Value::Bool(a == b)),
-            IrBinOp::NotEq => Ok(Value::Bool(a != b)),
-            IrBinOp::Lt => Ok(Value::Bool(a < b)),
-            IrBinOp::Gt => Ok(Value::Bool(a > b)),
-            IrBinOp::LtEq => Ok(Value::Bool(a <= b)),
-            IrBinOp::GtEq => Ok(Value::Bool(a >= b)),
+            IrBinOp::Eq => Ok(Value::Int((a == b) as i32)),
+            IrBinOp::NotEq => Ok(Value::Int((a != b) as i32)),
+            IrBinOp::Lt => Ok(Value::Int((a < b) as i32)),
+            IrBinOp::Gt => Ok(Value::Int((a > b) as i32)),
+            IrBinOp::LtEq => Ok(Value::Int((a <= b) as i32)),
+            IrBinOp::GtEq => Ok(Value::Int((a >= b) as i32)),
 
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on floats")),
@@ -1183,12 +1108,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     ) -> Result<Value, InterpError> {
         match op {
             IrBinOp::StrConcat => Ok(Value::String(a.concat(b))),
-            IrBinOp::StrEq => Ok(Value::Bool(a.as_bytes() == b.as_bytes())),
-            IrBinOp::StrNotEq => Ok(Value::Bool(a.as_bytes() != b.as_bytes())),
-            IrBinOp::StrLt => Ok(Value::Bool(a.as_bytes() < b.as_bytes())),
-            IrBinOp::StrGt => Ok(Value::Bool(a.as_bytes() > b.as_bytes())),
-            IrBinOp::StrLtEq => Ok(Value::Bool(a.as_bytes() <= b.as_bytes())),
-            IrBinOp::StrGtEq => Ok(Value::Bool(a.as_bytes() >= b.as_bytes())),
+            IrBinOp::StrEq => Ok(Value::Int((a.as_bytes() == b.as_bytes()) as i32)),
+            IrBinOp::StrNotEq => Ok(Value::Int((a.as_bytes() != b.as_bytes()) as i32)),
+            IrBinOp::StrLt => Ok(Value::Int((a.as_bytes() < b.as_bytes()) as i32)),
+            IrBinOp::StrGt => Ok(Value::Int((a.as_bytes() > b.as_bytes()) as i32)),
+            IrBinOp::StrLtEq => Ok(Value::Int((a.as_bytes() <= b.as_bytes()) as i32)),
+            IrBinOp::StrGtEq => Ok(Value::Int((a.as_bytes() >= b.as_bytes()) as i32)),
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on strings")),
                 span,
@@ -1198,45 +1123,34 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
     fn eval_unop(&self, op: IrUnOp, v: &Value, span: Span) -> Result<Value, InterpError> {
         match (op, v) {
+            // Byte/Short widen to Int for unary arithmetic/bitwise (FD-035), so
+            // e.g. negating a Byte yields a signed Int, matching binary promotion.
             (IrUnOp::Neg, Value::Int(x)) => Ok(Value::Int(x.wrapping_neg())),
             (IrUnOp::Neg, Value::Long(x)) => Ok(Value::Long(x.wrapping_neg())),
             (IrUnOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
-            (IrUnOp::Neg, Value::Short(x)) => Ok(Value::Short(x.wrapping_neg())),
-            (IrUnOp::Neg, Value::Byte(x)) => Ok(Value::Byte(x.wrapping_neg())),
-            (IrUnOp::Neg, Value::UInt(x)) => Ok(Value::UInt(x.wrapping_neg())),
-            (IrUnOp::Neg, Value::ULong(x)) => Ok(Value::ULong(x.wrapping_neg())),
+            (IrUnOp::Neg, Value::Short(x)) => Ok(Value::Int((*x as i32).wrapping_neg())),
+            (IrUnOp::Neg, Value::Byte(x)) => Ok(Value::Int((*x as i32).wrapping_neg())),
 
-            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028),
-            // type-preserving per sema. Signed widths use `wrapping_abs` to
-            // match the runtime `Abs` at `MIN`; unsigned widths are already
-            // non-negative, so abs is identity.
+            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028).
+            // Signed widths use `wrapping_abs` to match the runtime `Abs` at
+            // `MIN`; Byte/Short widen to Int (already non-negative).
             (IrUnOp::Abs, Value::Int(x)) => Ok(Value::Int(x.wrapping_abs())),
-            (IrUnOp::Abs, Value::Short(x)) => Ok(Value::Short(x.wrapping_abs())),
             (IrUnOp::Abs, Value::Long(x)) => Ok(Value::Long(x.wrapping_abs())),
-            (IrUnOp::Abs, Value::Byte(x)) => Ok(Value::Byte(*x)),
-            (IrUnOp::Abs, Value::UInt(x)) => Ok(Value::UInt(*x)),
-            (IrUnOp::Abs, Value::ULong(x)) => Ok(Value::ULong(*x)),
+            (IrUnOp::Abs, Value::Byte(x)) => Ok(Value::Int(*x as i32)),
+            (IrUnOp::Abs, Value::Short(x)) => Ok(Value::Int(*x as i32)),
             (IrUnOp::Abs, Value::Float(x)) => Ok(Value::Float(x.abs())),
 
-            // Logical NOT is defined for booleans and every integer width via
-            // truthiness, so we don't rely on sema always pre-converting.
+            // Logical NOT yields Int 1/0 (FD-035), defined for every integer
+            // width via truthiness so we don't rely on sema pre-converting.
             (
                 IrUnOp::Not,
-                Value::Bool(_)
-                | Value::Int(_)
-                | Value::Long(_)
-                | Value::Byte(_)
-                | Value::Short(_)
-                | Value::UInt(_)
-                | Value::ULong(_),
-            ) => Ok(Value::Bool(!v.is_truthy())),
+                Value::Int(_) | Value::Long(_) | Value::Byte(_) | Value::Short(_),
+            ) => Ok(Value::Int(if v.is_truthy() { 0 } else { 1 })),
 
             (IrUnOp::BinNot, Value::Int(x)) => Ok(Value::Int(!x)),
             (IrUnOp::BinNot, Value::Long(x)) => Ok(Value::Long(!x)),
-            (IrUnOp::BinNot, Value::Byte(x)) => Ok(Value::Byte(!x)),
-            (IrUnOp::BinNot, Value::Short(x)) => Ok(Value::Short(!x)),
-            (IrUnOp::BinNot, Value::UInt(x)) => Ok(Value::UInt(!x)),
-            (IrUnOp::BinNot, Value::ULong(x)) => Ok(Value::ULong(!x)),
+            (IrUnOp::BinNot, Value::Byte(x)) => Ok(Value::Int(!(*x as i32))),
+            (IrUnOp::BinNot, Value::Short(x)) => Ok(Value::Int(!(*x as i32))),
 
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid unop: {op:?} on {v:?}")),
@@ -1257,11 +1171,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
         match to {
             IrType::Byte => Ok(Value::Byte(i as u8)),
-            IrType::Short => Ok(Value::Short(i as i16)),
+            IrType::Short => Ok(Value::Short(i as u16)),
             IrType::Int => Ok(Value::Int(i as i32)),
-            IrType::UInt => Ok(Value::UInt(i as u32)),
             IrType::Long => Ok(Value::Long(i)),
-            IrType::ULong => Ok(Value::ULong(i as u64)),
             IrType::Float => {
                 if from.is_integer() {
                     Ok(Value::Float(i as f64))
@@ -1269,7 +1181,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     Ok(Value::Float(f))
                 }
             }
-            IrType::Bool => Ok(Value::Bool(v.is_truthy())),
             IrType::String => Ok(Value::String(v.as_cb_string(self.string_api))),
             _ => Ok(v.clone()),
         }
@@ -1292,12 +1203,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Byte(x) => *x as i64,
             Value::Short(x) => *x as i64,
             Value::Int(x) => *x as i64,
-            Value::UInt(x) => *x as i64,
             Value::Long(x) => *x,
-            Value::ULong(x) => *x as i64,
             Value::Float(x) => *x as i64,
-            Value::Bool(true) => 1,
-            Value::Bool(false) => 0,
             // Same leading-integer policy as CoolBasic `toInt`
             // (`value_to_int_cb`): `"3x"` → 3, not 0. Keeps the one
             // string→int rule used everywhere (array indices/dims included).
@@ -1311,12 +1218,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Byte(x) => *x as f64,
             Value::Short(x) => *x as f64,
             Value::Int(x) => *x as f64,
-            Value::UInt(x) => *x as f64,
             Value::Long(x) => *x as f64,
-            Value::ULong(x) => *x as f64,
             Value::Float(x) => *x,
-            Value::Bool(true) => 1.0,
-            Value::Bool(false) => 0.0,
             // Floats keep the strict full-parse policy (a partial parse of a
             // float prefix has no documented CB semantics); a non-numeric
             // string yields 0.0.
@@ -1333,11 +1236,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             Value::Byte(_) => IrType::Byte,
             Value::Short(_) => IrType::Short,
             Value::Int(_) => IrType::Int,
-            Value::UInt(_) => IrType::UInt,
             Value::Long(_) => IrType::Long,
-            Value::ULong(_) => IrType::ULong,
             Value::Float(_) => IrType::Float,
-            Value::Bool(_) => IrType::Bool,
             Value::String(_) => IrType::String,
             Value::Array(_) => IrType::Null,
             Value::TypeInstance(_) => IrType::Null,
