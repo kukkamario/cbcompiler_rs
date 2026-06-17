@@ -102,7 +102,6 @@ fn format_expr(e: &Expr) -> String {
     match e {
         Expr::IntLit(v) => format!("IntLit({v})"),
         Expr::FloatLit(v) => format!("FloatLit({v:?})"),
-        Expr::BoolLit(b) => format!("BoolLit({b})"),
         Expr::NullLit => "NullLit".to_string(),
         Expr::StrLit { value, kind } => {
             format!("StrLit({:?}, {})", value, str_kind_name(*kind))
@@ -276,7 +275,6 @@ fn sigil_str(s: Sigil) -> &'static str {
         Sigil::Integer => "Integer",
         Sigil::Float => "Float",
         Sigil::String => "String",
-        Sigil::Bool => "Bool",
     }
 }
 

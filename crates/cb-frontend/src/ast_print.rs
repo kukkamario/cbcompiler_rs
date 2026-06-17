@@ -88,7 +88,6 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             // Leaf expressions — no children.
             Expr::IntLit(_)
             | Expr::FloatLit(_)
-            | Expr::BoolLit(_)
             | Expr::NullLit
             | Expr::StrLit { .. }
             | Expr::Ident { .. }
@@ -242,7 +241,6 @@ fn expr_variant_name(e: &Expr) -> &'static str {
     match e {
         Expr::IntLit(_) => "IntLit",
         Expr::FloatLit(_) => "FloatLit",
-        Expr::BoolLit(_) => "BoolLit",
         Expr::NullLit => "NullLit",
         Expr::StrLit { .. } => "StrLit",
         Expr::Ident { .. } => "Ident",

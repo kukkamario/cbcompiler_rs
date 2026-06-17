@@ -83,7 +83,6 @@ fn node_header(node: &Node) -> &'static str {
         Node::Expr(e) => match e {
             Expr::IntLit(_) => "Expr::IntLit",
             Expr::FloatLit(_) => "Expr::FloatLit",
-            Expr::BoolLit(_) => "Expr::BoolLit",
             Expr::NullLit => "Expr::NullLit",
             Expr::StrLit { .. } => "Expr::StrLit",
             Expr::Ident { .. } => "Expr::Ident",

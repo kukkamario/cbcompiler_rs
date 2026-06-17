@@ -1,9 +1,11 @@
 //! Token types produced by the lexer.
 //!
 //! Design notes (see FD-001 and `docs/cb_syntax.md`):
-//! - A trailing type sigil (`%`, `#`, `$`, `!`) is folded into the `Ident`
+//! - A trailing type sigil (`%`, `#`, `$`) is folded into the `Ident`
 //!   token via [`TokenKind::Ident`]'s `sigil` field, not emitted as a
 //!   separate token. The sigil's byte is included in [`Token::span`].
+//!   (`!` was formerly the `Bool` sigil; it is now a reserved symbol with no
+//!   meaning — see FD-035 and `docs/cb_syntax.md` §1.4.)
 //! - Comments cover `//` and `REM` (line) and `/* … */` (block, nested).
 //! - Keyword operators (`And`, `Or`, `Mod`, `Shl`, …) lex as
 //!   [`TokenKind::Keyword`], not [`TokenKind::Op`]; the parser handles their
@@ -22,7 +24,7 @@ pub struct Token {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
     /// Identifier; lexeme recovered from source via `span`. `sigil` is the
-    /// trailing type sigil (`%`, `#`, `$`, `!`) if any. The sigil's bytes are
+    /// trailing type sigil (`%`, `#`, `$`) if any. The sigil's bytes are
     /// INCLUDED in `Token::span`; consumers can subtract the sigil byte from
     /// the span end to get the bare-name span.
     Ident {
@@ -62,8 +64,6 @@ pub enum Sigil {
     Float,
     /// `$` — String
     String,
-    /// `!` — Bool
-    Bool,
 }
 
 impl Sigil {
@@ -73,7 +73,6 @@ impl Sigil {
             Sigil::Integer => '%',
             Sigil::Float => '#',
             Sigil::String => '$',
-            Sigil::Bool => '!',
         }
     }
 }
@@ -126,6 +125,7 @@ pub enum Kw {
     BinOr,
     BinXor,
     Bool,
+    Boolean,
     Break,
     Byte,
     Case,
@@ -196,6 +196,7 @@ impl Kw {
             Kw::BinOr => "binor",
             Kw::BinXor => "binxor",
             Kw::Bool => "bool",
+            Kw::Boolean => "boolean",
             Kw::Break => "break",
             Kw::Byte => "byte",
             Kw::Case => "case",

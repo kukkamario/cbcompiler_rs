@@ -981,7 +981,6 @@ impl<'src> Lexer<'src> {
             Some(b'%') => Some(Sigil::Integer),
             Some(b'#') => Some(Sigil::Float),
             Some(b'$') => Some(Sigil::String),
-            Some(b'!') => Some(Sigil::Bool),
             _ => None,
         };
         if sigil.is_some() {

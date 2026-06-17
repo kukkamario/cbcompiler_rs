@@ -516,24 +516,27 @@ impl<'t> Parser<'t> {
                 self.diagnostics.append(&mut diags);
                 Ok(self.alloc(Node::Expr(Expr::StrLit { value, kind }), tok.span))
             }
+            // `True`/`False` are the Integer constants 1/0 — there is no Bool
+            // type (FD-035, `docs/cb_syntax.md` §1.6).
             TokenKind::Keyword(Kw::True) => {
                 self.cursor.bump();
-                Ok(self.alloc(Node::Expr(Expr::BoolLit(true)), tok.span))
+                Ok(self.alloc(Node::Expr(Expr::IntLit(1)), tok.span))
             }
             TokenKind::Keyword(Kw::False) => {
                 self.cursor.bump();
-                Ok(self.alloc(Node::Expr(Expr::BoolLit(false)), tok.span))
+                Ok(self.alloc(Node::Expr(Expr::IntLit(0)), tok.span))
             }
             TokenKind::Keyword(Kw::Null) => {
                 self.cursor.bump();
                 Ok(self.alloc(Node::Expr(Expr::NullLit), tok.span))
             }
             // Keywords used as intrinsic/runtime calls: Int(v), Float(v),
-            // Bool(v), Next(n), String(s, count) — each is also a type or loop
+            // Next(n), String(s, count) — each is also a type or loop
             // keyword, so this arm only fires when followed by `(`; otherwise it
-            // falls through to the type/keyword handling elsewhere.
+            // falls through to the type/keyword handling elsewhere. (`Bool(v)`
+            // was removed with the Bool type — FD-035.)
             TokenKind::Keyword(
-                Kw::Int | Kw::Integer | Kw::Float | Kw::Bool | Kw::Next | Kw::String,
+                Kw::Int | Kw::Integer | Kw::Float | Kw::Next | Kw::String,
             ) if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) => {
                 self.cursor.bump();
                 Ok(self.alloc(
@@ -2793,10 +2796,12 @@ fn bare_name_span(tok_span: Span, sigil: Option<Sigil>) -> Span {
     )
 }
 
-/// Whether a keyword names one of the primitive types accepted by the
-/// type-expression parser. `Int`/`Integer` and `UInt`/`UInteger` are both
-/// accepted here as spelling-preserving aliases (FD-004 #3); sema treats
-/// the alias pairs as equivalent.
+/// Whether a keyword names a primitive type accepted by the type-expression
+/// parser. `Int`/`Integer` are spelling-preserving aliases (FD-004 #3); sema
+/// treats the pair as equivalent. The reserved-but-unsupported names (`Bool`,
+/// `Boolean`, `UInt`, `UInteger`, `ULong`) are accepted here so sema can
+/// reject them with a clear diagnostic rather than a generic parse error
+/// (FD-035).
 fn is_primitive_type_kw(kw: Kw) -> bool {
     matches!(
         kw,
@@ -2810,6 +2815,7 @@ fn is_primitive_type_kw(kw: Kw) -> bool {
             | Kw::ULong
             | Kw::Float
             | Kw::Bool
+            | Kw::Boolean
             | Kw::String
     )
 }
