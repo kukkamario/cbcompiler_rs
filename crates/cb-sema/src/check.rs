@@ -2593,6 +2593,91 @@ mod tests {
         );
     }
 
+    // ── pass 2 tests: diagnostic assertion sweep (FD-031) ───────────────
+
+    #[test]
+    fn pass2_operator_type_mismatch_e0301() {
+        // String `-` Integer has no binary result type.
+        let result = analyze_src("Dim a As Integer\na = \"x\" - 1\n");
+        assert!(
+            error_codes(&result).contains(&"E0301"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_len_on_scalar_e0301() {
+        // Len requires an array or a string; a scalar is a type mismatch.
+        let result = analyze_src("Dim x As Integer\nDim n As Integer\nn = Len(x)\n");
+        assert!(
+            error_codes(&result).contains(&"E0301"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_call_non_function_e0304() {
+        // Calling an Integer variable is not a function call.
+        let result = analyze_src("Dim x As Integer\nDim y As Integer\ny = x(1)\n");
+        assert!(
+            error_codes(&result).contains(&"E0304"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_index_non_array_e0306() {
+        // Indexing a scalar value is not allowed.
+        let result = analyze_src("Dim x As Integer\nDim y As Integer\ny = x[0]\n");
+        assert!(
+            error_codes(&result).contains(&"E0306"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_rank_mismatch_e0307() {
+        // A rank-1 array indexed with two subscripts.
+        let result = analyze_src("Dim a As Integer[]\nDim y As Integer\ny = a[0, 0]\n");
+        assert!(
+            error_codes(&result).contains(&"E0307"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_field_on_non_type_e0309() {
+        // Field access on a scalar value.
+        let result = analyze_src("Dim x As Integer\nDim y As Integer\ny = x.foo\n");
+        assert!(
+            error_codes(&result).contains(&"E0309"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_address_of_command_e0329() {
+        // A bare runtime-command name in value position has no address.
+        let catalog = catalog_of(vec![rt_func(
+            "Box",
+            "cb_box",
+            &[("x", IrType::Float)],
+            IrType::Void,
+        )]);
+        let result = analyze_with_catalog("Dim p As Integer\np = Box\n", &catalog);
+        assert!(
+            error_codes(&result).contains(&"E0329"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
     // ── pass 2 tests: scope visibility ──────────────────────────────────
 
     #[test]
