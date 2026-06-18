@@ -1,6 +1,7 @@
 # FD-026: Identifier Interner Spec Compliance
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-19
 **Priority:** Medium
 **Effort:** Low-Medium (1-2 hours)
 **Impact:** Aligns the one place that defines identifier identity for the whole compiler with `cb_syntax.md`, and stops error messages from showing lowercased identifiers instead of what the user wrote.
