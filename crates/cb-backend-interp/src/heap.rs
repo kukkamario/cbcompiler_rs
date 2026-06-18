@@ -252,7 +252,10 @@ mod tests {
         let mut slab = Slab::new();
         let id = slab.alloc(obj(1));
         slab.free(id);
-        assert!(slab.get(id).is_none(), "freed id must not resolve via get()");
+        assert!(
+            slab.get(id).is_none(),
+            "freed id must not resolve via get()"
+        );
         assert!(
             slab.get_mut(id).is_none(),
             "freed id must not resolve via get_mut()"
@@ -302,7 +305,10 @@ mod tests {
         let mut slab = Slab::new();
         let a = slab.alloc(obj(10));
         let b = slab.alloc(obj(20));
-        assert_ne!(a.index, b.index, "distinct live instances use distinct slots");
+        assert_ne!(
+            a.index, b.index,
+            "distinct live instances use distinct slots"
+        );
         slab.free(a);
         slab.free(b);
         let c = slab.alloc(obj(30));

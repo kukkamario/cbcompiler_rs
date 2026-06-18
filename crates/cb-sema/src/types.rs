@@ -54,10 +54,7 @@ impl Type {
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(
-            self,
-            Type::Byte | Type::Short | Type::Int | Type::Long
-        )
+        matches!(self, Type::Byte | Type::Short | Type::Int | Type::Long)
     }
 
     pub fn is_reference(&self) -> bool {
@@ -528,7 +525,10 @@ mod tests {
         assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
         // Byte/Short widen to Int for unary arithmetic/bitwise (FD-035).
         assert_eq!(unary_result_type(UnOp::Neg, &Type::Byte), Some(Type::Int));
-        assert_eq!(unary_result_type(UnOp::BinNot, &Type::Short), Some(Type::Int));
+        assert_eq!(
+            unary_result_type(UnOp::BinNot, &Type::Short),
+            Some(Type::Int)
+        );
         assert_eq!(unary_result_type(UnOp::Not, &Type::Int), Some(Type::Int));
         assert_eq!(unary_result_type(UnOp::Not, &Type::Float), Some(Type::Int));
         assert!(unary_result_type(UnOp::Not, &Type::String).is_none());

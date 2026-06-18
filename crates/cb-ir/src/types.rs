@@ -37,9 +37,6 @@ impl IrType {
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(
-            self,
-            Self::Byte | Self::Short | Self::Int | Self::Long
-        )
+        matches!(self, Self::Byte | Self::Short | Self::Int | Self::Long)
     }
 }

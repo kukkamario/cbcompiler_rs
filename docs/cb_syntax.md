@@ -365,6 +365,7 @@ Each `Field` declares exactly one name; comma-separated forms like `Field x, y A
 | `Previous(node)`    | Previous instance, or `Null` at the start     |
 | `Delete node`       | Removes `node` from its list and frees it     |
 
+The name-vs-instance distinction is load-bearing for the compiler. `First`/`Last`, `New`, and `Each` (below) take a **`Type` name** — always written as a plain identifier, never a more complex expression. `Next`/`Previous`/`Delete` instead take a **`Type` instance value** (typically a variable). A bare `Type` name is therefore legal *only* in those name positions; used anywhere else as a value (`Return MyType`, `a = MyType`, `Print MyType`) it is a compile error (sema `E0311`).
 
 Iteration with `For Each` (§6.3) is the idiomatic loop:
 
