@@ -1,6 +1,7 @@
 # FD-031: Diagnostic Assertion Sweep
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-18
 **Priority:** Medium
 **Effort:** Medium (2-3 hours) — mostly one-line tests; E0311 is the one real implementation (value-position gating).
 **Impact:** Every defined diagnostic code is either asserted by a test or deliberately removed; error spans/recovery get regression protection.
