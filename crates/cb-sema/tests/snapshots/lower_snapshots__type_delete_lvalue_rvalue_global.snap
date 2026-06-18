@@ -3,20 +3,20 @@ source: crates/cb-sema/tests/lower_snapshots.rs
 expression: ir
 ---
 globals:
-  global0: gm (TypeRef(mob))
+  global0: gm (TypeRef(Mob))
 
 fn @main() -> Void {
   locals:
-    local0: n (TypeRef(mob))
+    local0: n (TypeRef(Mob))
 
   bb0:
-    r0 = new_type mob
+    r0 = new_type Mob
     store_global global0, r0
-    r1 = new_type mob
+    r1 = new_type Mob
     store_local local0, r1
     delete_lvalue local0
     delete_lvalue global0
-    r2 = first mob
+    r2 = first Mob
     delete_rvalue r2
     return
 }

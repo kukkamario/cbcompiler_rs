@@ -29,6 +29,7 @@ phf = { version = "0.11", features = ["macros"] }
 predicates = "3"
 proptest = "1"
 tempfile = "3"
+unicode-case-mapping = "1"
 unicode-ident = "1"
 
 # Internal crates (path entries so other crates can switch to `workspace = true`)

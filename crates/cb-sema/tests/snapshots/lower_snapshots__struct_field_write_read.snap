@@ -4,7 +4,7 @@ expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: p (StructVal(vec2))
+    local0: p (StructVal(Vec2))
     local1: s (Float)
 
   bb0:

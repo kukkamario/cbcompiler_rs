@@ -1062,7 +1062,9 @@ impl<'a> Lowerer<'a> {
         }) = &self.arena[callee]
         {
             let name = self.intern_ident(*name_span, None);
-            let name_str = self.interner.resolve(name).to_owned();
+            // Match on the case-folded name; `resolve` returns the original
+            // casing, so an unfolded compare would miss `LEN`, `Int`, etc.
+            let name_str = cb_diagnostics::fold(self.interner.resolve(name));
 
             match name_str.as_str() {
                 "len" => {

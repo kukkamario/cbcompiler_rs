@@ -1157,7 +1157,10 @@ impl<'a> Checker<'a> {
     }
 
     fn check_intrinsic_call(&mut self, name: &str, args: &[NodeId], span: Span) -> Option<Type> {
-        match name {
+        // Intrinsics are matched case-insensitively: fold the resolved name to
+        // its canonical key (`resolve` preserves the user's original casing,
+        // which is kept for `{name}` in the messages below).
+        match cb_diagnostics::fold(name).as_str() {
             INTRINSIC_LEN => {
                 if args.is_empty() || args.len() > 2 {
                     self.diagnostics.push(Diagnostic::error(

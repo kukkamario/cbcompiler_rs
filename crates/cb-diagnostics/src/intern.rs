@@ -1,12 +1,47 @@
 //! Case-insensitive string interning for CoolBasic identifiers.
+//!
+//! Identifier identity follows `docs/cb_syntax.md` §1.3: names are compared
+//! using **Unicode simple case folding**, not `str::to_lowercase`. The two
+//! genuinely differ for some characters (e.g. Greek final sigma `ς`, which
+//! folds to `σ` but is left unchanged by lowercasing), and this interner is
+//! *the* definition of identifier identity for the whole compiler. The
+//! original (first-seen) spelling is preserved so diagnostics echo what the
+//! user actually wrote.
 
 use std::collections::HashMap;
+
+/// Fold one `char` to its Unicode simple-case-folding form.
+///
+/// Returns the input unchanged when the scalar has no simple fold — Unicode's
+/// `case_folded` yields `None` for characters that already are their own fold
+/// (ASCII lowercase, `ß`, …).
+fn fold_char(c: char) -> char {
+    match unicode_case_mapping::case_folded(c) {
+        Some(folded) => char::from_u32(folded.get()).unwrap_or(c),
+        None => c,
+    }
+}
+
+/// Compute the Unicode simple-case-fold key for a name.
+///
+/// This is the canonical form that defines identifier identity: two names are
+/// the same identifier iff their folds are equal. Call sites that match a
+/// *resolved* name against a fixed spelling (e.g. intrinsic dispatch) must
+/// fold it first, since [`Interner::resolve`] returns the original casing, not
+/// the fold key.
+///
+/// Simple case folding is a per-scalar mapping (one `char` in, one `char`
+/// out), so folding char-by-char and reconcatenating is correct — there are
+/// no cross-character expansions like full folding's `ß` → `ss`.
+pub fn fold(name: &str) -> String {
+    name.chars().map(fold_char).collect()
+}
 
 /// Interned string identifier — a lightweight, copyable handle.
 ///
 /// Two `Symbol`s compare equal iff they were interned from strings that are
-/// identical after Unicode-aware lowercasing (CoolBasic identifiers are
-/// case-insensitive).
+/// identical under Unicode simple case folding (CoolBasic identifiers are
+/// case-insensitive — `docs/cb_syntax.md` §1.3).
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Symbol(u32);
 
@@ -23,11 +58,14 @@ impl std::fmt::Debug for Symbol {
 
 /// Interns strings with case-insensitive deduplication.
 ///
-/// All strings are normalized to lowercase before storage, so `"Foo"` and
-/// `"foo"` produce the same [`Symbol`].
+/// Names are deduplicated by their Unicode simple-case-fold key, so `"Foo"`
+/// and `"foo"` produce the same [`Symbol`]. The **first-seen original
+/// spelling** is retained for display via [`Interner::resolve`].
 #[derive(Debug, Default)]
 pub struct Interner {
+    /// Maps a fold key to its symbol.
     map: HashMap<String, Symbol>,
+    /// First-seen original spelling for each symbol, indexed by `Symbol.0`.
     strings: Vec<String>,
 }
 
@@ -38,23 +76,43 @@ impl Interner {
 
     /// Intern a name, returning a stable [`Symbol`] handle.
     ///
-    /// The name is lowercased before lookup/insertion.
+    /// Lookup and deduplication use the name's Unicode simple-case-fold key;
+    /// the original spelling of the first occurrence is stored for display.
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than `u32::MAX - 1` distinct names are interned — the
+    /// last `u32` value is reserved for [`Symbol::DUMMY`], mirroring the
+    /// `SourceMap` sentinel discipline.
     pub fn intern(&mut self, name: &str) -> Symbol {
-        let key = name.to_lowercase();
+        let key = fold(name);
         if let Some(&sym) = self.map.get(&key) {
             return sym;
         }
-        let sym = Symbol(self.strings.len() as u32);
-        self.strings.push(key.clone());
+        let id = u32::try_from(self.strings.len())
+            .expect("interner exhausted: more than u32::MAX names");
+        assert!(
+            id != u32::MAX,
+            "interner exhausted: cannot allocate Symbol({}) — reserved as DUMMY",
+            u32::MAX
+        );
+        let sym = Symbol(id);
+        self.strings.push(name.to_string());
         self.map.insert(key, sym);
         sym
     }
 
-    /// Resolve a symbol back to its canonical (lowercased) string.
+    /// Resolve a symbol back to the original (first-seen) spelling of its name.
+    ///
+    /// Casing is preserved for diagnostics — interning `"PlayerHealth"` then
+    /// resolving it yields `"PlayerHealth"`, not the folded `"playerhealth"`.
+    /// Names that differ only by case share one symbol and resolve to whichever
+    /// spelling was interned first.
     ///
     /// # Panics
     ///
-    /// Panics if `sym` was not produced by this interner.
+    /// Panics if `sym` was not produced by this interner (including
+    /// [`Symbol::DUMMY`], which [`Interner::intern`] never mints).
     pub fn resolve(&self, sym: Symbol) -> &str {
         &self.strings[sym.0 as usize]
     }
@@ -86,7 +144,51 @@ mod tests {
     fn resolve_round_trip() {
         let mut i = Interner::new();
         let sym = i.intern("MyVar");
-        assert_eq!(i.resolve(sym), "myvar");
+        // resolve() returns the original spelling, not the folded key.
+        assert_eq!(i.resolve(sym), "MyVar");
+    }
+
+    #[test]
+    fn resolve_preserves_first_seen_spelling() {
+        let mut i = Interner::new();
+        let a = i.intern("PlayerHealth");
+        // A later, differently-cased spelling maps to the same symbol, but the
+        // first-seen spelling is what diagnostics render.
+        let b = i.intern("playerhealth");
+        assert_eq!(a, b);
+        assert_eq!(i.resolve(a), "PlayerHealth");
+        assert_eq!(i.resolve(b), "PlayerHealth");
+    }
+
+    #[test]
+    fn case_insensitive_nordic() {
+        // Common Nordic letters must dedupe case-insensitively.
+        let mut i = Interner::new();
+        for (upper, lower) in [("Ä", "ä"), ("Ö", "ö"), ("Å", "å")] {
+            assert_eq!(i.intern(upper), i.intern(lower), "{upper} vs {lower}");
+        }
+        let a = i.intern("Hämäläinen");
+        let b = i.intern("HÄMÄLÄINEN");
+        let c = i.intern("hämäläinen");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn simple_fold_differs_from_lowercasing() {
+        // Greek final sigma `ς` (U+03C2) simple-case-folds to `σ` (U+03C3), as
+        // does capital `Σ` (U+03A3) — so all three intern to one symbol.
+        // `str::to_lowercase` leaves `ς` as `ς`, so the old lowercasing rule
+        // would have treated `ς` and `σ` as distinct names. This pins the fix.
+        let mut i = Interner::new();
+        let final_sigma = i.intern("ς");
+        let small_sigma = i.intern("σ");
+        let capital_sigma = i.intern("Σ");
+        assert_eq!(final_sigma, small_sigma);
+        assert_eq!(small_sigma, capital_sigma);
+        // Sanity check that this pair genuinely diverges under lowercasing,
+        // i.e. the test would fail against the previous `to_lowercase` rule.
+        assert_ne!("ς".to_lowercase(), "σ".to_lowercase());
     }
 
     #[test]
@@ -98,6 +200,9 @@ mod tests {
 
     #[test]
     fn dummy_symbol_is_distinct() {
+        // The first minted symbol is `Symbol(0)`; `DUMMY` is `Symbol(u32::MAX)`
+        // and `intern` guards against ever minting it (the overflow assert is
+        // unreachable in practice — 4 billion names — so it has no unit test).
         let mut i = Interner::new();
         let real = i.intern("x");
         assert_ne!(real, Symbol::DUMMY);

@@ -4,11 +4,11 @@ expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: m (TypeRef(mob))
+    local0: m (TypeRef(Mob))
     local1: h (Int)
 
   bb0:
-    r0 = new_type mob
+    r0 = new_type Mob
     store_local local0, r0
     r1 = const_int 5
     store_place local0.hp, r1

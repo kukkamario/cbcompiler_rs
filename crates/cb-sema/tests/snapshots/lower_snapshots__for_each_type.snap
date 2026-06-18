@@ -5,10 +5,10 @@ expression: ir
 fn @main() -> Void {
   locals:
     local0: count (Int)
-    local1: n (TypeRef(mob))
+    local1: n (TypeRef(Mob))
 
   bb0:
-    r0 = first mob
+    r0 = first Mob
     store_local local1, r0
     goto bb1
   bb1:

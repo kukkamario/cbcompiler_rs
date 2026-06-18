@@ -1,9 +1,8 @@
 ---
 source: crates/cb-sema/tests/lower_snapshots.rs
-assertion_line: 110
 expression: ir
 ---
-fn foo() -> Int {
+fn Foo() -> Int {
   bb0:
     r0 = const_int 42
     return r0

@@ -94,13 +94,17 @@ impl SourceMap {
     /// fresh slot for synthetic input (REPL, in-memory snippet, anonymous
     /// fixture) should use [`SourceMap::add_anonymous`] instead.
     ///
-    /// In debug builds, calling `add` twice with the same `name` but
-    /// different `text` panics — that almost always indicates a caller bug.
+    /// Calling `add` twice with the same `name` but different `text` panics in
+    /// all build modes — that almost always indicates a caller bug, and the new
+    /// text would otherwise be silently dropped, leaving diagnostics to render
+    /// against stale source with no signal. Callers that legitimately want a
+    /// fresh slot for the same name should use [`SourceMap::add_anonymous`].
     ///
     /// # Panics
     ///
-    /// Panics if more than `u32::MAX - 1` files are added (the last `u32`
-    /// value is reserved for [`FileId::SYNTHETIC`]).
+    /// Panics if a source with the same `name` but different `text` is added,
+    /// or if more than `u32::MAX - 1` files are added (the last `u32` value is
+    /// reserved for [`FileId::SYNTHETIC`]).
     pub fn add(&mut self, name: String, text: String) -> FileId {
         if let Some((idx, existing)) = self
             .sources
@@ -108,7 +112,7 @@ impl SourceMap {
             .enumerate()
             .find(|(_, s)| s.name == name)
         {
-            debug_assert_eq!(
+            assert_eq!(
                 existing.text, text,
                 "SourceMap::add called twice for {name} with different text — \
                  caller likely meant SourceMap::add_anonymous",

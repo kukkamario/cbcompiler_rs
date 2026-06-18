@@ -10,6 +10,6 @@ pub mod render;
 pub mod source;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Label, Severity, Span};
-pub use intern::{Interner, Symbol};
+pub use intern::{Interner, Symbol, fold};
 pub use render::{CliRenderer, Renderer, SourceMapFiles};
 pub use source::{FileId, LineIndex, Source, SourceMap};
