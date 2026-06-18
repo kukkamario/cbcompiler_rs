@@ -1,9 +1,11 @@
-# FD-025: Driver Backend-Selection & Exit-Code Correctness
+# FD-025: Driver CLI, Backend-Selection & Exit-Code Correctness
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
-**Effort:** Low (< 1 hour)
-**Impact:** Stops `--backend llvm` from silently succeeding while doing nothing, pins exit-code truncation behavior, and closes the driver's untested flag/error combinations.
+**Effort:** Low–Medium
+**Impact:** Stops `--backend llvm` from silently succeeding while doing nothing, pins exit-code truncation behavior, replaces the hand-rolled argument loop with a proper `clap` parser (giving `--help`/`--version`), makes the no-backend "dump-only" build actually usable, and closes the driver's untested flag/error combinations.
+
+> **Scope note (expanded):** The original FD covered the LLVM no-op, the exit-code cast, and untested branches. During implementation the scope was widened (per request) to include **proper command-line parsing**: the driver now uses `clap` (derive) for parsing and a real `--help`/`--version`. Surfacing every branch under test also revealed that backend selection ran *before* dumping, so the advertised `--no-default-features` "dump-only" binary actually errored with "no backend compiled in" — now fixed by resolving the backend lazily.
 
 ## Problem
 
@@ -21,26 +23,41 @@ Untested combinations the review flagged (regression risk):
 - The `--backend=name` equals-form (`main.rs:100-102`) and a malformed empty `--backend=` — only the space-separated form is tested.
 - Unknown flag / extra positional → exit 2 (`main.rs:104-107`).
 
+3. **CLI parsing was hand-rolled with no `--help`.** The driver matched args in a `while` loop and printed a one-line `usage:` string only on error. There was no `--help`/`-h` or `--version`/`-V`; discovering the flags meant reading the source.
+4. **The no-backend "dump-only" build was broken.** `CLAUDE.md` advertises `--no-default-features` as "a no-backend dump-only binary suitable for AST inspection," but backend selection ran *before* reading/parsing/dumping. With no backend compiled in, `default_backend()` returned `None` and the driver exited 2 ("no backend compiled in") for *every* invocation — including `--dump-ast` — so AST inspection was impossible in that build. (Latent because the driver test suite was only ever run with the default `interp` feature.)
+
 ## Solution
 
 In `cb-driver`:
 
-- Add an explicit `Backend::Llvm` arm that emits a clear "llvm backend not yet implemented" message and returns a distinct non-zero exit code, rather than silently succeeding. Once `cb-backend-llvm` codegen exists, wire it here and drop the `_backend` underscore (dispatch on `backend` in one match).
-- Decide exit-code policy: clamp explicitly (`code.clamp(0, 255) as u8`) with a documented rationale, or surface out-of-range `request_exit` values as a diagnostic. Pin it with a test so the behavior is intentional.
-- Backfill `assert_cmd` tests for the untested branches above.
+- **CLI parsing → `clap` (derive).** Replace the hand-rolled `while` loop with a `#[derive(Parser)]` `Cli` struct. This gives `--help`/`-h` and `--version`/`-V` for free, accepts both `--backend name` and `--backend=name`, and reports usage errors (unknown flag, missing value, missing `<FILE>`) with exit code 2 — matching the driver's existing usage-error code. `--backend` stays an `Option<String>` validated by the existing feature-gated `parse_backend`, so the "not compiled in" / "unknown backend" diagnostics are preserved.
+- **Explicit `Backend::Llvm` arm.** Emit a clear "llvm backend not yet implemented" message and return a distinct exit code (**3**), rather than silently succeeding. Dispatch is a single `match backend { … }` over `Option<Backend>`; once `cb-backend-llvm` codegen exists it gets wired in here.
+- **Lazy backend resolution.** Resolve the backend to `Option<Backend>` but only *require* one at the point a program would actually run. `--dump-ast`/`--dump-ir` and error paths no longer need a backend, so the `--no-default-features` dump-only build works as advertised. An explicitly named bad/unavailable backend still fails fast.
+- **Exit-code policy.** `clamp_exit(code) = code.clamp(0, 255) as u8`, documented: values >255 saturate to 255 (stay non-zero/failure) instead of the old `as u8` wrap that turned 256→0; negatives clamp to 0. Pinned with tests (256→255, −1→0).
+- **Centralised exit codes** in an `exit` module (`USAGE = 2`, `BACKEND_UNIMPLEMENTED = 3`) with the full contract documented (0 success / 1 compile-or-runtime error / 2 usage / 3 unimplemented backend).
+- **Backfill `assert_cmd` tests** for every branch, gated so the suite runs green under all four feature combos (`interp`, `interp`+`llvm`, none, `llvm`-only). Program-executing tests are gated on `feature = "interp"`; `programs.rs` is gated whole-file.
 
 ## Files to Create/Modify
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/cb-driver/src/main.rs` | MODIFY | Explicit `Backend::Llvm` "not implemented" arm + exit code; documented exit-code clamp |
-| `crates/cb-driver/tests/cli.rs` | MODIFY | Tests: `--backend llvm` (llvm build) errors clearly; `--backend=interp` and empty `--backend=`; `--dump-ir`/`--dump-ast` on an erroring input; no-backend build error; out-of-range `request_exit` clamp |
+| `Cargo.toml` (workspace) | MODIFY | Add `clap = { version = "4", features = ["derive"] }` to `[workspace.dependencies]` |
+| `crates/cb-driver/Cargo.toml` | MODIFY | Depend on `clap.workspace = true` |
+| `crates/cb-driver/src/main.rs` | MODIFY | `clap` `Cli` struct; lazy `Option<Backend>` resolution; single dispatch `match` with explicit `Llvm` (exit 3) and `None` (exit 2) arms; `clamp_exit`; `exit` code module |
+| `crates/cb-driver/tests/cli.rs` | MODIFY | `--help`/`-h`/`--version`; unknown flag; `--backend=interp` and empty `--backend=`; `--dump-ir`/`--dump-ast` on erroring input; out-of-range `request_exit` clamp (256→255, −1→0); llvm-not-implemented (gated); no-backend error (gated); existing run-tests gated on `interp` |
+| `crates/cb-driver/tests/programs.rs` | MODIFY | Whole-file `#![cfg(feature = "interp")]` (every fixture runs a program) |
 
 ## Verification
 
-- `cargo test -p cb-driver` green, with new tests covering each branch.
-- `cargo build --features llvm && cargo run -p cb-driver --features llvm -- --backend llvm examples/bounce.cb` exits non-zero with a clear message (not silent exit 0).
-- `cargo test --workspace` + `clippy -- -D warnings` green.
+- `cargo test -p cb-driver` green across all four feature combos: default `interp` (28 cli + 28 programs), `--features llvm` (28+28), `--no-default-features` (20 cli, programs empty), `--no-default-features --features llvm` (19 cli, programs empty). ✅
+- `cargo test --workspace` green (28 test binaries, 0 failures). ✅
+- `cargo clippy` with `-D warnings` clean on the workspace and on `cb-driver` across all four feature combos; `cargo fmt --all` clean. ✅
+- `cb --help` / `cb --version` print usage / version and exit 0; `cb --backend llvm <file>` (llvm build) exits 3 with "not yet implemented" (not silent exit 0); `cb --dump-ast <file>` works under `--no-default-features`.
+
+## Implementation Notes
+
+- **clap displays the binary basename in usage** (`Usage: cb.exe …` on Windows) because it derives `bin_name` from `argv[0]`; the version line uses the configured `name` (`cb 0.1.0`). Tests assert on `Usage: cb` (prefix-matches both) and `CARGO_PKG_VERSION`.
+- The exit-code clamp's negative→0 choice is deliberately pinned by a test so it's an intentional policy, not an accident; revisit if CoolBasic ever ascribes meaning to negative `request_exit` codes.
 
 ## Related
 

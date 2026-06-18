@@ -10,7 +10,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-025](FD-025_DRIVER_BACKEND_SELECTION_AND_EXIT_CODES.md) | Driver Backend-Selection & Exit-Code Correctness | Open | Low | Medium |
+| [FD-025](FD-025_DRIVER_BACKEND_SELECTION_AND_EXIT_CODES.md) | Driver CLI, Backend-Selection & Exit-Code Correctness | Pending Verification | Low–Medium | Medium |
 
 ## Completed
 
