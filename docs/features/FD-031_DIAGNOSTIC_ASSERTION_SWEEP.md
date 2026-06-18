@@ -12,7 +12,7 @@ Implemented in three commits on `fd-031-diagnostic-assertion-sweep`:
 2. **cb-sema E0311** — `check_ident` now rejects any `TypeDef`/`StructDef`/`RuntimeTypeDef` name in value position. The legitimate bare-name positions (`First`/`Last`, For-Each source) resolve the name directly via a new `resolve_type_name_arg` helper, which records the arg type in `self.types` so lowering's `self.types.get(arg)` stays valid. `New` (structural `TypeExpr`) and `Delete`/`Next`/`Previous` (instance values) were unaffected. The matching-slot soundness hole (`Function f() As Foo : Return Foo`, previously exit 0) now fails with E0311 — confirmed by a driver spot-check.
 3. **cb-frontend** — E0205 tests (sigil-on-type, non-type token); E0207 deleted; E0299 guards commented.
 
-Verification: full workspace `cargo test` green; `cargo clippy --workspace --all-targets -D warnings` clean. (`cargo fmt --all` not run: HEAD carries pre-existing rustfmt-version drift in untouched crates; the FD-031 additions are already format-clean, so reformatting was skipped to avoid unrelated churn.)
+Verification: full workspace `cargo test` green; `cargo clippy --workspace --all-targets -D warnings` clean; `cargo fmt --all --check` clean (run as a final whitespace-only commit, `d311107`, which also absorbed pre-existing rustfmt-version drift in a few untouched crates — heap.rs, interp.rs, ir/types.rs — so the tree is now uniformly formatted).
 
 ## Problem
 
