@@ -14,7 +14,7 @@ fn mem() -> Void {
     store_local local0, r0
     r1 = load_global global0
     store_global global0, r1
-    r2 = new_type enemy
+    r2 = new_type Enemy
     r3 = new_array Int, r0, r1
     r4 = get_field r2, hp (Int)
     r5 = get_element r3, r0, r1

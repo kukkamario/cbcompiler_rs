@@ -1,9 +1,8 @@
 ---
 source: crates/cb-sema/tests/lower_snapshots.rs
-assertion_line: 84
 expression: ir
 ---
-fn add(Int, Int) -> Int {
+fn Add(Int, Int) -> Int {
   locals:
     local0: a (Int, param)
     local1: b (Int, param)
@@ -22,7 +21,7 @@ fn @main() -> Void {
   bb0:
     r0 = const_int 3
     r1 = const_int 4
-    r2 = call add, r0, r1
+    r2 = call Add, r0, r1
     store_local local0, r2
     return
 }

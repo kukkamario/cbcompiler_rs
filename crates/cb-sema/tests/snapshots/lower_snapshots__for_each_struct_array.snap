@@ -1,19 +1,18 @@
 ---
 source: crates/cb-sema/tests/lower_snapshots.rs
-assertion_line: 471
 expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: arr (Array<StructVal(p), 1>)
+    local0: arr (Array<StructVal(P), 1>)
     local1: total (Int)
-    local2: e (StructVal(p))
+    local2: e (StructVal(P))
     local3: @foreach_idx_0 (Int)
     local4: @foreach_len_1 (Int)
 
   bb0:
     r0 = const_int 3
-    r1 = new_array StructVal(p), r0
+    r1 = new_array StructVal(P), r0
     store_local local0, r1
     r2 = load_local local0
     r3 = array_total_len r2

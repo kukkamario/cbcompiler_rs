@@ -1,6 +1,5 @@
 ---
 source: crates/cb-ir/tests/print_snapshots.rs
-assertion_line: 212
 expression: "print_program(&prog, &i)"
 ---
 fn types() -> Void {
@@ -12,8 +11,8 @@ fn types() -> Void {
     local4: v (Float)
     local5: v (String)
     local6: v (Array<Int, 2>)
-    local7: v (TypeRef(enemy))
-    local8: v (StructVal(vec2))
+    local7: v (TypeRef(Enemy))
+    local8: v (StructVal(Vec2))
     local9: v (FnPtr(Int, Float) -> Int)
     local10: v (RuntimeType(Image))
     local11: v (Null)

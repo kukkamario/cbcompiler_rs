@@ -4,17 +4,17 @@ expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: a (TypeRef(mob))
-    local1: b (TypeRef(mob))
-    local2: n (TypeRef(mob))
-    local3: l (TypeRef(mob))
+    local0: a (TypeRef(Mob))
+    local1: b (TypeRef(Mob))
+    local2: n (TypeRef(Mob))
+    local3: l (TypeRef(Mob))
 
   bb0:
-    r0 = new_type mob
+    r0 = new_type Mob
     store_local local0, r0
-    r1 = new_type mob
+    r1 = new_type Mob
     store_local local1, r1
-    r2 = first mob
+    r2 = first Mob
     store_local local2, r2
     r3 = load_local local2
     r4 = next r3
@@ -22,7 +22,7 @@ fn @main() -> Void {
     r5 = load_local local2
     r6 = previous r5
     store_local local2, r6
-    r7 = last mob
+    r7 = last Mob
     store_local local3, r7
     return
 }

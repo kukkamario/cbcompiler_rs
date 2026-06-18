@@ -4,8 +4,8 @@ expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: p (StructVal(vec2))
-    local1: q (StructVal(vec2))
+    local0: p (StructVal(Vec2))
+    local1: q (StructVal(Vec2))
 
   bb0:
     r0 = const_int 1

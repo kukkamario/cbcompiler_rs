@@ -227,6 +227,17 @@ fn source_map_add_dedupes_same_name() {
 }
 
 #[test]
+#[should_panic(expected = "different text")]
+fn source_map_add_same_name_divergent_text_panics() {
+    // The dedupe contract is integrity-checked in all build modes (not just
+    // debug): a same-name/different-text add is a caller bug, not a silent
+    // stale-source render. Runs identically under `cargo test --release`.
+    let mut sm = SourceMap::new();
+    sm.add("foo.cb".into(), "x = 1".into());
+    sm.add("foo.cb".into(), "x = 2".into());
+}
+
+#[test]
 fn source_map_add_anonymous_always_fresh() {
     let mut sm = SourceMap::new();
     let a = sm.add_anonymous("x = 1".into());

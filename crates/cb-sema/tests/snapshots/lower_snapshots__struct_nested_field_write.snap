@@ -4,14 +4,14 @@ expression: ir
 ---
 fn @main() -> Void {
   locals:
-    local0: o (StructVal(outer))
+    local0: o (StructVal(Outer))
     local1: r (Int)
 
   bb0:
     r0 = const_int 5
-    store_place local0.inner.v, r0
+    store_place local0.Inner.v, r0
     r1 = load_local local0
-    r2 = get_field r1, inner (StructVal(inner))
+    r2 = get_field r1, Inner (StructVal(Inner))
     r3 = get_field r2, v (Int)
     store_local local1, r3
     return

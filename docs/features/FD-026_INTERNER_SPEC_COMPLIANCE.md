@@ -1,6 +1,6 @@
 # FD-026: Identifier Interner Spec Compliance
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** Low-Medium (1-2 hours)
 **Impact:** Aligns the one place that defines identifier identity for the whole compiler with `cb_syntax.md`, and stops error messages from showing lowercased identifiers instead of what the user wrote.
@@ -44,6 +44,64 @@ In `cb-diagnostics`:
   - Interning never mints `Symbol(u32::MAX)`; resolving `DUMMY` behaves as documented.
 - Diagnostic snapshot(s) in `cb-sema`/`cb-driver` now show original-cased identifiers — update goldens accordingly.
 - `cargo test --workspace` + `clippy -- -D warnings` green.
+
+## Implementation Notes (2026-06-18)
+
+Implemented on branch `fd-026-interner-spec-compliance`. User chose **full Unicode
+simple case folding via a crate** (option B) over an ASCII restriction, because
+Nordic identifiers (`ä`/`Ä`, `ö`/`Ö`, `å`/`Å`) must compare case-insensitively.
+
+**Crate:** [`unicode-case-mapping`](https://docs.rs/unicode-case-mapping) (`= "1"`,
+Unicode 16.0). Its `case_folded(char) -> Option<NonZeroU32>` is exactly *simple*
+folding (one scalar → one scalar; `None` = the char is its own fold) — not the
+full folding `caseless` does (`ß` → `ss`), which would diverge from the spec. Added
+as a workspace dep and a `cb-diagnostics` dep. Confirmed `ß` stays `ß` under simple
+folding, matching the FD's review note.
+
+**`intern.rs`:**
+- New `pub fn fold(name: &str) -> String` (the canonical simple-fold key) and a
+  private `fold_char`. `intern` keys the map by `fold(name)` but pushes the
+  **original** spelling into `strings`.
+- `resolve()` now returns the **first-seen original spelling** (chosen over a
+  separate `resolve_display()` — fewer call sites change, and IR dumps / every
+  diagnostic get correct casing for free). The `@main` lookup (`interp.rs`) and
+  `IrType::RuntimeType` string are safe: `@main` has no cased chars, and the
+  RuntimeType name is never matched case-sensitively at runtime (FFI treats it as
+  an opaque pointer; the catalog decodes by its own C-side names).
+- **Overflow guard:** `u32::try_from(len)` + `assert!(id != u32::MAX)` so the
+  4-billion-th name can't silently collide with `Symbol::DUMMY` — mirrors
+  `SourceMap::push_source`.
+
+**Non-obvious fallout — intrinsic dispatch (the load-bearing fix):** intrinsics
+(`Len`/`Int`/`Str`/`First`/`Last`/`Next`/`Previous`/`Float`/`Integer`) were
+matched by comparing `resolve(callee)` against lowercase constants in
+`check.rs::check_intrinsic_call` and `lower.rs::lower_call`. That only worked
+because `resolve` *used* to lowercase. Both sites now match on
+`cb_diagnostics::fold(name)` (keeping the original `name` for `{name}` in error
+messages). Without this, `Len(x)` etc. silently stopped being recognized as
+intrinsics (caught by the existing `pass2_intrinsic_*` tests).
+
+**`source.rs`:** `SourceMap::add` same-name/different-text promoted from
+`debug_assert_eq!` to a hard `assert_eq!`, so the integrity violation signals in
+**release** too (was a silent stale-source render). No caller legitimately passes
+divergent text (driver adds one file per run); zero ripple.
+
+**Spec:** `cb_syntax.md` §1.3 already mandated "Unicode simple case folding" — we
+conformed to it rather than amending, so no doc change was needed.
+
+**Tests:** interner unit tests for Nordic case-insensitivity, the simple-fold ≠
+`to_lowercase` divergence (Greek final sigma `ς`/`σ`/`Σ` collapse to one symbol),
+and `resolve` returning original spelling; `resolve_round_trip` updated to expect
+`MyVar`. New `#[should_panic]` test for the hardened `add`. 16 lowering/print
+snapshots (`cb-ir`, `cb-sema`) re-accepted — all diffs were name casing only
+(`TypeRef(mob)` → `TypeRef(Mob)`), no IR structure change.
+
+**Verified (2026-06-18, Windows):** `cargo test --workspace` all green (0 failed);
+`cargo clippy --workspace --all-targets -D warnings` clean; `cargo fmt --all
+--check` clean. Driver smoke tests: undeclared `MissingThing` renders with its
+original casing (was `missingthing`); `PlayerHealth`/`playerhealth` resolve to one
+variable; `Dim Hämäläinen` referenced as `HÄMÄLÄINEN`/`hämäläinen` runs and prints
+`42` (exit 0).
 
 ## Related
 
