@@ -161,6 +161,30 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// If `id` is a bare identifier naming a Type/Struct/runtime-type, return its
+    /// value-type WITHOUT emitting E0311. Used by the positions that legitimately
+    /// take a bare Type name (First/Last, For-Each source). Mirrors `refine_type`.
+    fn resolve_type_name_arg(&mut self, id: NodeId) -> Option<Type> {
+        let name_span = match &self.arena[id] {
+            Node::Expr(Expr::Ident {
+                name_span,
+                sigil: None,
+            }) => *name_span,
+            _ => return None,
+        };
+        let name = self.intern_ident(name_span, None);
+        let ty = match self.symbols.lookup(self.current_scope, name)?.kind {
+            DeclKind::TypeDef { .. } => Type::TypeRef { name },
+            DeclKind::StructDef { .. } => Type::StructVal { name },
+            DeclKind::RuntimeTypeDef => Type::RuntimeType { name },
+            _ => return None,
+        };
+        // Keep lowering's `self.types.get(arg)` valid — first/last and for_each
+        // read the arg type from the table rather than re-lowering the name node.
+        self.types.insert(id, ty.clone());
+        Some(ty)
+    }
+
     fn try_declare(
         &mut self,
         scope: ScopeId,
@@ -815,6 +839,15 @@ impl<'a> Checker<'a> {
                 decl.kind,
                 DeclKind::OverloadSet { .. } | DeclKind::RuntimeFn { .. }
             );
+            // A bare Type/Struct/runtime-type name is not a value. The positions
+            // that legitimately take a bare Type name (First/Last, For-Each
+            // source) resolve it directly via `resolve_type_name_arg` and never
+            // reach here; anything that does is a genuine type-as-value misuse
+            // (cb_syntax.md §3.3, e.g. `Return Foo`, `a = Foo`).
+            let is_type_name = matches!(
+                decl.kind,
+                DeclKind::TypeDef { .. } | DeclKind::StructDef { .. } | DeclKind::RuntimeTypeDef
+            );
             // Sigil enforcement: if this use has a sigil, it must match the
             // declared type (for a function name, its return type).
             if let Some(s) = sigil {
@@ -832,6 +865,17 @@ impl<'a> Checker<'a> {
                     E_ADDRESS_OF_UNSUPPORTED,
                     format!(
                         "cannot take the address of overloaded or built-in command `{}`; only user-defined functions and subs have addresses",
+                        self.interner.resolve(name)
+                    ),
+                    Label::new(name_span),
+                ));
+                return Type::Error;
+            }
+            if is_type_name {
+                self.diagnostics.push(Diagnostic::error(
+                    E_TYPE_AS_VALUE,
+                    format!(
+                        "`{}` is a type name, not a value",
                         self.interner.resolve(name)
                     ),
                     Label::new(name_span),
@@ -1168,16 +1212,31 @@ impl<'a> Checker<'a> {
                     ));
                     return Some(Type::Error);
                 }
-                let ty = self.check_expr(args[0]);
-                if matches!(ty, Type::TypeRef { .. }) || ty.is_error() {
-                    Some(ty)
-                } else {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_TYPE_MISMATCH,
-                        format!("{name} expects a Type name"),
-                        Label::new(self.arena.span_of(args[0])),
-                    ));
-                    Some(Type::Error)
+                // First/Last take a bare Type name (a heap `Type` list head),
+                // never an arbitrary value — so resolve the name directly. This
+                // keeps E0311 from firing on the legitimate name position while
+                // still rejecting struct/runtime-type names and plain values.
+                match self.resolve_type_name_arg(args[0]) {
+                    Some(ty @ Type::TypeRef { .. }) => Some(ty),
+                    Some(_) => {
+                        self.diagnostics.push(Diagnostic::error(
+                            E_TYPE_MISMATCH,
+                            format!("{name} expects a Type name"),
+                            Label::new(self.arena.span_of(args[0])),
+                        ));
+                        Some(Type::Error)
+                    }
+                    None => {
+                        let ty = self.check_expr(args[0]);
+                        if !ty.is_error() {
+                            self.diagnostics.push(Diagnostic::error(
+                                E_TYPE_MISMATCH,
+                                format!("{name} expects a Type name"),
+                                Label::new(self.arena.span_of(args[0])),
+                            ));
+                        }
+                        Some(Type::Error)
+                    }
                 }
             }
             INTRINSIC_NEXT | INTRINSIC_PREVIOUS => {
@@ -1859,8 +1918,13 @@ impl<'a> Checker<'a> {
     }
 
     fn check_for_each(&mut self, for_id: NodeId, var: NodeId, source: NodeId, body: &[NodeId]) {
-        // Check the source first to determine the iteration type.
-        let source_ty = self.check_expr(source);
+        // Check the source first to determine the iteration type. `For Each` over
+        // a Type takes a bare Type name (cb_syntax.md §6.3); resolve that name
+        // directly so E0311 does not fire on the legitimate position. Array
+        // sources are arbitrary expressions and still flow through `check_expr`.
+        let source_ty = self
+            .resolve_type_name_arg(source)
+            .unwrap_or_else(|| self.check_expr(source));
 
         // The iteration variable is implicitly declared.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
@@ -2676,6 +2740,50 @@ mod tests {
             "got {:?}",
             error_codes(&result)
         );
+    }
+
+    #[test]
+    fn pass2_type_name_as_value_mismatched_slot_e0311() {
+        // A bare Type name used as a value into a mismatched slot. Before FD-031
+        // this leaked a `TypeRef` Debug repr through E0317; now it is E0311.
+        let result =
+            analyze_src("Type Foo\nField x As Integer\nEndType\nDim a As Integer\na = Foo\n");
+        assert!(
+            error_codes(&result).contains(&"E0311"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_type_name_as_value_matching_slot_e0311() {
+        // The soundness hole: a bare Type name returned into a matching-typed
+        // slot compiled clean before FD-031. It must now be rejected as E0311.
+        let result = analyze_src(
+            "Type Foo\nField x As Integer\nEndType\n\
+             Function makeFoo() As Foo\nReturn Foo\nEndFunction\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0311"),
+            "got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_type_name_legit_positions_ok() {
+        // `New`, `First`, and `For Each` all take a bare Type name legitimately
+        // (cb_syntax.md §3.3/§6.3) — they must NOT trip E0311 (over-firing guard).
+        let result = analyze_src(
+            "Type Foo\nField x As Integer\nEndType\n\
+             Dim a As Foo = New Foo\n\
+             Dim b As Foo = First(Foo)\n\
+             Dim total As Integer\n\
+             For c = Each Foo\n\
+             total = c.x\n\
+             Next c\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     // ── pass 2 tests: scope visibility ──────────────────────────────────
