@@ -23,6 +23,7 @@ unsafe_code = "deny"
 [workspace.dependencies]
 # External crates
 assert_cmd = "2"
+clap = { version = "4", features = ["derive"] }
 codespan-reporting = "0.11"
 insta = "1"
 phf = { version = "0.11", features = ["macros"] }

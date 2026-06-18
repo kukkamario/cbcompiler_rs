@@ -9,7 +9,7 @@ use std::fs;
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
-use predicates::str::contains;
+use predicates::str::{contains, is_empty};
 use tempfile::{TempDir, tempdir};
 
 fn write_cb(dir: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
@@ -73,11 +73,14 @@ fn parse_error_exits_one() {
 
 #[test]
 fn missing_arg_exits_two() {
+    // No positional `<FILE>` — clap reports the missing required argument and
+    // exits 2 (its default for usage errors, which matches the driver's own
+    // usage exit code).
     Command::cargo_bin("cb")
         .unwrap()
         .assert()
         .code(2)
-        .stderr(contains("usage: cb"));
+        .stderr(contains("Usage: cb"));
 }
 
 #[test]
@@ -114,6 +117,7 @@ fn sema_error_exits_one() {
         .stderr(contains("E0300"));
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn sema_narrowing_warning_exits_zero() {
     let dir = tempdir().unwrap();
@@ -126,6 +130,7 @@ fn sema_narrowing_warning_exits_zero() {
         .stderr(contains("E0318"));
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn backend_flag_accepts_interp() {
     let dir = tempdir().unwrap();
@@ -167,12 +172,14 @@ fn backend_flag_rejects_unknown_name() {
 
 #[test]
 fn backend_flag_missing_value_exits_two() {
+    // `--backend` with no following value — clap reports the missing value and
+    // exits 2.
     Command::cargo_bin("cb")
         .unwrap()
         .arg("--backend")
         .assert()
         .code(2)
-        .stderr(contains("--backend requires a value"));
+        .stderr(contains("--backend").and(contains("value is required")));
 }
 
 #[test]
@@ -189,6 +196,7 @@ fn runtime_print_typechecks_and_lowers() {
         .stdout(contains("const_string \"hello world\""));
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn make_error_writes_stderr_and_exits_one() {
     // `MakeError(msg)` writes the message to stderr and terminates with a
@@ -209,6 +217,7 @@ fn make_error_writes_stderr_and_exits_one() {
         .stderr(contains("boom happened"));
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn end_statement_exits_zero() {
     // A bare `End` terminates cleanly (exit 0); code after it does not run.
@@ -223,6 +232,7 @@ fn end_statement_exits_zero() {
         .stdout(contains("unreachable").not());
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn runtime_request_exit_sets_exit_code() {
     // FD-015 trap channel: a runtime function calling the host's
@@ -243,6 +253,7 @@ fn runtime_request_exit_sets_exit_code() {
         .stdout(contains("after").not());
 }
 
+#[cfg(feature = "interp")]
 #[test]
 fn runtime_raise_error_writes_stderr_and_exits_one() {
     // FD-015 trap channel: a runtime function calling the host's
@@ -275,4 +286,197 @@ fn runtime_abs_overload_resolves() {
         .assert()
         .success()
         .stdout(contains("call abs"));
+}
+
+// --- CLI parsing: help, version, and argument errors (FD-025) ---
+
+#[test]
+fn help_flag_prints_usage_and_exits_zero() {
+    // `--help` is handled by clap: prints usage to stdout and exits 0, even
+    // though `<FILE>` is otherwise required.
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(
+            contains("Usage: cb")
+                .and(contains("--backend"))
+                .and(contains("--dump-ir")),
+        );
+}
+
+#[test]
+fn short_help_flag_exits_zero() {
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("-h")
+        .assert()
+        .success()
+        .stdout(contains("Usage: cb"));
+}
+
+#[test]
+fn version_flag_exits_zero() {
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(contains("cb").and(contains(env!("CARGO_PKG_VERSION"))));
+}
+
+#[test]
+fn unknown_flag_exits_two() {
+    // An unrecognised flag is a clap usage error → exit 2.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--not-a-real-flag")
+        .arg(&path)
+        .assert()
+        .code(2)
+        .stderr(contains("--not-a-real-flag").and(contains("unexpected argument")));
+}
+
+#[cfg(feature = "interp")]
+#[test]
+fn backend_equals_form_accepts_interp() {
+    // The `--backend=interp` equals form is handled by clap identically to the
+    // space-separated form.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--backend=interp")
+        .arg(&path)
+        .assert()
+        .success();
+}
+
+#[test]
+fn backend_empty_equals_rejected() {
+    // `--backend=` supplies an empty backend name, which is not a known
+    // backend → the driver's own "unknown backend" error, exit 2.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--backend=")
+        .arg(&path)
+        .assert()
+        .code(2)
+        .stderr(contains("unknown backend"));
+}
+
+// --- Dump flags vs. the error gate (FD-025) ---
+
+#[test]
+fn dump_ir_on_erroring_input_exits_one_with_empty_stdout() {
+    // IR lowering is gated behind `if !had_error`, so `--dump-ir` on an
+    // erroring program prints nothing to stdout, reports the diagnostic on
+    // stderr, and exits 1.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "bad.cb", "@\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--dump-ir")
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(is_empty())
+        .stderr(contains("E0106"));
+}
+
+#[test]
+fn dump_ast_on_erroring_input_still_emits() {
+    // `--dump-ast` runs *before* the error gate, so a program with a semantic
+    // error still gets its AST dumped to stdout while exiting 1 — the
+    // deliberate asymmetry with `--dump-ir` above.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "sema.cb", "Dim y As Integer\ny = x + 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg("--dump-ast")
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("Program ("))
+        .stderr(contains("E0300"));
+}
+
+// --- Exit-code clamping (FD-025) ---
+
+#[cfg(feature = "interp")]
+#[test]
+fn request_exit_above_255_clamps_to_255() {
+    // `request_exit(256)` would wrap to 0 under the old `as u8` cast, hiding a
+    // failure as success. The clamp policy saturates it to 255 instead.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "big_exit.cb",
+        "Print \"before\"\nTestRequestExit(256)\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(255)
+        .stdout(contains("before"))
+        .stdout(contains("after").not());
+}
+
+#[cfg(feature = "interp")]
+#[test]
+fn request_exit_negative_clamps_to_zero() {
+    // Negative codes are out of the OS `0..=255` range; the clamp policy maps
+    // them to 0. Pinned so the choice is intentional rather than incidental.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "neg_exit.cb",
+        "Print \"before\"\nTestRequestExit(-1)\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(0)
+        .stdout(contains("before"))
+        .stdout(contains("after").not());
+}
+
+// --- Backend selection across feature builds (FD-025) ---
+
+#[cfg(feature = "llvm")]
+#[test]
+fn backend_llvm_reports_not_implemented() {
+    // Selecting the llvm backend used to parse, lower, verify, then run
+    // nothing and exit 0. It must now fail loudly with a distinct exit code.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .args(["--backend", "llvm"])
+        .arg(&path)
+        .assert()
+        .code(3)
+        .stderr(contains("not yet implemented"));
+}
+
+#[cfg(not(any(feature = "interp", feature = "llvm")))]
+#[test]
+fn no_backend_compiled_in_exits_two() {
+    // A dump-only build (`--no-default-features`) has no backend to run, so a
+    // plain compile-and-run invocation reports that and exits 2.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(2)
+        .stderr(contains("no backend compiled in"));
 }

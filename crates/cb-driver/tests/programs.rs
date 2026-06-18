@@ -3,6 +3,11 @@
 //! normalisation). Each fixture lives in `tests/fixtures/programs/` as a
 //! pair `<name>.cb` + `<name>.out`. Adding a new test = write the pair +
 //! one `#[test] fn name() { run("name") }`.
+//!
+//! Every fixture runs the program, so the whole suite needs a backend; it is
+//! gated on `interp` (the reference backend) and is empty in backend-less
+//! builds (`--no-default-features`).
+#![cfg(feature = "interp")]
 
 use std::path::PathBuf;
 

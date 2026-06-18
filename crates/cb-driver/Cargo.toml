@@ -22,6 +22,7 @@ cb-runtime-sys = { path = "../cb-runtime-sys" }
 cb-sema = { path = "../cb-sema" }
 cb-backend-interp = { path = "../cb-backend-interp", optional = true }
 cb-backend-llvm = { path = "../cb-backend-llvm", optional = true }
+clap.workspace = true
 codespan-reporting.workspace = true
 
 [dev-dependencies]

@@ -1,9 +1,11 @@
 //! `cb` — CoolBasic compiler driver.
 //!
-//! End-to-end smoke driver: tokenize + parse a single `.cb` file, render any
-//! diagnostics to stderr, print a debug view of the AST to stdout, and exit
-//! non-zero if any error-severity diagnostics were emitted. Codegen and
-//! backend selection arrive later — see FD-002 plan §E.
+//! End-to-end smoke driver: tokenize + parse a single `.cb` file, run semantic
+//! analysis, render any diagnostics to stderr, optionally dump the AST/IR, and
+//! otherwise hand the lowered IR to the selected backend. Exit codes are
+//! documented on [`exit`]. Codegen for the LLVM backend arrives later — for now
+//! selecting it reports "not yet implemented" rather than silently doing
+//! nothing (FD-025).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -12,7 +14,28 @@ use cb_diagnostics::{CliRenderer, Renderer, Severity, SourceMap};
 use cb_frontend::ast_print;
 use cb_frontend::parser::ParseResult;
 use cb_frontend::{LexerOptions, parse, tokenize};
+use clap::Parser;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+
+/// Process exit codes the driver returns. Centralised so the contract is
+/// explicit and testable:
+///
+/// * `0` — success.
+/// * `1` — compilation produced error diagnostics, or the program itself
+///   failed at runtime (`MakeError`, an interpreter trap, a runtime
+///   `raise_error`).
+/// * `2` — driver/usage error: bad CLI arguments (clap also exits `2` for
+///   these), an unreadable input file, a runtime-catalog load failure, or an
+///   unknown / not-compiled-in `--backend`.
+/// * `3` — the requested backend is recognised but not yet implemented.
+mod exit {
+    /// Driver or usage error. Matches clap's own exit code for argument errors.
+    pub const USAGE: u8 = 2;
+    /// Backend selected is recognised but has no codegen yet (e.g. `llvm`).
+    /// Only referenced when an unimplemented backend is compiled in.
+    #[cfg(feature = "llvm")]
+    pub const BACKEND_UNIMPLEMENTED: u8 = 3;
+}
 
 #[cfg(feature = "interp")]
 const HAS_INTERP: bool = true;
@@ -22,6 +45,30 @@ const HAS_INTERP: bool = false;
 const HAS_LLVM: bool = true;
 #[cfg(not(feature = "llvm"))]
 const HAS_LLVM: bool = false;
+
+/// Compile and run a single CoolBasic source file.
+#[derive(Parser, Debug)]
+#[command(name = "cb", version, about, long_about = None)]
+struct Cli {
+    /// Backend used to run the program: `interp` or `llvm`. Defaults to
+    /// `interp`; availability depends on the features compiled in.
+    #[arg(long, value_name = "NAME")]
+    backend: Option<String>,
+
+    /// Print the parsed AST to stdout (still reports diagnostics; skips
+    /// execution).
+    #[arg(long)]
+    dump_ast: bool,
+
+    /// Print the lowered IR to stdout (only when the program is error-free;
+    /// skips execution).
+    #[arg(long)]
+    dump_ir: bool,
+
+    /// CoolBasic source file to compile.
+    #[arg(value_name = "FILE")]
+    file: PathBuf,
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum Backend {
@@ -80,64 +127,49 @@ fn parse_backend(name: &str) -> Result<Backend, String> {
     }
 }
 
+/// Map a program-level exit code (`i32`) onto an OS process exit code.
+///
+/// OS process exit codes occupy `0..=255`. CoolBasic's `End` / `request_exit`
+/// can name any `i32`, so we clamp into range rather than wrapping: the old
+/// `as u8` cast turned `256` into `0`, silently converting a failure into a
+/// success. Values above `255` saturate to `255` (still non-zero, still a
+/// failure); negative values clamp to `0`.
+///
+/// Only the interpreter backend produces a program-level exit code today.
+#[cfg(feature = "interp")]
+fn clamp_exit(code: i32) -> u8 {
+    code.clamp(0, 255) as u8
+}
+
 fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let mut backend_arg: Option<String> = None;
-    let mut positional: Option<String> = None;
-    let mut dump_ir = false;
-    let mut dump_ast = false;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--backend" => match args.next() {
-                Some(v) => backend_arg = Some(v),
-                None => {
-                    eprintln!("cb: --backend requires a value");
-                    return ExitCode::from(2);
-                }
-            },
-            "--dump-ir" => dump_ir = true,
-            "--dump-ast" => dump_ast = true,
-            _ if a.starts_with("--backend=") => {
-                backend_arg = Some(a["--backend=".len()..].to_string());
-            }
-            _ if positional.is_none() => positional = Some(a),
-            _ => {
-                eprintln!("cb: unexpected argument: {a}");
-                return ExitCode::from(2);
-            }
-        }
-    }
+    let Cli {
+        backend: backend_arg,
+        dump_ast,
+        dump_ir,
+        file: path,
+    } = Cli::parse();
 
-    let Some(path_arg) = positional else {
-        eprintln!("usage: cb [--backend <name>] [--dump-ast] [--dump-ir] <file.cb>");
-        return ExitCode::from(2);
-    };
-
-    let _backend = match backend_arg {
+    // Resolve the requested backend, but don't *require* one yet: a dump-only
+    // build (no backend compiled in) must still be able to `--dump-ast` /
+    // `--dump-ir`. The "no backend compiled in" error is deferred to the point
+    // where we would actually run a program (see the run dispatch below). An
+    // explicitly named but invalid/unavailable backend still fails fast.
+    let backend: Option<Backend> = match backend_arg {
         Some(name) => match parse_backend(&name) {
-            Ok(b) => b,
+            Ok(b) => Some(b),
             Err(msg) => {
                 eprintln!("cb: {msg}");
-                return ExitCode::from(2);
+                return ExitCode::from(exit::USAGE);
             }
         },
-        None => match default_backend() {
-            Some(b) => b,
-            None => {
-                eprintln!(
-                    "cb: no backend compiled in; rebuild with --features interp or --features llvm"
-                );
-                return ExitCode::from(2);
-            }
-        },
+        None => default_backend(),
     };
 
-    let path = PathBuf::from(&path_arg);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("cb: failed to read {}: {}", path.display(), e);
-            return ExitCode::from(2);
+            return ExitCode::from(exit::USAGE);
         }
     };
 
@@ -156,7 +188,7 @@ fn main() -> ExitCode {
         Ok(c) => c,
         Err(msg) => {
             eprintln!("cb: failed to load runtime catalog: {msg}");
-            return ExitCode::from(2);
+            return ExitCode::from(exit::USAGE);
         }
     };
 
@@ -175,7 +207,7 @@ fn main() -> ExitCode {
         }
         if let Err(e) = stderr.emit(d, &sources) {
             eprintln!("cb: failed to render diagnostic: {e}");
-            return ExitCode::from(2);
+            return ExitCode::from(exit::USAGE);
         }
     }
 
@@ -202,17 +234,34 @@ fn main() -> ExitCode {
         }
 
         if !dump_ast && !dump_ir {
-            #[cfg(feature = "interp")]
-            if matches!(_backend, Backend::Interp) {
-                // `Ok(code)` is the program's own exit code (`End` → 0,
-                // `MakeError` → 1); `Err` is an interpreter trap / internal
-                // error, which always maps to exit 1 with a diagnostic.
-                match cb_backend_interp::interpret(&ir_program, &sema_result.interner) {
-                    Ok(code) => return ExitCode::from(code as u8),
-                    Err(e) => {
-                        eprintln!("cb: {e}");
-                        return ExitCode::from(1);
+            match backend {
+                #[cfg(feature = "interp")]
+                Some(Backend::Interp) => {
+                    // `Ok(code)` is the program's own exit code (`End` → 0,
+                    // `MakeError` → 1, `request_exit(n)` → n); `Err` is an
+                    // interpreter trap / internal error, which always maps to
+                    // exit 1 with a diagnostic.
+                    match cb_backend_interp::interpret(&ir_program, &sema_result.interner) {
+                        Ok(code) => return ExitCode::from(clamp_exit(code)),
+                        Err(e) => {
+                            eprintln!("cb: {e}");
+                            return ExitCode::from(1);
+                        }
                     }
+                }
+                #[cfg(feature = "llvm")]
+                Some(Backend::Llvm) => {
+                    eprintln!(
+                        "cb: the llvm backend is not yet implemented; \
+                         run with --backend interp to execute programs"
+                    );
+                    return ExitCode::from(exit::BACKEND_UNIMPLEMENTED);
+                }
+                None => {
+                    eprintln!(
+                        "cb: no backend compiled in; rebuild with --features interp or --features llvm"
+                    );
+                    return ExitCode::from(exit::USAGE);
                 }
             }
         }
