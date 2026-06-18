@@ -1,6 +1,7 @@
 # FD-025: Driver CLI, Backend-Selection & Exit-Code Correctness
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-19
 **Priority:** Medium
 **Effort:** Low–Medium
 **Impact:** Stops `--backend llvm` from silently succeeding while doing nothing, pins exit-code truncation behavior, replaces the hand-rolled argument loop with a proper `clap` parser (giving `--help`/`--version`), makes the no-backend "dump-only" build actually usable, and closes the driver's untested flag/error combinations.
