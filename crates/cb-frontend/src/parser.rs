@@ -25,7 +25,9 @@ pub const E_UNTERMINATED_BLOCK: DiagnosticCode = DiagnosticCode::new("E0203");
 pub const E_MISMATCHED_END_KEYWORD: DiagnosticCode = DiagnosticCode::new("E0204");
 pub const E_INVALID_TYPE_EXPR: DiagnosticCode = DiagnosticCode::new("E0205");
 pub const E_BAD_STATEMENT: DiagnosticCode = DiagnosticCode::new("E0206");
-pub const E_RESERVED_WORD_AS_NAME: DiagnosticCode = DiagnosticCode::new("E0207");
+// E0207 retired (FD-031) — a reserved word can never reach a name slot (the
+// lexer emits `Keyword` tokens, lexer.rs:972-977), so such inputs are rejected
+// earlier as E0201/E0202; code number left unused.
 // E0208 (E_INVALID_ESCAPE) and E0209 (E_BAD_RAW_INDENT) live in
 // `string_value.rs` next to their emission sites. FD-004 #17.
 pub const E_MULTI_NAME_NOT_ALLOWED: DiagnosticCode = DiagnosticCode::new("E0210");
@@ -1106,6 +1108,7 @@ impl<'t> Parser<'t> {
             // a clear failure instead of a hard panic.
             TokenKind::Newline | TokenKind::Eof => Err(ParseError {
                 diag: Box::new(Diagnostic::error(
+                    // (E0299) intentionally untested — unreachable defensive guard
                     E_INTERNAL_PARSER,
                     "internal: `parse_stmt_inner` reached a statement terminator",
                     Label::new(tok.span),
@@ -1563,6 +1566,7 @@ impl<'t> Parser<'t> {
                 // is loud instead of silently producing a node with a
                 // current-token span.
                 self.diagnostics.push(Diagnostic::error(
+                    // (E0299) intentionally untested — unreachable defensive guard
                     E_INTERNAL_PARSER,
                     format!(
                         "internal: `consume_block_closer` reached an unexpected token while closing `{opener_name}`",
@@ -4853,6 +4857,32 @@ mod decl_tests {
                 .iter()
                 .any(|d| d.code == Some(E_MULTI_NAME_NOT_ALLOWED)),
             "expected E0210, got {:?}",
+            r.diagnostics
+        );
+    }
+
+    #[test]
+    fn dim_type_with_sigil_is_e0205() {
+        // A sigil on a type name is not a valid type expression.
+        let r = parse_src("Dim x As foo$\n");
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_INVALID_TYPE_EXPR)),
+            "expected E0205, got {:?}",
+            r.diagnostics
+        );
+    }
+
+    #[test]
+    fn dim_type_invalid_token_is_e0205() {
+        // A non-type token in type position (the `_` arm of the type parser).
+        let r = parse_src("Dim x As 123\n");
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_INVALID_TYPE_EXPR)),
+            "expected E0205, got {:?}",
             r.diagnostics
         );
     }
