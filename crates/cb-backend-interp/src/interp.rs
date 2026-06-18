@@ -1142,10 +1142,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // Logical NOT yields Int 1/0 (FD-035), defined for every integer
             // width via truthiness so we don't rely on sema pre-converting.
-            (
-                IrUnOp::Not,
-                Value::Int(_) | Value::Long(_) | Value::Byte(_) | Value::Short(_),
-            ) => Ok(Value::Int(if v.is_truthy() { 0 } else { 1 })),
+            (IrUnOp::Not, Value::Int(_) | Value::Long(_) | Value::Byte(_) | Value::Short(_)) => {
+                Ok(Value::Int(if v.is_truthy() { 0 } else { 1 }))
+            }
 
             (IrUnOp::BinNot, Value::Int(x)) => Ok(Value::Int(!x)),
             (IrUnOp::BinNot, Value::Long(x)) => Ok(Value::Long(!x)),

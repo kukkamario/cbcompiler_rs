@@ -825,13 +825,15 @@ fn function_pointer_roundtrip() {
 fn function_pointer_as_argument() {
     // A function name passed as an argument lowers to FuncAddr; the callee then
     // invokes the fn-pointer parameter via CallIndirect (higher-order call).
-    let out = run("Function apply(f As Function(Integer) As Integer, x As Integer) As Integer\n\
+    let out = run(
+        "Function apply(f As Function(Integer) As Integer, x As Integer) As Integer\n\
            Return f(x)\n\
          EndFunction\n\
          Function inc(n As Integer) As Integer\n\
            Return n + 1\n\
          EndFunction\n\
-         Print Str(apply(inc, 41))");
+         Print Str(apply(inc, 41))",
+    );
     assert_eq!(out, "42\n");
 }
 
@@ -861,7 +863,10 @@ fn trap_null_function_pointer() {
          fp = Null\n\
          Print Str(fp(0))",
     );
-    assert!(matches!(err.kind, InterpErrorKind::Trap(TrapKind::NullFnPtr)));
+    assert!(matches!(
+        err.kind,
+        InterpErrorKind::Trap(TrapKind::NullFnPtr)
+    ));
 }
 
 // ── FD-032: multi-dimensional arrays ───────────────────────────────────

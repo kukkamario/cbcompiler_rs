@@ -537,9 +537,9 @@ impl<'t> Parser<'t> {
             // keyword, so this arm only fires when followed by `(`; otherwise it
             // falls through to the type/keyword handling elsewhere. (`Bool(v)`
             // was removed with the Bool type — FD-035.)
-            TokenKind::Keyword(
-                Kw::Int | Kw::Integer | Kw::Float | Kw::Next | Kw::String,
-            ) if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) => {
+            TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Next | Kw::String)
+                if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
+            {
                 self.cursor.bump();
                 Ok(self.alloc(
                     Node::Expr(Expr::Ident {

@@ -1410,23 +1410,22 @@ impl<'a> Checker<'a> {
                 // 0-arg call (CoolBasic paren-less sub-call syntax), matching
                 // `lower_stmt`. Route it through call-checking so it is validated
                 // as a call rather than mistaken for an address-of value (§7.4).
-                let bare_call = if let Node::Expr(Expr::Ident { name_span, sigil }) =
-                    &self.arena[expr]
-                {
-                    let name = self.intern_ident(*name_span, *sigil);
-                    self.symbols
-                        .lookup(self.current_scope, name)
-                        .is_some_and(|d| {
-                            matches!(
-                                d.kind,
-                                DeclKind::Function { .. }
-                                    | DeclKind::RuntimeFn { .. }
-                                    | DeclKind::OverloadSet { .. }
-                            )
-                        })
-                } else {
-                    false
-                };
+                let bare_call =
+                    if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
+                        let name = self.intern_ident(*name_span, *sigil);
+                        self.symbols
+                            .lookup(self.current_scope, name)
+                            .is_some_and(|d| {
+                                matches!(
+                                    d.kind,
+                                    DeclKind::Function { .. }
+                                        | DeclKind::RuntimeFn { .. }
+                                        | DeclKind::OverloadSet { .. }
+                                )
+                            })
+                    } else {
+                        false
+                    };
                 if bare_call {
                     let span = self.arena.span_of(expr);
                     self.check_call(expr, expr, &[], span);
@@ -2199,12 +2198,18 @@ fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstV
         }
 
         // Integer comparison — yields Int 1/0 (FD-035)
-        (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a == b) as i64)),
+        (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a == b) as i64))
+        }
         (BinOp::NotEq, ConstValue::Int(a), ConstValue::Int(b)) => {
             Some(ConstValue::Int((a != b) as i64))
         }
-        (BinOp::Lt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a < b) as i64)),
-        (BinOp::Gt, ConstValue::Int(a), ConstValue::Int(b)) => Some(ConstValue::Int((a > b) as i64)),
+        (BinOp::Lt, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a < b) as i64))
+        }
+        (BinOp::Gt, ConstValue::Int(a), ConstValue::Int(b)) => {
+            Some(ConstValue::Int((a > b) as i64))
+        }
         (BinOp::LtEq, ConstValue::Int(a), ConstValue::Int(b)) => {
             Some(ConstValue::Int((a <= b) as i64))
         }
