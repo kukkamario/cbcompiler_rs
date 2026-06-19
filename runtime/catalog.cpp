@@ -369,6 +369,16 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawghostimage",   cb_rt_draw_ghost_image),
     CB_FN("drawimagebox",     cb_rt_draw_image_box),
     CB_FN("hotspot",          cb_rt_hotspot),
+    // FD-036 multi-frame sprite sheets — `frame`/`useMask` overloads (one CB_FN
+    // per arity; useMask is accepted but ignored). LoadAnimImage returns the
+    // existing `Image` opaque type, so no new type tag is registered.
+    CB_FN("loadanimimage",    cb_rt_load_anim_image),
+    CB_FN("makeimage",        cb_rt_make_image_frames),
+    CB_FN("drawimage",        cb_rt_draw_image_frame),
+    CB_FN("drawimage",        cb_rt_draw_image_frame_mask),
+    CB_FN("drawghostimage",   cb_rt_draw_ghost_image_frame),
+    CB_FN("drawimagebox",     cb_rt_draw_image_box_frame),
+    CB_FN("drawimagebox",     cb_rt_draw_image_box_frame_mask),
     CB_FN("imagesoverlap",    cb_rt_images_overlap),
     CB_FN("imagescollide",    cb_rt_images_collide),
     CB_FN("screenwidth",      cb_rt_screen_width),

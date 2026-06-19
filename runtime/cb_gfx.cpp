@@ -36,11 +36,21 @@
 //
 // FD-017 adds a hotspot — the draw/scale/rotate origin. It defaults to (0,0)
 // (top-left), so functions that predate it (DrawImage) are unaffected; HotSpot,
-// CloneImage, and RotateImage set it. Single-frame only (multi-frame deferred).
+// CloneImage, and RotateImage set it.
+//
+// FD-036 adds multi-frame sprite-sheet metadata. `anim_length == 0` (the
+// default) means a single-frame image — every draw uses the whole bitmap and the
+// frame parameter is ignored. LoadAnimImage sets frame_w/frame_h/anim_length so
+// the bitmap is sliced into frame_w×frame_h cells. `anim_begin` (the start frame)
+// is stored for parity but never read in any draw path (matches cbEnchanted).
 struct CbImage {
     ALLEGRO_BITMAP* bmp;
     int32_t hotspot_x = 0;
     int32_t hotspot_y = 0;
+    int32_t frame_w = 0;
+    int32_t frame_h = 0;
+    int32_t anim_begin = 0;
+    int32_t anim_length = 0;
 };
 
 // ─── Opaque Font handle ───────────────────────────────────────────────
@@ -656,12 +666,17 @@ extern "C" void cb_rt_default_mask(int32_t enabled, int32_t r, int32_t g, int32_
     }
 }
 
-// Copies an image and its hotspot.
+// Copies an image, its hotspot, and its frame metadata (FD-036).
 extern "C" CbImage* cb_rt_clone_image(const CbImage* img) {
     if (!img || !img->bmp) return nullptr;
     ALLEGRO_BITMAP* b = al_clone_bitmap(img->bmp);
     if (!b) return nullptr;
-    return new CbImage{b, img->hotspot_x, img->hotspot_y};
+    CbImage* out = new CbImage{b, img->hotspot_x, img->hotspot_y};
+    out->frame_w = img->frame_w;
+    out->frame_h = img->frame_h;
+    out->anim_begin = img->anim_begin;
+    out->anim_length = img->anim_length;
+    return out;
 }
 
 // Resizes (scales) an image to w×h. Resets the hotspot to (0,0).
@@ -782,8 +797,15 @@ extern "C" void cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
 extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
     if (!img || !img->bmp) return;
     if (x < 0 || y < 0) {
-        img->hotspot_x = al_get_bitmap_width(img->bmp) / 2;
-        img->hotspot_y = al_get_bitmap_height(img->bmp) / 2;
+        // FD-036: center on a single frame when frame size is set, else on the
+        // whole image (matches cbEnchanted CBImage::setHotspot).
+        if (img->frame_w > 0 && img->frame_h > 0) {
+            img->hotspot_x = img->frame_w / 2;
+            img->hotspot_y = img->frame_h / 2;
+        } else {
+            img->hotspot_x = al_get_bitmap_width(img->bmp) / 2;
+            img->hotspot_y = al_get_bitmap_height(img->bmp) / 2;
+        }
     } else {
         img->hotspot_x = x;
         img->hotspot_y = y;
@@ -835,6 +857,146 @@ extern "C" int32_t cb_rt_images_collide(const CbImage* a, double x1, double y1, 
         }
     }
     return 0;
+}
+
+// ─── FD-036 multi-frame sprite sheets ──────────────────────────────────
+//
+// A multi-frame image stores one bitmap sliced on the fly into frame_w×frame_h
+// cells (LoadAnimImage sets the frame size). The frame draw overloads below sit
+// alongside the single-frame ones above; the no-frame catalog rows keep working.
+
+// Source sub-rect for `frame` of a multi-frame image. Returns false for a
+// single-frame image (anim_length==0 or no frame size) — the caller draws the
+// whole bitmap. `frame` is 0-based and taken modulo framesX (NOT clamped to
+// anim_length), matching cbEnchanted. The row/offset math deliberately fixes
+// cbEnchanted bugs #1/#2 (cbimage.cpp:64,67 used `/framesY` and `*frameWidth`,
+// correct only for square single-row sheets); see FD-036.
+static bool image_frame_src_rect(const CbImage* img, int32_t frame,
+                                 float& left, float& top, float& w, float& h) {
+    if (!img || !img->bmp || img->anim_length == 0 ||
+        img->frame_w <= 0 || img->frame_h <= 0) {
+        return false;
+    }
+    int frames_x = al_get_bitmap_width(img->bmp) / img->frame_w;
+    if (frames_x <= 0) return false;
+    int col = frame % frames_x;
+    int row = frame / frames_x;                 // FIX #1: /framesX, not /framesY
+    left = (float)(col * img->frame_w);
+    top  = (float)(row * img->frame_h);         // FIX #2: *frame_h, not *frame_w
+    w = (float)img->frame_w;
+    h = (float)img->frame_h;
+    return true;
+}
+
+// LoadAnimImage(path, frameW, frameH, startFrame, animLength): loads a sprite
+// sheet and records its frame geometry. Mirrors MakeImage's memory-bitmap
+// fallback so sheets load without a display (al_load_bitmap would otherwise try
+// to create a video bitmap and fail headless). Returns Null on load failure.
+extern "C" CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w,
+                                          int32_t frame_h, int32_t start_frame,
+                                          int32_t anim_length) {
+    ensure_init();
+    std::string p;
+    if (path) {
+        std::size_t len = cb_rt_string_len(path);
+        if (len > 0) {
+            p.assign(reinterpret_cast<const char*>(cb_rt_string_data(path)), len);
+        }
+    }
+    int prev_flags = al_get_new_bitmap_flags();
+    int flags = prev_flags;
+    if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
+    if (smooth_2d) flags |= ALLEGRO_MIN_LINEAR | ALLEGRO_MAG_LINEAR;
+    al_set_new_bitmap_flags(flags);
+    ALLEGRO_BITMAP* bmp = al_load_bitmap(p.c_str());
+    al_set_new_bitmap_flags(prev_flags);
+    if (!bmp) return nullptr;
+
+    if (default_mask_on) al_convert_mask_to_alpha(bmp, default_mask_color);
+
+    CbImage* img = new CbImage{bmp};
+    img->frame_w = frame_w;
+    img->frame_h = frame_h;
+    img->anim_begin = start_frame;
+    img->anim_length = anim_length;
+    return img;
+}
+
+// MakeImage(w, h, frameCount): the 3-arg overload. `frameCount` is popped and
+// ignored — cbEnchanted has no frame size to slice by, so a made image is always
+// single-frame. Identical to the 2-arg MakeImage otherwise.
+extern "C" CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_count) {
+    (void)frame_count;
+    return cb_rt_make_image(w, h);
+}
+
+// DrawImage(img, x, y, frame): draws one frame, honoring the hotspot. Falls back
+// to the whole bitmap for a single-frame image.
+extern "C" void cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame) {
+    if (!img || !img->bmp || !current_target) return;
+    float l, t, w, h;
+    if (image_frame_src_rect(img, frame, l, t, w, h)) {
+        al_draw_bitmap_region(img->bmp, l, t, w, h,
+                              (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    } else {
+        al_draw_bitmap(img->bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    }
+}
+
+// DrawImage(img, x, y, frame, useMask): the documented 5-arg form.
+// TODO(FD-036): `useMask` is accepted but ignored — this port's masking is
+// destructive (MaskImage bakes alpha into the single bitmap; there is no unmasked
+// copy to select between). Revisit by storing masked+unmasked bitmaps if a
+// program needs per-draw mask selection.
+extern "C" void cb_rt_draw_image_frame_mask(const CbImage* img, double x, double y,
+                                            int32_t frame, int32_t use_mask) {
+    (void)use_mask;
+    cb_rt_draw_image_frame(img, x, y, frame);
+}
+
+// DrawGhostImage(img, x, y, frame, alpha): alpha-blended single frame.
+extern "C" void cb_rt_draw_ghost_image_frame(const CbImage* img, double x, double y,
+                                             int32_t frame, double alpha) {
+    if (!img || !img->bmp || !current_target) return;
+    float a = (float)(alpha / 100.0);
+    if (a < 0.0f) a = 0.0f;
+    if (a > 1.0f) a = 1.0f;
+    ALLEGRO_COLOR tint = al_map_rgba_f(1.0f, 1.0f, 1.0f, a);
+    float l, t, w, h;
+    if (image_frame_src_rect(img, frame, l, t, w, h)) {
+        al_draw_tinted_bitmap_region(img->bmp, tint, l, t, w, h,
+                                     (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    } else {
+        al_draw_tinted_bitmap(img->bmp, tint,
+                              (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    }
+}
+
+// DrawImageBox(img, sx, sy, sw, sh, tx, ty, frame): same source/dest convention
+// as the 7-arg cb_rt_draw_image_box (source rect (sx,sy,sw,sh) → dest (tx,ty));
+// for a multi-frame image the source origin is shifted to the frame's top-left.
+// Does not apply the hotspot (matches the non-frame box draw).
+extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double sy,
+                                           double sw, double sh, double tx, double ty,
+                                           int32_t frame) {
+    if (!img || !img->bmp || !current_target) return;
+    float l, t, w, h;
+    double ox = 0.0, oy = 0.0;
+    if (image_frame_src_rect(img, frame, l, t, w, h)) {
+        ox = l;
+        oy = t;
+    }
+    al_draw_bitmap_region(img->bmp, (float)(ox + sx), (float)(oy + sy),
+                          (float)sw, (float)sh, (float)tx, (float)ty, 0);
+}
+
+// DrawImageBox(..., frame, useMask): the documented 9-arg form. useMask ignored
+// (see the TODO on cb_rt_draw_image_frame_mask).
+extern "C" void cb_rt_draw_image_box_frame_mask(const CbImage* img, double sx, double sy,
+                                                double sw, double sh, double tx, double ty,
+                                                int32_t frame, int32_t use_mask) {
+    (void)use_mask;
+    cb_rt_draw_image_box_frame(img, sx, sy, sw, sh, tx, ty, frame);
 }
 
 // ─── Screen queries ────────────────────────────────────────────────────

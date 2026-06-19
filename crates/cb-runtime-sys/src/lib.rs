@@ -525,6 +525,49 @@ mod tests {
             );
             assert_eq!(get_pixel.return_ty, IrType::Int);
 
+            // FD-036 multi-frame sprite sheets. Each optional `frame`/`useMask`
+            // arg is its own arity overload (the catalog has no default-arg
+            // mechanism); LoadAnimImage returns the existing `Image` type.
+            let image_ty = IrType::RuntimeType("Image".to_string());
+            let load_anim = by_symbol["cb_rt_load_anim_image"];
+            assert_eq!(load_anim.name, "loadanimimage");
+            assert_eq!(load_anim.params.len(), 5);
+            assert_eq!(load_anim.params[0].ty, IrType::String);
+            assert_eq!(load_anim.params[1].ty, IrType::Int);
+            assert_eq!(load_anim.return_ty, image_ty);
+
+            let make_frames = by_symbol["cb_rt_make_image_frames"];
+            assert_eq!(make_frames.name, "makeimage");
+            assert_eq!(make_frames.params.len(), 3);
+            assert_eq!(make_frames.return_ty, image_ty);
+
+            // drawimage: 3-arg (existing), 4-arg (frame), 5-arg (frame+useMask).
+            let draw_frame = by_symbol["cb_rt_draw_image_frame"];
+            assert_eq!(draw_frame.name, "drawimage");
+            assert_eq!(draw_frame.params.len(), 4);
+            assert_eq!(draw_frame.params[0].ty, image_ty);
+            assert_eq!(draw_frame.params[3].ty, IrType::Int);
+            assert_eq!(draw_frame.return_ty, IrType::Void);
+
+            let draw_frame_mask = by_symbol["cb_rt_draw_image_frame_mask"];
+            assert_eq!(draw_frame_mask.name, "drawimage");
+            assert_eq!(draw_frame_mask.params.len(), 5);
+
+            let ghost_frame = by_symbol["cb_rt_draw_ghost_image_frame"];
+            assert_eq!(ghost_frame.name, "drawghostimage");
+            assert_eq!(ghost_frame.params.len(), 5);
+            assert_eq!(ghost_frame.params[3].ty, IrType::Int);
+            assert_eq!(ghost_frame.params[4].ty, IrType::Float);
+
+            let box_frame = by_symbol["cb_rt_draw_image_box_frame"];
+            assert_eq!(box_frame.name, "drawimagebox");
+            assert_eq!(box_frame.params.len(), 8);
+            assert_eq!(box_frame.params[7].ty, IrType::Int);
+
+            let box_frame_mask = by_symbol["cb_rt_draw_image_box_frame_mask"];
+            assert_eq!(box_frame_mask.name, "drawimagebox");
+            assert_eq!(box_frame_mask.params.len(), 9);
+
             // Input: keyboard + mouse queries (FD-013 Batch 5). All are
             // Int->Int or ()->Int catalog entries dispatched generically.
             let key_down = by_symbol["cb_rt_key_down"];

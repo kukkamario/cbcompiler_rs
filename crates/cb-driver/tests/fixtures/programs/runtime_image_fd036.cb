@@ -1,0 +1,92 @@
+// FD-036 multi-frame sprite sheets. Headless: build a 4x9 sheet in memory with a
+// distinct color in each frame's top-left pixel, SaveImage it to a BMP (in the
+// test's isolated temp cwd), then LoadAnimImage it back as 2x3 frames (2 columns
+// x 3 rows = 6 frames, indices 0..5 row-major).
+//
+// Each DrawImage(anim, 0, 0, frame) must reproduce the LOADED image's pixel at
+// that frame's CORRECT source origin. Comparing the drawn pixel against
+// GetPixel(anim, srcX, srcY) isolates slicing from BMP round-trip fidelity and
+// pins the slice-bug #1/#2 fix: cbEnchanted's `/framesY` + `*frameWidth` would
+// read the wrong cell for frames 2..5 on this multi-row, non-square sheet.
+
+Dim sheet As Image
+sheet = MakeImage(4, 9)
+DrawToImage(sheet)
+Lock()
+PutPixel(0, 0, 40, 0, 0)    // frame 0  (col 0, row 0)
+PutPixel(2, 0, 0, 40, 0)    // frame 1  (col 1, row 0)
+PutPixel(0, 3, 0, 0, 40)    // frame 2  (col 0, row 1)
+PutPixel(2, 3, 40, 40, 0)   // frame 3  (col 1, row 1)
+PutPixel(0, 6, 40, 0, 40)   // frame 4  (col 0, row 2)
+PutPixel(2, 6, 0, 40, 40)   // frame 5  (col 1, row 2)
+Unlock()
+SaveImage(sheet, "fd036_sheet.bmp", 0)
+DeleteImage(sheet)
+
+Dim anim As Image
+anim = LoadAnimImage("fd036_sheet.bmp", 2, 3, 0, 6)
+If anim = Null Then Print "load_FAILED"
+
+Dim target As Image
+target = MakeImage(8, 8)
+DrawToImage(target)
+
+// Frames 0/1 are always correct (row 0); 2..5 distinguish the fix from the bug.
+DrawImage(anim, 0.0, 0.0, 0)
+If GetPixel(target, 0, 0) = GetPixel(anim, 0, 0) Then Print "frame0_ok"
+DrawImage(anim, 0.0, 0.0, 1)
+If GetPixel(target, 0, 0) = GetPixel(anim, 2, 0) Then Print "frame1_ok"
+DrawImage(anim, 0.0, 0.0, 2)
+If GetPixel(target, 0, 0) = GetPixel(anim, 0, 3) Then Print "frame2_ok"
+DrawImage(anim, 0.0, 0.0, 3)
+If GetPixel(target, 0, 0) = GetPixel(anim, 2, 3) Then Print "frame3_ok"
+DrawImage(anim, 0.0, 0.0, 4)
+If GetPixel(target, 0, 0) = GetPixel(anim, 0, 6) Then Print "frame4_ok"
+DrawImage(anim, 0.0, 0.0, 5)
+If GetPixel(target, 0, 0) = GetPixel(anim, 2, 6) Then Print "frame5_ok"
+
+// 5-arg DrawImage: useMask is accepted but ignored (still draws frame 3).
+DrawImage(anim, 0.0, 0.0, 3, 1)
+If GetPixel(target, 0, 0) = GetPixel(anim, 2, 3) Then Print "drawimage_usemask_ok"
+
+// DrawGhostImage frame variant: alpha 100 = fully opaque -> exact frame color.
+DrawGhostImage(anim, 0.0, 0.0, 2, 100.0)
+If GetPixel(target, 0, 0) = GetPixel(anim, 0, 3) Then Print "ghost_frame_ok"
+
+// DrawImageBox frame variant: copy frame 5's whole 2x3 cell to (0,0).
+DrawImageBox(anim, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 5)
+If GetPixel(target, 0, 0) = GetPixel(anim, 2, 6) Then Print "box_frame_ok"
+
+// Single-frame fallback: the frame arg is ignored on a non-anim image.
+Dim solo As Image
+solo = MakeImage(2, 2)
+DrawToImage(solo)
+Lock()
+PutPixel(0, 0, 70, 80, 90)
+Unlock()
+DrawToImage(target)
+DrawImage(solo, 0.0, 0.0, 5)
+If GetPixel(target, 0, 0) = GetPixel(solo, 0, 0) Then Print "single_frame_ok"
+
+// MakeImage(w, h, frameCount): frameCount popped and ignored -> single-frame.
+Dim mk As Image
+mk = MakeImage(4, 4, 3)
+DrawToImage(mk)
+Lock()
+PutPixel(0, 0, 12, 34, 56)
+Unlock()
+DrawToImage(target)
+DrawImage(mk, 0.0, 0.0, 2)
+If GetPixel(target, 0, 0) = GetPixel(mk, 0, 0) Then Print "makeimage_frames_ok"
+
+// HotSpot(-1, -1) centers on a single FRAME (frame_w/2, frame_h/2) = (1, 1),
+// so frame 0 drawn at (5, 5) lands its top-left at (4, 4).
+HotSpot(anim, -1, -1)
+DrawImage(anim, 5.0, 5.0, 0)
+If GetPixel(target, 4, 4) = GetPixel(anim, 0, 0) Then Print "hotspot_frame_center_ok"
+
+DeleteImage(anim)
+DeleteImage(target)
+DeleteImage(solo)
+DeleteImage(mk)
+Print "fd036_done"

@@ -759,8 +759,7 @@ intentionally. Known status and divergences as of the latest runtime work
   bitmaps), `Ellipse`, `CopyBox` (current target only), `PutPixel2`/`GetPixel2`
   (ARGB aliases; the buffer-id arg models only the current target). `ScreenGamma`
   is stored but not applied and `ScreenShot` is a no-op without a window
-  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017,
-  single-frame — multi-frame `LoadAnimImage`/`frame` params deferred):
+  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017):
   `CloneImage`, `ResizeImage`, `RotateImage` (rotated bounding box, centered
   hotspot), `PickImageColor`/`PickImageColor2`, `SaveImage` (`frame` ignored),
   `DrawGhostImage` (alpha 0–100), `DrawImageBox`, `DefaultMask`, `ImagesOverlap`
@@ -769,6 +768,25 @@ intentionally. Known status and divergences as of the latest runtime work
   gained a **hotspot** (default top-left); `HotSpot(img, x, y)` is the per-image
   form (x<0 || y<0 auto-centers) — cbEnchanted's integer-id `0`/`1` default toggle
   has no analogue since `Image` is an opaque handle, not an int id.
+- **Multi-frame sprite sheets** (FD-036, `runtime/cb_gfx.cpp`). `LoadAnimImage`
+  slices an `Image` into `frameW × frameH` cells; the `frame` parameter is honored
+  by `DrawImage`/`DrawGhostImage`/`DrawImageBox` (overloaded per arity — the
+  catalog has no default-arg mechanism). `frame` is 0-based, taken `% framesX`,
+  and **not clamped**; an image with no anim params (`anim_length == 0`) ignores
+  `frame` and draws whole (single-frame fallback). `MakeImage(w, h, frameCount)`
+  accepts but **ignores** `frameCount` (no frame size to slice by → stays
+  single-frame, matching cbEnchanted). The slice math **deliberately fixes**
+  cbEnchanted's row-index/offset bugs (`cbimage.cpp` used `/framesY` and
+  `*frameWidth`, correct only for square single-row sheets); the port uses
+  `row = frame / framesX` and `top = row * frameHeight`. **`useMask` on
+  `DrawImage`/`DrawImageBox` is accepted but ignored** — this port's masking is
+  destructive (`MaskImage` bakes alpha into the single bitmap, leaving no unmasked
+  copy to select between), with a `// TODO(FD-036)` to revisit by storing
+  masked+unmasked bitmaps. `SaveImage`/`ImagesCollide` `frame` args stay inert
+  (matches cbEnchanted). `HotSpot(-1, -1)` centers on a single frame when a frame
+  size is set, else the whole image. `anim_begin`/`startFrame` is stored but never
+  read (parity with cbEnchanted). `LoadAnimImage` shares `MakeImage`'s
+  memory-bitmap fallback so sheets load without a display.
 - **Input** (FD-013 Batch 5, `runtime/cb_input.cpp`). Keyboard
   (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the scancode table are ported 1:1.
   Input advances per frame inside `DrawScreen`. The mouse functions
@@ -797,9 +815,8 @@ intentionally. Known status and divergences as of the latest runtime work
   implementing.
 - **Not yet implemented** in cbcompiler_rs: objects/sprites, collision, camera,
   tile maps, sound, video playback, particles, file I/O, memblocks,
-  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, multi-frame sprite sheets
-  (`LoadAnimImage` and the `frame` params), and the plumbing-heavy System funcs
-  (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
+  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System
+  funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)
 

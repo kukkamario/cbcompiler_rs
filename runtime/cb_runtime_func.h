@@ -178,6 +178,21 @@ int32_t  cb_rt_images_overlap(const CbImage* a, double x1, double y1,
                               const CbImage* b, double x2, double y2);
 int32_t  cb_rt_images_collide(const CbImage* a, double x1, double y1, int32_t frame1,
                               const CbImage* b, double x2, double y2, int32_t frame2);
+/* FD-036 multi-frame sprite sheets. */
+CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w, int32_t frame_h,
+                               int32_t start_frame, int32_t anim_length);
+CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_count);
+void     cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame);
+void     cb_rt_draw_image_frame_mask(const CbImage* img, double x, double y,
+                                     int32_t frame, int32_t use_mask);
+void     cb_rt_draw_ghost_image_frame(const CbImage* img, double x, double y,
+                                      int32_t frame, double alpha);
+void     cb_rt_draw_image_box_frame(const CbImage* img, double sx, double sy,
+                                    double sw, double sh, double tx, double ty,
+                                    int32_t frame);
+void     cb_rt_draw_image_box_frame_mask(const CbImage* img, double sx, double sy,
+                                         double sw, double sh, double tx, double ty,
+                                         int32_t frame, int32_t use_mask);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 int32_t cb_rt_screen_depth(void);

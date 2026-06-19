@@ -54,6 +54,39 @@ fn run_graphics(name: &str) {
     run(name);
 }
 
+/// Like [`run_graphics`], but runs the program in a throwaway working directory.
+/// Fixtures that write files (e.g. `SaveImage` to a relative path) resolve them
+/// against the cwd; isolating it keeps those temp files out of the crate root.
+fn run_graphics_isolated(name: &str) {
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping {name}: SDK-free runtime build has no graphics/input");
+        return;
+    }
+    let dir = fixtures_dir();
+    let cb_path = dir.join(format!("{name}.cb"));
+    let out_path = dir.join(format!("{name}.out"));
+    let expected = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", out_path.display()));
+    let work = tempfile::tempdir().expect("create temp working dir");
+
+    let output = Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&cb_path)
+        .current_dir(work.path())
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf-8");
+
+    let normalise = |s: &str| s.replace("\r\n", "\n");
+    assert_eq!(
+        normalise(&stdout),
+        normalise(&expected),
+        "stdout mismatch for {name}.cb",
+    );
+}
+
 // Type system ------------------------------------------------------------
 
 #[test]
@@ -187,6 +220,13 @@ fn runtime_image_fd017() {
 #[test]
 fn collide_images() {
     run_graphics("collide_images");
+}
+
+#[test]
+fn runtime_image_fd036() {
+    // Writes a sprite sheet via SaveImage and reloads it with LoadAnimImage, so
+    // it needs an isolated working directory.
+    run_graphics_isolated("runtime_image_fd036");
 }
 
 #[test]
