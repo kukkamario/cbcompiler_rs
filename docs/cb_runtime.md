@@ -25,6 +25,8 @@ Throughout this document:
 - Parameters are listed in CB source order (left-to-right as written in code).
 - Many commands have optional trailing parameters; the CoolBasic compiler
   supplies defaults for omitted ones, so the runtime always sees a fixed arity.
+  Where it matters to a CB programmer, the tables note the optional trailing
+  parameters (in `[, …]` brackets) and their compiler-supplied defaults.
 
 ---
 
@@ -73,7 +75,7 @@ radians internally).
 |----------|-----------|---------|-------------|
 | `Int` | `value: Float` | `Integer` | Float→int: rounds to the nearest integer, ties **away from zero** (`10.5 → 11`, `-1.5 → -2`), **not** a straight truncation toward zero |
 | `Int` | `value: String` | `Integer` | Parses a string to an integer (trims whitespace, `stoi`) |
-| `Float` | `value: Integer` | `Float` | Converts a value to a float |
+| `Float` | `value: Integer\|Float\|String` | `Float` | Converts a value to a float; a String is trimmed and parsed (`stof`, `0.0` on failure) |
 | `RoundUp` | `value: Float` | `Integer` | Ceiling (`ceil`) |
 | `RoundDown` | `value: Float` | `Integer` | Floor (`floor`) |
 | `Abs` | `value: Float` | `Float` | Absolute value; preserves type (Int in → Int out, Float in → Float out) |
@@ -88,8 +90,8 @@ radians internally).
 | `GetAngle` | `x1: Float, y1: Float, x2: Float, y2: Float` | `Float` | Angle (degrees, `[0,360)`) from point 1 to point 2; uses `atan2` with inverted Y |
 | `Log` | `value: Float` | `Float` | Natural logarithm (base e) |
 | `Log10` | `value: Float` | `Float` | Base-10 logarithm |
-| `Rnd` | `low: Float, high: Float` | `Float` | Random float between `low` and `high`. If `high < low`, returns `randf() * low` (special-cased, not swapped) |
-| `Rand` | `low: Integer, high: Integer` | `Integer` | Random integer between `low` and `high`. If `high < low`, returns `rand(low)` |
+| `Rnd` | `[low: Float,] high: Float` | `Float` | Random float between `low` and `high` (single-arg `Rnd(high)` ⇒ `0..high`, `low` defaults to 0). If `high < low`, returns `randf() * low` (special-cased, not swapped) |
+| `Rand` | `[low: Integer,] high: Integer` | `Integer` | Random integer between `low` and `high` (single-arg `Rand(high)` ⇒ `0..high`). If `high < low`, returns `rand(low)` |
 | `Randomize` | `seed: Integer` | — | Seeds the random number generator |
 | `Min` | `a: Float, b: Float` | `Float` | Smaller of two values (also `Integer` overload) |
 | `Max` | `a: Float, b: Float` | `Float` | Larger of two values (also `Integer` overload) |
@@ -110,9 +112,9 @@ String positions are **1-based** (CoolBasic convention).
 | `Str` | `value: Integer` | `String` | Integer→string (also `Float`/`String` overloads; a String passes through) |
 | `Left` | `s: String, n: Integer` | `String` | Leftmost `n` characters |
 | `Right` | `s: String, n: Integer` | `String` | Rightmost `n` characters (`n ≥ 0`; clamps to full string) |
-| `Mid` | `s: String, pos: Integer, len: Integer` | `String` | `len` characters starting at `pos` (1-based; `pos > 0`) |
+| `Mid` | `s: String, pos: Integer [, len: Integer]` | `String` | `len` characters starting at `pos` (1-based; `pos > 0`); omit `len` to read to the end of the string |
 | `Replace` | `s: String, find: String, repl: String` | `String` | Replaces **all** occurrences of `find`; empty `find` returns `s` unchanged |
-| `InStr` | `s: String, find: String, start: Integer` | `Integer` | 1-based position of `find` at or after `start`; `0` if not found |
+| `InStr` | `s: String, find: String [, start: Integer]` | `Integer` | 1-based position of `find` at or after `start` (default `start` = 1); `0` if not found |
 | `Upper` | `s: String` | `String` | Uppercase |
 | `Lower` | `s: String` | `String` | Lowercase |
 | `Trim` | `s: String` | `String` | Removes leading and trailing whitespace |
@@ -148,15 +150,15 @@ String positions are **1-based** (CoolBasic convention).
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `Timer` | — | `Integer` | Milliseconds, monotonic; suitable for measuring elapsed time |
+| `Timer` | — | `Integer` | Milliseconds since system boot (uptime sampled at program start + elapsed); monotonic, suitable for measuring elapsed time |
 | `Wait` | `ms: Integer` | — | Blocks for `ms` milliseconds (`al_rest`) |
-| `Date` | — | `String` | Current date as a formatted string |
+| `Date` | — | `String` | Current date as `D Mon YYYY` (e.g. `9 Jun 2026`; non-zero-padded day, 3-letter English month) |
 | `Time` | — | `String` | Current time as `HH:MM:SS` |
 | `CommandLine` | — | `String` | Command-line arguments passed to the program |
 | `GetEXEName` | — | `String` | Absolute path of the running executable |
-| `FPS` | — | `Float` | Current frames-per-second |
+| `FPS` | — | `Integer` | Current frames-per-second |
 | `FrameLimit` | `fps: Integer` | — | Caps the frame rate |
-| `SetWindow` | `title: String, mode: Integer, confirm: String` | — | Sets window title; `mode`: 0=no change, 1=restore, 2=minimize, 3=maximize (Windows). `confirm` is shown if the user tries to close the window |
+| `SetWindow` | `title: String [, mode: Integer] [, confirm: String]` | — | Sets window title; `mode` (optional): 0=no change, 1=restore, 2=minimize, 3=maximize (Windows). Optional `confirm` is shown if the user tries to close the window |
 | `Crc32` | `pathOrMemblock: String\|Integer` | `Integer` | CRC32 of a file (path) or memblock (id) |
 | `Errors` | `enabled: Integer` | — | Enables/disables display of error messages |
 | `MakeError` | `msg: String` | — | Raises a fatal error with `msg` and halts |
@@ -200,9 +202,9 @@ coordinates by `+0.5` for pixel-center alignment.
 |----------|-----------|---------|-------------|
 | `Dot` | `x: Float, y: Float` | — | Draws a single pixel |
 | `Line` | `x1: Float, y1: Float, x2: Float, y2: Float` | — | Draws a line between two points |
-| `Box` | `x: Float, y: Float, w: Float, h: Float, fill: Integer` | — | Rectangle at top-left `(x,y)`; `fill`=0 outline, non-zero filled |
-| `Circle` | `x: Float, y: Float, diameter: Float, fill: Integer` | — | Circle (input is a **diameter**); `fill`=0 outline, non-zero filled |
-| `Ellipse` | `x: Float, y: Float, w: Float, h: Float, fill: Integer` | — | Ellipse (`w`,`h` are full diameters); `fill`=0 outline, non-zero filled |
+| `Box` | `x: Float, y: Float, w: Float, h: Float [, fill: Integer]` | — | Rectangle at top-left `(x,y)`; `fill`=0 outline, non-zero filled (optional, default filled) |
+| `Circle` | `x: Float, y: Float, diameter: Float [, fill: Integer]` | — | Circle (input is a **diameter**); `fill`=0 outline, non-zero filled (optional, default filled) |
+| `Ellipse` | `x: Float, y: Float, w: Float, h: Float [, fill: Integer]` | — | Ellipse (`w`,`h` are full diameters); `fill`=0 outline, non-zero filled (optional, default filled) |
 
 ### Pixel operations
 
@@ -221,7 +223,7 @@ coordinates by `+0.5` for pixel-center alignment.
 | `DrawToImage` | `imageId: Image` | — | Redirects subsequent drawing onto an image's bitmap |
 | `DrawToScreen` | — | — | Redirects subsequent drawing back to the screen |
 | `DrawToWorld` | `drawCommands: Integer, drawImages: Integer, drawText: Integer` | — | Flags controlling whether primitives / images / text render in world (camera) coordinates vs screen coordinates |
-| `CopyBox` | `srcX, srcY, w, h, destX, destY: Float, srcBuf: Integer, destBuf: Integer` | — | Blits a rectangular region between render targets using the current blender |
+| `CopyBox` | `srcX, srcY, w, h, destX, destY: Float, srcBuf: Integer, destBuf: Integer` | — | Copies a rectangular region between render targets as a straight opaque blit (forces a replace blender, bypassing the mask / current blender) |
 | `UpdateGame` | — | — | Runs object update callbacks and advances game objects |
 | `DrawGame` | — | — | Runs draw callbacks and renders game objects to the current target |
 
@@ -236,20 +238,20 @@ are zero-based.
 |----------|-----------|---------|-------------|
 | `LoadImage` | `path: String` | `Image` | Loads an image; applies the default mask/hotspot if enabled; 0 on failure |
 | `LoadAnimImage` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer` | `Image` | Loads a sprite sheet sliced into `frameW × frameH` frames |
-| `MakeImage` | `w: Integer, h: Integer, frameCount: Integer` | `Image` | Creates a blank image (optionally multi-frame) |
+| `MakeImage` | `w: Integer, h: Integer [, frameCount: Integer]` | `Image` | Creates a blank image; omit `frameCount` for a single frame |
 | `CloneImage` | `img: Image` | `Image` | Copies an image and all properties |
 | `ImageWidth` | `img: Image` | `Integer` | Image width (px) |
 | `ImageHeight` | `img: Image` | `Integer` | Image height (px) |
 | `DrawImage` | `img: Image, x: Float, y: Float, frame: Integer, useMask: Integer` | — | Draws a frame at `(x,y)`; `useMask` skips transparent pixels; honors `DrawToWorld` |
 | `DrawGhostImage` | `img: Image, x: Float, y: Float, frame: Integer, alpha: Float` | — | Draws with alpha 0–100 (0=transparent, 100=opaque) |
-| `DrawImageBox` | `img: Image, srcX: Float, srcY: Float, srcW: Float, srcH: Float, dstX: Float, dstY: Float, frame: Integer, useMask: Integer` | — | Draws a source sub-rectangle scaled to a destination size |
+| `DrawImageBox` | `img: Image, dstX: Float, dstY: Float, srcX: Float, srcY: Float, w: Float, h: Float, frame: Integer, useMask: Integer` | — | Copies the `w`×`h` source sub-rectangle at `(srcX,srcY)` of `img` to `(dstX,dstY)` on the current target — a 1:1 copy, **no scaling**; honors `useMask`/`frame` and `DrawToWorld` |
 | `MaskImage` | `img: Image, r: Integer, g: Integer, b: Integer` | — | Sets the per-image transparent color key |
 | `DefaultMask` | `enabled: Integer, r: Integer, g: Integer, b: Integer` | — | Sets the default mask color applied to future images |
-| `HotSpot` | `id: Integer, x: Integer, y: Integer` | — | Sets rotation/scale origin: `id`=0 disable, 1 set default for future images, `>1` set for that image; `-1` auto-centers |
+| `HotSpot` | `id: Integer, x: Integer, y: Integer` | — | Sets rotation/scale origin: `id`=0 disable default, 1 store default `(x,y)` for future images, `>1` set hotspot of that image handle. Passing a negative `x` or `y` centers the hotspot on the frame/image |
 | `ResizeImage` | `img: Image, w: Integer, h: Integer` | — | Resizes an image |
 | `RotateImage` | `img: Image, angle: Float` | — | Rotates the image bitmap (degrees, clockwise) |
 | `PickImageColor` | `img: Image, x: Integer, y: Integer` | — | Reads a pixel from an image and makes it the draw color (`PickImageColor2` alias) |
-| `SaveImage` | `img: Image, path: String, frame: Integer` | — | Writes an image (or one frame) to disk |
+| `SaveImage` | `img: Image, path: String [, frame: Integer]` | — | Writes the whole image to disk (the extension picks the format); `frame` is accepted but **ignored** in cbEnchanted |
 | `DeleteImage` | `img: Image` | — | Frees an image |
 | `ImagesOverlap` | `img1: Image, x1: Float, y1: Float, img2: Image, x2: Float, y2: Float` | `Integer` | Axis-aligned bounding-box test between two placed images |
 | `ImagesCollide` | `img1: Image, x1: Float, y1: Float, frame1: Integer, img2: Image, x2: Float, y2: Float, frame2: Integer` | `Integer` | Pixel-precise collision test between two placed image frames |
@@ -264,15 +266,15 @@ drawing commands.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `Print` | `s: String` | — | Writes `s` + newline to stdout (UTF-8; CP-1252 on Windows) |
+| `Print` | `[s: String]` | — | Writes `s` + newline to stdout (UTF-8; CP-1252 on Windows); omit `s` for a blank line. Accepts Integer/Float/String |
 | `Write` | `s: String` | — | Writes `s` to stdout without a newline |
 | `Locate` | `x: Integer, y: Integer` | — | Sets the on-screen text cursor for `AddText` |
 | `AddText` | `s: String` | — | Queues on-screen text at the cursor (current font/color), advancing one line |
 | `ClearText` | — | — | Clears all queued on-screen text and resets the cursor |
 | `Text` | `x: Float, y: Float, s: String` | — | Draws text immediately at `(x,y)` in the current font/color; honors `DrawToWorld` |
-| `CenterText` | `x: Integer, y: Integer, s: String, style: Integer` | — | Centered text; `style`: 0=horizontal, 1=vertical, 2=both |
+| `CenterText` | `x: Integer, y: Integer, s: String [, style: Integer]` | — | Centered text; `style` (optional, default 0): 0=horizontal, 1=vertical, 2=both |
 | `VerticalText` | `x: Integer, y: Integer, s: String` | — | Draws text one character per line, top-to-bottom |
-| `LoadFont` | `name: String, size: Integer, bold: Integer, italic: Integer, underline: Integer` | `Font` | Loads a TrueType font by family name or file path; honors `Smooth2D`; 0 on failure |
+| `LoadFont` | `name: String [, size: Integer] [, bold: Integer] [, italic: Integer] [, underline: Integer]` | `Font` | Loads a TrueType font by family name or file path; honors `Smooth2D`; 0 on failure. Optional `size` (default 13), `bold`/`italic`/`underline` (default off) |
 | `SetFont` | `font: Font` | — | Sets the current font |
 | `DeleteFont` | `font: Font` | — | Frees a font |
 | `TextWidth` | `s: String` | `Integer` | Pixel width of `s` in the current font |
@@ -312,9 +314,9 @@ CoolBasic `…Animation` commands play a video file (single active video).
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `MakeEmitter` | `img: Image, lifeTime: Integer` | `Emitter` | Creates a particle emitter using `img` as the particle sprite; `lifeTime` in ms |
-| `ParticleEmission` | `emitter: Emitter, density: Float, count: Float, spread: Float` | — | Emission rate (per frame), particles per emission, and angular spread (degrees) |
-| `ParticleMovement` | `emitter: Emitter, speed: Float, gravity: Float, acceleration: Float` | — | Initial speed, gravity, and per-frame acceleration |
+| `MakeEmitter` | `img: Image, lifeTime: Integer` | `Emitter` | Creates a particle emitter using `img` as the particle sprite; `lifeTime` is the particle lifetime in **frames** (update cycles), decremented once per update |
+| `ParticleEmission` | `emitter: Emitter, density: Float, count: Float, spread: Float` | — | `density` = spawn **interval** in update cycles (smaller = denser; a batch spawns whenever an internal per-frame counter exceeds `density`), `count` = particles per batch, `spread` = angular half-spread (degrees) |
+| `ParticleMovement` | `emitter: Emitter, speed: Float, gravity: Float, acceleration: Float` | — | Initial speed, gravity (subtracted from vertical velocity each update), and `acceleration` = **per-frame velocity multiplier** (default 1; `<1` decelerates, `>1` accelerates) |
 | `ParticleAnimation` | `emitter: Emitter, frameCount: Integer` | — | Frame cycling for animated particle images |
 
 ---
@@ -330,22 +332,22 @@ space unless noted.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `LoadObject` | `path: String, rotation: Float` | `Object` | Loads a single-frame image as an object |
-| `LoadAnimObject` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer, rotation: Float` | `Object` | Loads a sprite-sheet object |
+| `LoadObject` | `path: String [, rotQuality: Integer]` | `Object` | Loads a single-frame image as an object. `rotQuality` (1–360, default 1) = facing-direction count; cbEnchanted accepts but ignores it |
+| `LoadAnimObject` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer [, rotQuality: Integer]` | `Object` | Loads a sprite-sheet object. `rotQuality` as in `LoadObject` (accepted but ignored) |
 | `MakeObject` | — | `Object` | Creates an empty (imageless) object |
 | `MakeObjectFloor` | — | `Object` | Creates a floor object (drawn before regular objects) |
-| `CloneObject` | `obj: Object` | `Object` | Copies an object (image, position, orientation, frame) |
+| `CloneObject` | `obj: Object` | `Object` | Copies an object's image, mask, frames, animation, range and visibility; **position and angle reset to 0** (not copied). Map objects can't be cloned |
 | `DeleteObject` | `obj: Object` | — | Deletes an object and clears its collisions |
-| `ClearObjects` | — | — | Deletes all non-map objects |
+| `ClearObjects` | — | — | Deletes all objects and the tilemap (map freed via `DeleteTileMap`; the object registry is fully cleared) |
 
 ### Position & movement
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `PositionObject` | `obj: Object, x: Float, y: Float` | — | Sets absolute world position |
+| `PositionObject` | `obj: Object, x: Float, y: Float [, z: Float]` | — | Sets absolute world position (`z` accepted but ignored) |
 | `ScreenPositionObject` | `obj: Object, sx: Float, sy: Float` | — | Sets position from screen coords (converted via camera) |
-| `MoveObject` | `obj: Object, forward: Float, side: Float` | — | Moves relative to the object's facing angle |
-| `TranslateObject` | `obj: Object, dx: Float, dy: Float` | — | Moves by an absolute world delta |
+| `MoveObject` | `obj: Object, forward: Float, side: Float [, z: Float]` | — | Moves relative to the object's facing angle (`z` accepted but ignored) |
+| `TranslateObject` | `obj: Object, dx: Float, dy: Float [, dz: Float]` | — | Moves by an absolute world delta (`dz` forwarded to the object's depth) |
 | `CloneObjectPosition` | `dst: Object, src: Object` | — | Copies `src`'s position to `dst` |
 | `ObjectX` | `obj: Object` | `Float` | World X of the object center |
 | `ObjectY` | `obj: Object` | `Float` | World Y of the object center |
@@ -369,7 +371,7 @@ space unless noted.
 | `PaintObject` | `obj: Object, source: Integer` | — | Replaces the object's image; positive id = another object's image, negative = `-imageId` |
 | `MaskObject` | `obj: Object, r: Integer, g: Integer, b: Integer` | — | Sets a transparent color key |
 | `GhostObject` | `obj: Object, alpha: Float` | — | Sets alpha 0–100 (clamped) |
-| `MirrorObject` | `obj: Object, direction: Integer` | — | Mirrors the image: 0=none, 1=horizontal, 2=vertical |
+| `MirrorObject` | `obj: Object, direction: Integer` | — | Mirrors the image: 0=horizontal, 1=vertical, 2=both (regular objects only) |
 | `ShowObject` | `obj: Object, visible: Integer` | — | Shows/hides (hidden objects still update & collide) |
 | `DefaultVisible` | `visible: Integer` | — | Default visibility for newly created objects |
 | `ObjectOrder` | `obj: Object, direction: Integer` | — | Draw order: −1 = to back, 1 = to front |
@@ -380,8 +382,8 @@ space unless noted.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `PlayObject` | `obj: Object, startFrame: Integer, endFrame: Integer, speed: Float, continuous: Integer` | — | Plays frames once; `endFrame = -1` stops and resets |
-| `LoopObject` | `obj: Object, startFrame: Integer, endFrame: Integer, speed: Float, continuous: Integer` | — | Loops the frame range continuously |
+| `PlayObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Plays frames once (optional args; `speed` default 0.1, `continuous` default off); `endFrame = -1` stops and resets |
+| `LoopObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Loops the frame range continuously (optional args; `speed` default 0.1) |
 | `StopObject` | `obj: Object` | — | Stops animation, keeping the current frame |
 | `ObjectPlaying` | `obj: Object` | `Integer` | 1 if an animation is playing |
 | `ObjectFrame` | `obj: Object` | `Float` | Current frame index (may be fractional) |
@@ -393,7 +395,7 @@ space unless noted.
 | `ObjectInteger` | `obj: Object [, value: Integer]` | `Integer` / — | Get/set a per-object integer slot |
 | `ObjectFloat` | `obj: Object [, value: Float]` | `Float` / — | Get/set a per-object float slot |
 | `ObjectString` | `obj: Object [, value: String]` | `String` / — | Get/set a per-object string slot |
-| `ObjectLife` | `obj: Object [, ms: Integer]` | `Integer` / — | Get/set object lifetime (ms); auto-deletes at 0 |
+| `ObjectLife` | `obj: Object [, frames: Integer]` | `Integer` / — | Get/set object lifetime in **drawn frames**; decremented once per DrawScreen, auto-deletes at 0 |
 
 ### Collision
 
@@ -406,11 +408,11 @@ See the [collision model](#collision-model) note for types and handling modes.
 | `ResetObjectCollision` | `obj: Object` | — | Clears recorded collisions for the object this frame |
 | `ClearCollisions` | — | — | Removes all collision checks |
 | `CountCollisions` | `obj: Object` | `Integer` | Number of collisions recorded this frame |
-| `GetCollision` | `obj: Object, index: Integer` | `Object` | Colliding object by 0-based index (0 if none) |
+| `GetCollision` | `obj: Object, index: Integer` | `Object` | Colliding object by **1-based** index (1..`CountCollisions`; 0 if none) |
 | `CollisionX` | `obj: Object, index: Integer` | `Float` | Contact X of a collision |
 | `CollisionY` | `obj: Object, index: Integer` | `Float` | Contact Y of a collision |
 | `CollisionAngle` | `obj: Object, index: Integer` | `Float` | Contact normal angle (degrees) |
-| `ObjectsOverlap` | `a: Object, b: Object, type: Integer` | `Integer` | One-shot overlap test: 1=box, 2=circle, 3=pixel (pixel not yet implemented) |
+| `ObjectsOverlap` | `a: Object, b: Object [, type: Integer]` | `Integer` | One-shot overlap test; `type` (optional, default 1): 1=box, 2=circle, 3=pixel (pixel not yet implemented) |
 
 ### Picking & line of sight
 
@@ -418,6 +420,7 @@ See the [collision model](#collision-model) note for types and handling modes.
 |----------|-----------|---------|-------------|
 | `ObjectPickable` | `obj: Object, style: Integer` | — | Marks pickable: 0=off, 1=box, 2=circle, 3=pixel (pixel partial) |
 | `ObjectPick` | `picker: Object` | — | Raycasts from `picker` along its facing angle; stores the nearest hit |
+| `PixelPick` | `picker: Object [, accuracy: Integer]` | — | Pixel-perfect pick from inside `picker` along its facing angle (needs `ObjectPickable obj, 3`). **Registered but a no-op stub in cbEnchanted** |
 | `PickedObject` | — | `Object` | Object hit by the last `ObjectPick` (0 if none) |
 | `PickedX` | — | `Float` | World X of the last pick hit |
 | `PickedY` | — | `Float` | World Y of the last pick hit |
@@ -460,7 +463,8 @@ screen Y.
 ## Tile Maps
 
 A `Map` is a tile grid with up to 4 layers: 0=background, 1=foreground,
-2=collision (always active), 3=unused. Tiles are referenced by **1-based** id in
+2=collision (always active), 3=data (per-tile integers, e.g. triggers/terrain;
+readable/writable via GetMap/GetMap2/EditMap but never drawn). Tiles are referenced by **1-based** id in
 game code (0 = empty). Only one map is active at a time.
 
 | Function | Parameters | Returns | Description |
@@ -469,11 +473,11 @@ game code (0 = empty). Only one map is active at a time.
 | `MakeMap` | `wTiles: Integer, hTiles: Integer, tileW: Integer, tileH: Integer` | `Map` | Creates an empty tilemap; replaces any existing map |
 | `MapWidth` | — | `Integer` | Map width in tiles |
 | `MapHeight` | — | `Integer` | Map height in tiles |
-| `GetMap` | `layer: Integer, tx: Integer, ty: Integer` | `Integer` | Tile id at grid position (1-based; 0 if out of bounds) |
-| `GetMap2` | `layer: Integer, wx: Float, wy: Float` | `Integer` | Tile id at world coordinates |
-| `EditMap` | `layer: Integer, tx: Integer, ty: Integer, tile: Integer` | — | Sets a tile at a 1-based grid position (out-of-bounds ignored) |
+| `GetMap` | `layer: Integer, x: Float, y: Float` | `Integer` | Tile id at world coordinates (0 if out of bounds) |
+| `GetMap2` | `layer: Integer, tx: Integer, ty: Integer` | `Integer` | Tile id at grid position (1-based; 0 if out of bounds) |
+| `EditMap` | `map: Map, layer: Integer, tx: Integer, ty: Integer, tile: Integer` | — | Sets a tile at a 1-based grid position (out-of-bounds ignored). `map` is popped but ignored — the single active map is edited |
 | `SetMap` | `backLayer: Integer, overLayer: Integer` | — | Toggles visibility of the background (0) and foreground (1) layers |
-| `SetTile` | `tile: Integer, animLength: Integer, animSlowness: Integer` | — | Configures per-tile animation (frame count + slowness) |
+| `SetTile` | `tile: Integer, animLength: Integer [, animSlowness: Integer]` | — | Configures per-tile animation (frame count + slowness; `animSlowness` default 1) |
 
 ---
 
@@ -499,7 +503,7 @@ went down this frame (edge), `Released` = went up this frame (edge), `Up` = idle
 | `GetKey` | — | `Integer` | Next queued character code (CP-1252), or 0 |
 | `WaitKey` | — | `Integer` / — | Blocks until a key is pressed; function form returns the scancode |
 | `ClearKeys` | — | — | Clears key states; ignores keyboard events until the next frame |
-| `EscapeKey` | — | `Integer` | 1 if Escape is held (level) |
+| `EscapeKey` | — | `Integer` | 1 if Escape is held (level). Only observable when `SafeExit` is OFF — with the default `SafeExit` ON, Escape stops the program before its held state is recorded |
 | `LeftKey` / `RightKey` / `UpKey` / `DownKey` | — | `Integer` | 1 if the arrow key is held (level) |
 
 ### Mouse
@@ -529,9 +533,9 @@ Buttons are 1-based: **1=left, 2=right, 3=middle**, 4+ extra.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `Input` | `prompt: String, mask: String` | `String` | Interactive on-screen text entry; `mask` replaces typed characters (e.g. `"*"`) |
+| `Input` | `prompt: String [, mask: String]` | `String` | Interactive on-screen text entry; optional `mask` replaces typed characters (e.g. `"*"`; default off) |
 | `CloseInput` | — | — | Destroys the active input field |
-| `SafeExit` | `flag: Integer` | — | When enabled, pressing Escape triggers a confirmed exit instead of acting as a normal key (`SAFEEXIT` in source) |
+| `SafeExit` | `flag: Integer` | — | Enabled by default; when on, pressing Escape stops the program immediately instead of acting as a normal key. When off, Escape is readable via `EscapeKey` (`SAFEEXIT` in source) |
 
 ### Scancode table
 
@@ -646,7 +650,7 @@ Instances of a `Type ... EndType` form a per-type linked list.
 | `Last` | `type: Type` | `TypeMember` | Last instance (or null) |
 | `After` | `member: TypeMember` | `TypeMember` | Next instance (or null) |
 | `Before` | `member: TypeMember` | `TypeMember` | Previous instance (or null) |
-| `Insert` | `member: TypeMember, target: TypeMember` | — | Moves/inserts `member` before `target` in the list |
+| `Insert` | `member: TypeMember, target: TypeMember` | — | Moves `member` to sit **after** `target` in the list (special case: if `target` is the first member, `member` becomes the new first member) |
 | `Delete` | `member: TypeMember` | — | Removes an instance from the list and frees it |
 | `ConvertToInteger` | `member: TypeMember` | `Integer` | Stable integer id for a type pointer (so it can live in integer arrays) |
 | `ConvertToType` | `id: Integer` | `TypeMember` | Recovers the type pointer from a `ConvertToInteger` id |
@@ -657,7 +661,7 @@ Instances of a `Type ... EndType` form a per-type linked list.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `SortArray` | `arr: Integer[]` | — | Sorts a 1D array in ascending order |
+| `SortArray` | `arr: Integer[]` | — | Sorts a 1D array in ascending order. **Not present in cbEnchanted** (original CoolBasic only) |
 
 > `Dim`, `ReDim`, and `ClearArray` are language constructs handled by the
 > compiler/bytecode rather than runtime library calls.
@@ -670,8 +674,8 @@ Instances of a `Type ... EndType` form a per-type linked list.
 |----------|-----------|---------|-------------|
 | `Read` | — | `Integer`\|`Float`\|`String` | Reads the next value from `DATA` statements; type matches the data |
 | `Restore` | `label` | — | Resets the `DATA` read pointer to a label |
-| `Encrypt` | `src: String\|Integer, dst: String\|Integer, password: String` | — | XOR-encrypts a file or memblock with a repeating password |
-| `Decrypt` | `src: String\|Integer, dst: String\|Integer, password: String` | — | Inverse of `Encrypt` |
+| `Encrypt` | `src: String\|Integer, dst: String\|Integer, password: String` | — | Byte-adds a repeating password to each byte of a file or memblock (additive cipher, not XOR) |
+| `Decrypt` | `src: String\|Integer, dst: String\|Integer, password: String` | — | Inverse of `Encrypt` (subtracts the repeating password from each byte) |
 | `CallDLL` | `dll: String, func: String, memIn: Memblock, memOut: Memblock` | — | Loads a DLL (cached) and calls `func`, passing in/out memblocks (Windows) |
 | `SaveProgram` | — | — | **Stub** — not implemented |
 | `LoadProgram` | — | — | **Stub** — not implemented |
@@ -700,7 +704,8 @@ Instances of a `Type ... EndType` form a per-type linked list.
   (declared, not fully implemented).
 - **Handling**: 0 = report only, 1 = stop (circle only), 2 = slide.
 - Each recorded collision exposes the other object, a contact point `(X, Y)`, and
-  a contact angle, queried via `CountCollisions`/`GetCollision`/`CollisionX/Y/Angle`.
+  a contact angle, queried via `CountCollisions`/`GetCollision`/`CollisionX/Y/Angle`
+  using **1-based** indices (1..`CountCollisions`).
 
 ---
 
@@ -730,7 +735,10 @@ intentionally. Known status and divergences as of the latest runtime work
   rounds to the **nearest integer, ties away from zero** (`f64::round`, so
   `10.5 → 11` and `-1.5 → -2`), and `Int(String)` trims then parses a leading
   integer — both via the interpreter's `convert_value` (so explicit `Int()` and
-  implicit Float→Int coercion agree).
+  implicit Float→Int coercion agree). **Known divergence from cbEnchanted:**
+  cbEnchanted's `Int(Float)` adds `0.5` then truncates toward zero (`-1.5 → -1`,
+  and quirkily `-1.4 → 0`); cbcompiler_rs's `f64::round` (ties away from zero) is
+  *not* bug-for-bug identical here — an intentional divergence, not parity.
 - **System / Time.** `Timer` returns monotonic ms since first call
   (`std::chrono::steady_clock`; the legacy used CPU-time `clock()`). `Wait(ms)`
   sleeps (`ms <= 0` is a no-op). `End` is a language statement lowered to an IR
