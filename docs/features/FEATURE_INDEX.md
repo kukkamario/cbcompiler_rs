@@ -10,7 +10,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-036](FD-036_RUNTIME_GAME_OBJECTS.md) | Game-Object Runtime Cluster (Multi-frame Images, Camera, Tile Maps, Objects, Game Loop) | Open | High (phased) | Medium |
+| [FD-036](FD-036_RUNTIME_GAME_OBJECTS.md) | Game-Object Runtime Cluster (Multi-frame Images, Camera, Tile Maps, Objects, Game Loop) | In Progress (Phase 1/5) | High (phased) | Medium |
 
 ## Completed
 

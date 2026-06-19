@@ -1,6 +1,6 @@
 # FD-036: Game-Object Runtime Cluster — Multi-frame Images, Camera, Tile Maps, Objects & Game Loop
 
-**Status:** Open
+**Status:** In Progress (Phase 1 of 5 complete)
 **Priority:** Medium
 **Effort:** High (> 4 hours; multi-PR — landed phase by phase)
 **Impact:** Brings CoolBasic's central game-programming abstractions online — multi-frame sprites, the camera, tile maps, sprite **Objects**, collision, and the `UpdateGame`/`DrawGame` loop — unlocking the bulk of idiomatic CoolBasic game code.
@@ -43,8 +43,18 @@ Follow the established **FD-013/FD-017 runtime recipe** per function: prototype 
 
 Each phase is **one logical PR**:
 
-### Phase 1 — Multi-frame sprite sheets (extend `Image`)
+### Phase 1 — Multi-frame sprite sheets (extend `Image`) ✅ DONE (commit `0874022`)
 Slicing + `frame`-param plumbing on the existing `Image` type (`runtime/cb_gfx.cpp`): `LoadAnimImage`, `MakeImage(w,h,frameCount)`, and the deferred `frame` arguments on `DrawImage`/`DrawGhostImage`/`DrawImageBox`/`ImagesCollide`/`SaveImage`. No new opaque type. Foundation for object animation.
+
+**Landed:** `CbImage` gained `frame_w/frame_h/anim_begin/anim_length`; a slice helper, `cb_rt_load_anim_image` (with MakeImage's headless memory-bitmap fallback), `cb_rt_make_image_frames` (frameCount popped+ignored), and `frame` overloads for `DrawImage`/`DrawGhostImage`/`DrawImageBox` (one `CB_FN` per arity). `HotSpot(-1,-1)` frame-centers; `CloneImage` copies frame metadata. Graphics-gated golden fixture `runtime_image_fd036` (build sheet → `SaveImage` → `LoadAnimImage` → `DrawImage(frame)` → `GetPixel`, run in an isolated temp cwd) + `cb-runtime-sys` overload-arity assertions. `cb_runtime.md` updated.
+
+**Decisions resolved during impl:**
+- **Slice bugs #1/#2 → fixed** (not replicated): `row = frame/framesX`, `top = row*frameHeight` (cbEnchanted used `/framesY`, `*frameWidth`). The fixture's multi-row non-square layout pins the fix (verified it fails under the buggy math).
+- **`useMask` on `DrawImage`/`DrawImageBox` → accepted but ignored**, with a `// TODO(FD-036)` to revisit — this port's masking is destructive (single bitmap, no unmasked copy to select). `SaveImage`/`ImagesCollide` `frame` args stay inert (matches cbEnchanted).
+
+**Follow-ups noted (not blocking):**
+- Pre-existing `DrawImageBox` arg-order discrepancy: this port's signature is `(srcX, srcY, w, h, dstX, dstY)` vs the documented/cbEnchanted `(dstX, dstY, srcX, srcY, w, h)`. The new `frame` overloads were kept consistent with the existing port order rather than reordering an FD-017 function mid-phase.
+- `cb_rt_load_image` (single-frame `LoadImage`) still lacks the headless memory-bitmap fallback that `LoadAnimImage` now has.
 
 ### Phase 2 — Camera transform core
 New `runtime/cb_camera.{h,cpp}`: `PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`, `TurnCamera`, `CameraX`, `CameraY`, `CameraAngle`, the Allegro world transform (world Y inverted **in the screen↔world wrapper functions, not the matrix** — see *Camera & transform* under Reference-verified behavior), `DrawToWorld` (three independent user-draw flags, **orthogonal** to the always-on object/map world pass), and `MouseWX`/`MouseWY`. **No Object dependency.** The object-referencing camera funcs are deferred to Phase 5.
