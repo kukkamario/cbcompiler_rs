@@ -10,7 +10,7 @@ Opened from the post-FD-018 codebase review (code quality + test coverage). Bund
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features yet |
+| [FD-036](FD-036_RUNTIME_GAME_OBJECTS.md) | Game-Object Runtime Cluster (Multi-frame Images, Camera, Tile Maps, Objects, Game Loop) | Open | High (phased) | Medium |
 
 ## Completed
 
@@ -64,4 +64,12 @@ Low-priority or blocked items. Promote to Active when ready to design.
 
 | FD | Title | Notes |
 |----|-------|-------|
-| - | - | No backlog items yet |
+| - | Sound | Independent runtime subsystem. Do after the FD-036 game cluster. New `Sound`/`Channel` opaque types. Prerequisite for Video. |
+| - | Video Playback | After Sound — video mixes audio through the sound interface. |
+| - | Particle Effects | After the FD-036 game loop — needs multi-frame Images + a per-frame update cadence. New `Emitter` opaque type. |
+| - | File I/O | Independent; trap channel already in place (FD-015). |
+| - | Memory Blocks | Independent runtime subsystem. |
+| - | DATA / `Read` / `Restore` | Compiler-side `DATA` statements + runtime cursor. |
+| - | `Encrypt` / `Decrypt` | Independent utility. |
+| - | Plumbing System funcs | `Crc32`, `SetWindow`, `FrameLimit`, `Errors` — window/loop/error-display plumbing. |
+| - | `CallDLL` | Plugin/FFI; lowest priority. |

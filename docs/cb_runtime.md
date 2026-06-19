@@ -357,7 +357,7 @@ space unless noted.
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `RotateObject` | `obj: Object, angle: Float` | — | Sets absolute rotation (degrees; 0°=right, 90°=down) |
-| `TurnObject` | `obj: Object, speed: Float` | — | Rotates continuously at `speed` degrees per update |
+| `TurnObject` | `obj: Object, speed: Float` | — | Rotates **by** `speed` degrees, **relative** to the current angle (a one-shot delta applied when the command runs — *not* a stored per-frame turn rate) |
 | `PointObject` | `obj: Object, target: Object` | — | Rotates `obj` to face `target` |
 | `CloneObjectOrientation` | `dst: Object, src: Object` | — | Copies `src`'s angle to `dst` |
 | `ObjectAngle` | `obj: Object` | `Float` | Current rotation (degrees) |
@@ -395,7 +395,7 @@ space unless noted.
 | `ObjectInteger` | `obj: Object [, value: Integer]` | `Integer` / — | Get/set a per-object integer slot |
 | `ObjectFloat` | `obj: Object [, value: Float]` | `Float` / — | Get/set a per-object float slot |
 | `ObjectString` | `obj: Object [, value: String]` | `String` / — | Get/set a per-object string slot |
-| `ObjectLife` | `obj: Object [, frames: Integer]` | `Integer` / — | Get/set object lifetime in **drawn frames**; decremented once per DrawScreen, auto-deletes at 0 |
+| `ObjectLife` | `obj: Object [, frames: Integer]` | `Integer` / — | Get/set object lifetime in **update ticks**; decremented once per tick (the implicit `DrawScreen` update, *or* an explicit `UpdateGame`/`DrawGame`), auto-deletes at 0 |
 
 ### Collision
 
