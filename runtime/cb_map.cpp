@@ -62,6 +62,11 @@ namespace {
 // replace it. Process-global is safe: the VM is single-threaded (FD-036).
 CbMap* active_map = nullptr;
 
+// Wall-clock time (al_get_time seconds) of the last tile-animation tick; -1 means
+// unseeded. Re-seeded whenever the map stops so a resume doesn't advance by the
+// whole pause. See cb_map_tick_animation.
+double map_anim_last_time = -1.0;
+
 void replace_active_map(CbMap* m) {
     if (active_map) {
         if (active_map->texture) al_destroy_bitmap(active_map->texture);
@@ -287,26 +292,41 @@ extern "C" const CbMapData* cb_map_active_data(void) {
     return active_map ? &active_map->data : nullptr;
 }
 
-// FD-036 Phase 5: advance animated tiles one update tick. Tiles advance only
-// while the map is "playing" — PlayObject(Map) has set a positive animSpeed
-// (cbEnchanted: animSpeed is the per-tile formula's divisor, 0 before PlayObject
-// so nothing advances). cbEnchanted scales by a wall-clock timestep
-// (cbmap.cpp:373); this port uses a deterministic unit step so headless runs are
-// reproducible: currentFrame += 1/(slowness*animSpeed), wrapping at animLength.
-// The render samples `tile + (int)currentFrame[tile]`, stepping through
-// consecutive tileset ids.
+// FD-036: advance animated map tiles, faithful to cbEnchanted (cbmap.cpp:366-379).
+// Time-based: currentFrame += elapsedSeconds / (slowness * animSpeed), where the
+// elapsed time is the real wall-clock delta since the last tick (al_get_time) —
+// so the animation is frame-rate independent and paces like cbEnchanted (with no
+// FrameLimit the game loop runs unbounded, so a per-tick step would race away).
+// A tile resets to frame 0 once (int)currentFrame *exceeds* animLength, so it
+// cycles tile..tile+animLength — animLength+1 frames (`length` = "following tiles
+// attached"; animLength==1 is a 2-frame tile). The render samples
+// `tile + (int)currentFrame[tile]`. Runs only while playing (animSpeed > 0, set
+// by PlayObject(Map)).
+//
+// (Supersedes the Phase-5 "deterministic frame-step": it was frame-rate-dependent
+// and far too fast, and its wrap never advanced an animLength==1 tile. No headless
+// test exercises tile animation — every fixture asset has animLength==0 — so the
+// determinism it bought was moot.)
 extern "C" void cb_map_tick_animation(void) {
-    if (!active_map || active_map->animSpeed <= 0.0f) return;
+    if (!active_map || active_map->animSpeed <= 0.0f) {
+        map_anim_last_time = -1.0;  // stopped → re-seed the delta on resume
+        return;
+    }
+    double now = al_get_time();
+    if (map_anim_last_time < 0.0) {  // first tick since (re)start: seed, don't jump
+        map_anim_last_time = now;
+        return;
+    }
+    const float timestep = (float)(now - map_anim_last_time);
+    map_anim_last_time = now;
+
     CbMapData& d = active_map->data;
     const float spd = active_map->animSpeed;
     for (uint32_t i = 0; i < d.tileCount; ++i) {
         if (i >= d.animLength.size() || d.animLength[i] <= 0) continue;
-        int32_t slow = (i < d.animSlowness.size() && d.animSlowness[i] > 0)
-                           ? d.animSlowness[i]
-                           : 1;
-        float& cur = d.currentFrame[i];
-        cur += 1.0f / ((float)slow * spd);
-        while (cur >= (float)d.animLength[i]) cur -= (float)d.animLength[i];
+        int32_t slow = (i < d.animSlowness.size()) ? d.animSlowness[i] : 1;
+        d.currentFrame[i] =
+            cb_map_advance_frame(d.currentFrame[i], d.animLength[i], slow, spd, timestep);
     }
 }
 

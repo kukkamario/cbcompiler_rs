@@ -387,7 +387,7 @@ regular objects (background layering). Positions are in world space unless noted
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `PlayObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Plays frames once (optional args; `speed` default 0.1, `continuous` default off); `endFrame = -1` stops and resets |
-| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation. Only `speed` applies (the per-tile `animLength` governs wrapping); tiles do not advance until called. Higher `speed` = slower (it divides the per-tick step, faithful to cbEnchanted); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
+| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation (each animated tile cycles `tile..tile+animLength`, i.e. `animLength+1` frames); only `speed` applies and tiles do not advance until called. Higher `speed` = slower (it divides the elapsed-time step, faithful to cbEnchanted); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
 | `LoopObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Loops the frame range continuously (optional args; `speed` default 0.1) |
 | `StopObject` | `obj: Object` | — | Stops animation, keeping the current frame |
 | `ObjectPlaying` | `obj: Object` | `Integer` | 1 if an animation is playing |

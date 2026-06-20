@@ -281,4 +281,21 @@ inline bool cb_map_ray_cast(const CbMapData& m, double x1, double y1, double x2,
     return false;
 }
 
+// ─── Tile animation advance (FD-036; cbmap.cpp:373-376) ──────────────────────
+// Advance one animated tile's currentFrame by `timestep` seconds. Faithful to
+// cbEnchanted: cur += timestep / (slowness * animSpeed), reset to 0 once
+// (int)cur *exceeds* animLength — so the tile cycles tile..tile+animLength, i.e.
+// animLength+1 frames (animLength==1 is a 2-frame tile). The render samples
+// `tile + (int)cur`. Caller passes animSpeed > 0 and animLength > 0; a
+// non-positive slowness is treated as 1 (matches the tick's guard). Pure, so the
+// frame/wrap math is headless-unit-tested while the wall-clock timestep that
+// feeds it stays in cb_map.cpp.
+inline float cb_map_advance_frame(float cur, int32_t animLength, int32_t slowness,
+                                  float animSpeed, float timestep) {
+    if (slowness <= 0) slowness = 1;
+    cur += timestep / ((float)slowness * animSpeed);
+    if ((int32_t)cur > animLength) cur = 0.0f;
+    return cur;
+}
+
 #endif  // CB_MAP_DATA_H

@@ -233,3 +233,34 @@ TEST(MapCreate, EmptyGrid) {
     cb_map_edit(m, 0, 3, 2, 9);
     EXPECT_EQ(cb_map_get(m, 0, 3, 2), 9);
 }
+
+// FD-036: tile animation advance (cb_map_advance_frame). Regression for the
+// animLength==1 case (a real cdm2.til tile): it is a 2-frame tile (tile, tile+1).
+// cbEnchanted resets to 0 once (int)cur EXCEEDS animLength, so (int)cur ranges
+// 0..animLength. The earlier wrap kept cur in [0, animLength), so an animLength==1
+// tile never left frame 0 — no visible animation. The render reads `tile +
+// (int)cur`, so the integer frame is what matters.
+TEST(MapAnim, AnimLengthOneIsTwoFrames) {
+    const int32_t anim_len = 1, slow = 1;
+    const float speed = 1.0f, dt = 0.6f;  // +0.6 of a frame per tick
+    float cur = 0.0f;
+    EXPECT_EQ((int32_t)cur, 0);
+    cur = cb_map_advance_frame(cur, anim_len, slow, speed, dt);  // 0.6
+    EXPECT_EQ((int32_t)cur, 0);
+    cur = cb_map_advance_frame(cur, anim_len, slow, speed, dt);  // 1.2
+    EXPECT_EQ((int32_t)cur, 1);  // frame 1 IS reached (the old wrap never did)
+    cur = cb_map_advance_frame(cur, anim_len, slow, speed, dt);  // 1.8
+    EXPECT_EQ((int32_t)cur, 1);
+    cur = cb_map_advance_frame(cur, anim_len, slow, speed, dt);  // 2.4 -> reset
+    EXPECT_EQ((int32_t)cur, 0);
+}
+
+// animSpeed and slowness both divide the per-tick step (cbEnchanted: higher
+// speed = slower); reset happens only once (int)cur exceeds animLength.
+TEST(MapAnim, SpeedAndSlownessDivideTheStep) {
+    EXPECT_FLOAT_EQ(cb_map_advance_frame(0.0f, 3, 1, 1.0f, 1.0f), 1.0f);  // base
+    EXPECT_FLOAT_EQ(cb_map_advance_frame(0.0f, 3, 1, 2.0f, 1.0f), 0.5f);  // 2x speed
+    EXPECT_FLOAT_EQ(cb_map_advance_frame(0.0f, 3, 2, 1.0f, 1.0f), 0.5f);  // 2x slow
+    EXPECT_FLOAT_EQ(cb_map_advance_frame(3.5f, 3, 1, 1.0f, 0.4f), 3.9f);  // (int)3, kept
+    EXPECT_FLOAT_EQ(cb_map_advance_frame(3.9f, 3, 1, 1.0f, 0.4f), 0.0f);  // 4.3 -> reset
+}
