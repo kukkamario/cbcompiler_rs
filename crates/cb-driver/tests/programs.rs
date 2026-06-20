@@ -242,6 +242,17 @@ fn runtime_system() {
 }
 
 #[test]
+fn runtime_memblock_fd039() {
+    // Memory blocks are Allegro-free (FD-039), so this runs in BOTH the full and
+    // SDK-free builds — plain `run`, not `run_graphics`. Covers alloc/zero-fill,
+    // unsigned Byte/Short + signed Int + 32-bit Float round-trips, little-endian
+    // byte order, resize preserve/zero-fill, MemCopy, and Null default. The
+    // out-of-bounds trap path is in cli.rs; the C++ edge cases in
+    // runtime/tests/test_memblock.cpp.
+    run("runtime_memblock_fd039");
+}
+
+#[test]
 fn runtime_image() {
     run_graphics("runtime_image");
 }

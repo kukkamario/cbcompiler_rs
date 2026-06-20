@@ -6,9 +6,11 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
-The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, and FD-038 (particle system) completed 2026-06-20. No FDs are currently active — the next item is promoted from the Backlog's post-FD-036 game-subsystem track (Sound → Video, then File I/O / Memblock / DATA / Encrypt / System / `CallDLL`).
+The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, and FD-038 (particle system) completed 2026-06-20. FD-039 (memory blocks) is the next subsystem promoted from the Backlog's post-FD-036 game-subsystem track (remaining: Sound → Video, then File I/O / DATA / Encrypt / System / `CallDLL`).
 
-_(none — all designed FDs are complete)_
+| FD | Title | Status | Effort | Priority |
+|----|-------|--------|--------|----------|
+| [FD-039](FD-039_MEMORY_BLOCK_RUNTIME_FUNCTIONS.md) | Memory Block Runtime Functions | Pending Verification | Medium | Medium |
 
 ## Completed
 
@@ -68,7 +70,6 @@ Low-priority or blocked items. Promote to Active when ready to design.
 | - | Sound | Independent runtime subsystem. Do after the FD-036 game cluster. New `Sound`/`Channel` opaque types. Prerequisite for Video. |
 | - | Video Playback | After Sound — video mixes audio through the sound interface. |
 | - | File I/O | Independent; trap channel already in place (FD-015). |
-| - | Memory Blocks | Independent runtime subsystem. |
 | - | DATA / `Read` / `Restore` | Compiler-side `DATA` statements + runtime cursor. |
 | - | `Encrypt` / `Decrypt` | Independent utility. |
 | - | Plumbing System funcs | `Crc32`, `SetWindow`, `FrameLimit`, `Errors` — window/loop/error-display plumbing. |

@@ -303,6 +303,31 @@ fn particle_command_on_non_emitter_traps() {
         .stderr(contains("not a particle emitter"));
 }
 
+#[cfg(feature = "interp")]
+#[test]
+fn memblock_out_of_bounds_traps() {
+    // FD-039: an out-of-range Peek/Poke traps via the FD-015 channel instead of
+    // corrupting memory (classic CB blind-casts → UB; resolved as: trap). A
+    // 4-byte block can't hold a 4-byte int at offset 2, so PokeInt aborts with
+    // exit 1 and the statement after it does not run. Not graphics-gated —
+    // memory blocks are Allegro-free and present in the SDK-free build too.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "mb_oob.cb",
+        "Dim m As Memblock\nm = MakeMEMBlock(4)\nPrint \"before\"\nPokeInt(m, 2, 123)\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("before"))
+        .stdout(contains("after").not())
+        .stderr(contains("runtime error: PokeInt"))
+        .stderr(contains("out of bounds"));
+}
+
 #[test]
 fn runtime_abs_overload_resolves() {
     let dir = tempdir().unwrap();
