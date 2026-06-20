@@ -54,6 +54,78 @@ fn run_graphics(name: &str) {
     run(name);
 }
 
+/// Like [`run_graphics`], but runs the program in a throwaway working directory.
+/// Fixtures that write files (e.g. `SaveImage` to a relative path) resolve them
+/// against the cwd; isolating it keeps those temp files out of the crate root.
+fn run_graphics_isolated(name: &str) {
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping {name}: SDK-free runtime build has no graphics/input");
+        return;
+    }
+    let dir = fixtures_dir();
+    let cb_path = dir.join(format!("{name}.cb"));
+    let out_path = dir.join(format!("{name}.out"));
+    let expected = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", out_path.display()));
+    let work = tempfile::tempdir().expect("create temp working dir");
+
+    let output = Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&cb_path)
+        .current_dir(work.path())
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf-8");
+
+    let normalise = |s: &str| s.replace("\r\n", "\n");
+    assert_eq!(
+        normalise(&stdout),
+        normalise(&expected),
+        "stdout mismatch for {name}.cb",
+    );
+}
+
+/// Like [`run_graphics_isolated`], but first stages the named committed assets
+/// (from `tests/fixtures/assets/`) into the throwaway cwd, so the program can
+/// load them by bare filename. Used for fixtures that consume real binary assets
+/// (e.g. LoadMap of a CoolBasic `.til` + tileset).
+fn run_graphics_with_assets(name: &str, assets: &[&str]) {
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping {name}: SDK-free runtime build has no graphics/input");
+        return;
+    }
+    let dir = fixtures_dir();
+    let cb_path = dir.join(format!("{name}.cb"));
+    let out_path = dir.join(format!("{name}.out"));
+    let expected = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", out_path.display()));
+    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/assets");
+    let work = tempfile::tempdir().expect("create temp working dir");
+    for asset in assets {
+        std::fs::copy(assets_dir.join(asset), work.path().join(asset))
+            .unwrap_or_else(|e| panic!("stage asset {asset}: {e}"));
+    }
+
+    let output = Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&cb_path)
+        .current_dir(work.path())
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf-8");
+
+    let normalise = |s: &str| s.replace("\r\n", "\n");
+    assert_eq!(
+        normalise(&stdout),
+        normalise(&expected),
+        "stdout mismatch for {name}.cb",
+    );
+}
+
 // Type system ------------------------------------------------------------
 
 #[test]
@@ -187,6 +259,70 @@ fn runtime_image_fd017() {
 #[test]
 fn collide_images() {
     run_graphics("collide_images");
+}
+
+#[test]
+fn runtime_image_fd036() {
+    // Writes a sprite sheet via SaveImage and reloads it with LoadAnimImage, so
+    // it needs an isolated working directory.
+    run_graphics_isolated("runtime_image_fd036");
+}
+
+#[test]
+fn runtime_camera_fd036() {
+    // Asserts deterministic camera state (CameraX/Y/Angle); the world<->screen
+    // affine math is unit-tested headlessly in runtime/tests/test_camera.cpp.
+    run_graphics("runtime_camera_fd036");
+}
+
+#[test]
+fn runtime_map_fd036() {
+    // MakeMap dims + GetMap2/EditMap round-trips, and LoadMap of the real
+    // CoolBasic asset testmap.til + tileset.bmp (byte-verified format). The
+    // world<->tile math is unit-tested headlessly in runtime/tests/test_map.cpp.
+    run_graphics_with_assets("runtime_map_fd036", &["testmap.til", "tileset.bmp"]);
+}
+
+#[test]
+fn runtime_object_fd036() {
+    // MakeObject/Position/Rotate/Turn/slot/life round-trips, GetAngle2/Distance2,
+    // CloneObject pos+angle reset, a built sprite-sheet object (Play/Stop/Loop/
+    // Size/Frame), PaintObject, and InitObjectList/NextObject enumeration. Writes
+    // the sheet via SaveImage, so it needs an isolated working directory. The pure
+    // object math is unit-tested headlessly in runtime/tests/test_object.cpp.
+    run_graphics_isolated("runtime_object_fd036");
+}
+
+#[test]
+fn runtime_collision_fd036() {
+    // ObjectsOverlap (box/circle/pixel-stub/invalid-type), the 1-based collision
+    // query surface, and SetupCollision registration (object-object + the type-4
+    // Map overload). Deterministic state, no display. The persistent per-tick
+    // collision path is covered by runtime_gameloop_fd036 (Phase 5c); the
+    // resolution geometry by runtime/tests/test_collision.cpp.
+    run_graphics("runtime_collision_fd036");
+}
+
+#[test]
+fn runtime_pick_fd036() {
+    // ObjectPick raycast + PickedObject/X/Y/Angle, ObjectSight (map-wall DDA), and
+    // the object-aware camera funcs (PointCamera/CameraFollow/CloneCamera*/
+    // CameraPick/ScreenPositionObject). Deterministic state, no display: the
+    // screen<->world transform uses the 400x300 design size via cb_camera_math.
+    // CameraFollow's per-frame motion is covered by runtime_gameloop_fd036 (5c).
+    run_graphics("runtime_pick_fd036");
+}
+
+#[test]
+fn runtime_gameloop_fd036() {
+    // UpdateGame drives the per-tick advancement: ObjectLife decrement + auto-
+    // delete, animation frame advance, and the persistent SetupCollision checks
+    // (report records-but-doesn't-move; circle slide applies the resolved
+    // position). Builds a sprite sheet via SaveImage, so it needs an isolated cwd.
+    // The UpdateGame/DrawGame/DrawScreen dedup flags need a real display and are a
+    // deferred visual smoke; the per-tick math is unit-tested in test_object.cpp /
+    // test_collision.cpp.
+    run_graphics_isolated("runtime_gameloop_fd036");
 }
 
 #[test]

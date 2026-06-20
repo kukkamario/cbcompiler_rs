@@ -30,6 +30,15 @@ typedef struct CbImage CbImage;
    font; defined in cb_gfx.cpp. Created by LoadFont, freed by DeleteFont. */
 typedef struct CbFont CbFont;
 
+/* Map handle — the CB-visible `Map` opaque type (FD-036 Phase 3). The single
+   active tilemap; defined in cb_map.cpp. Created by LoadMap/MakeMap. */
+typedef struct CbMap CbMap;
+
+/* Object handle — the CB-visible `Object` opaque type (FD-036 Phase 4, tag 13).
+   A 2D sprite; defined in cb_object.cpp. Created by LoadObject/LoadAnimObject/
+   MakeObject/MakeObjectFloor/CloneObject, freed by DeleteObject. */
+typedef struct CbObject CbObject;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -122,6 +131,11 @@ void    cb_rt_screen_depth_mode(int32_t w, int32_t h, int32_t depth, int32_t mod
 int32_t cb_rt_screen_buffer_id(void);
 void    cb_rt_drawscreen(void);
 void    cb_rt_drawscreen_args(int32_t cls, int32_t vsync);
+/* Game loop (FD-036 Phase 5). UpdateGame runs the built-in object update tick;
+   DrawGame updates-if-needed then draws the object pass. Dedup flags suppress the
+   implicit DrawScreen pass for the frame. No user CB callbacks (out of scope). */
+void    cb_rt_update_game(void);
+void    cb_rt_draw_game(void);
 void    cb_rt_cls(void);
 void    cb_rt_cls_color(int32_t r, int32_t g, int32_t b);
 void    cb_rt_cls_color_a(int32_t r, int32_t g, int32_t b, int32_t a);
@@ -178,10 +192,191 @@ int32_t  cb_rt_images_overlap(const CbImage* a, double x1, double y1,
                               const CbImage* b, double x2, double y2);
 int32_t  cb_rt_images_collide(const CbImage* a, double x1, double y1, int32_t frame1,
                               const CbImage* b, double x2, double y2, int32_t frame2);
+/* FD-036 multi-frame sprite sheets. */
+CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w, int32_t frame_h,
+                               int32_t start_frame, int32_t anim_length);
+CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_count);
+void     cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame);
+void     cb_rt_draw_image_frame_mask(const CbImage* img, double x, double y,
+                                     int32_t frame, int32_t use_mask);
+void     cb_rt_draw_ghost_image_frame(const CbImage* img, double x, double y,
+                                      int32_t frame, double alpha);
+void     cb_rt_draw_image_box_frame(const CbImage* img, double sx, double sy,
+                                    double sw, double sh, double tx, double ty,
+                                    int32_t frame);
+void     cb_rt_draw_image_box_frame_mask(const CbImage* img, double sx, double sy,
+                                         double sw, double sh, double tx, double ty,
+                                         int32_t frame, int32_t use_mask);
 int32_t cb_rt_screen_width(void);
 int32_t cb_rt_screen_height(void);
 int32_t cb_rt_screen_depth(void);
 int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
+
+/* Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+   No new opaque type — camera state is process-global. RotateCamera/TurnCamera
+   take two angle args (logical degrees, render degrees) that map to two
+   independent fields (faithful to cbEnchanted's desyncable angles). DrawToWorld
+   toggles world-space rendering of user draws; MouseWX/WY convert the mouse to
+   world coordinates. */
+void    cb_rt_position_camera(double x, double y, double zoom);
+void    cb_rt_move_camera(double forward, double side, double dzoom);
+void    cb_rt_translate_camera(double dx, double dy, double dzoom);
+void    cb_rt_rotate_camera(double logical, double render);
+void    cb_rt_turn_camera(double d_logical, double d_render);
+double  cb_rt_camera_x(void);
+double  cb_rt_camera_y(void);
+double  cb_rt_camera_angle(void);
+void    cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images, int32_t draw_text);
+double  cb_rt_mouse_wx(void);
+double  cb_rt_mouse_wy(void);
+/* Object-aware camera (FD-036 Phase 5; deferred from Phase 2 to break the
+   Camera<->Object cycle). PointCamera/CameraFollow/CloneCameraPosition/
+   CloneCameraOrientation take an Object; CameraPick converts a screen point to
+   world then picks (sets PickedObject). */
+void    cb_rt_point_camera(const CbObject* obj);
+void    cb_rt_camera_follow(const CbObject* obj, int32_t style, double setting);
+void    cb_rt_clone_camera_position(const CbObject* obj);
+void    cb_rt_clone_camera_orientation(const CbObject* obj);
+void    cb_rt_camera_pick(double sx, double sy);
+
+/* Tile maps (cb_map.cpp, FD-036 Phase 3). One active tilemap; `Map` is the
+   opaque CbMap* handle (LoadMap/MakeMap return it, Null on failure). The query/
+   mutate functions operate on the single active map and return 0 / no-op when
+   none is loaded. GetMap2/EditMap take 1-based grid coordinates; GetMap takes
+   world coordinates. EditMap's `map` arg is popped but ignored. SetTile's
+   animSlowness is an optional arg (defaults to 1) — its own arity overload. */
+CbMap*  cb_rt_load_map(const CbString* map_path, const CbString* tileset_path);
+CbMap*  cb_rt_make_map(int32_t w_tiles, int32_t h_tiles, int32_t tile_w, int32_t tile_h);
+int32_t cb_rt_map_width(void);
+int32_t cb_rt_map_height(void);
+int32_t cb_rt_get_map(int32_t layer, double x, double y);
+int32_t cb_rt_get_map2(int32_t layer, int32_t tx, int32_t ty);
+void    cb_rt_edit_map(CbMap* map_ignored, int32_t layer, int32_t tx, int32_t ty, int32_t tile);
+void    cb_rt_set_map(int32_t back_layer, int32_t over_layer);
+void    cb_rt_set_tile(int32_t tile, int32_t anim_length);
+void    cb_rt_set_tile_slow(int32_t tile, int32_t anim_length, int32_t anim_slowness);
+/* PaintObject(map, image): repaints the active tilemap's tileset (cb_map.cpp).
+   The `map` handle is popped but ignored, like EditMap. */
+void    cb_rt_paint_object_map(CbMap* map, const CbImage* img);
+
+/* Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+   CbObject* handle (tag 13); LoadObject/LoadAnimObject/MakeObject/MakeObjectFloor/
+   CloneObject return it (Null on failure). Many funcs are overloaded by arity/
+   type — sema resolves them; each maps to a distinct C symbol below sharing one
+   CB name in catalog.cpp. Documented-but-ignored z/dz/rotQuality args are
+   exposed as per-arity overloads (this port controls emission; the catalog has
+   no default-arg mechanism for runtime funcs). The query funcs return 0 / no-op
+   on a null handle. Angles are degrees, 0° = right. */
+/* Creation / destruction */
+CbObject* cb_rt_load_object(const CbString* path);
+CbObject* cb_rt_load_object_rq(const CbString* path, int32_t rot_quality);
+CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_w, int32_t frame_h,
+                                 int32_t start_frame, int32_t frame_count);
+CbObject* cb_rt_load_anim_object_rq(const CbString* path, int32_t frame_w, int32_t frame_h,
+                                    int32_t start_frame, int32_t frame_count, int32_t rot_quality);
+CbObject* cb_rt_make_object(void);
+CbObject* cb_rt_make_object_floor(void);
+CbObject* cb_rt_clone_object(const CbObject* src);
+void      cb_rt_delete_object(CbObject* o);
+void      cb_rt_clear_objects(void);
+/* Position / movement (z/dz forms ignore the depth arg) */
+void      cb_rt_position_object(CbObject* o, double x, double y);
+void      cb_rt_position_object_z(CbObject* o, double x, double y, double z);
+void      cb_rt_move_object_fwd(CbObject* o, double forward); /* 2-arg: side = 0 */
+void      cb_rt_move_object(CbObject* o, double forward, double side);
+void      cb_rt_move_object_z(CbObject* o, double forward, double side, double z);
+void      cb_rt_translate_object(CbObject* o, double dx, double dy);
+void      cb_rt_translate_object_z(CbObject* o, double dx, double dy, double dz);
+void      cb_rt_clone_object_position(CbObject* dst, const CbObject* src);
+double    cb_rt_object_x(const CbObject* o);
+double    cb_rt_object_y(const CbObject* o);
+/* Rotation / angle */
+void      cb_rt_rotate_object(CbObject* o, double angle);
+void      cb_rt_turn_object(CbObject* o, double speed);
+void      cb_rt_point_object(CbObject* o, const CbObject* target);
+void      cb_rt_clone_object_orientation(CbObject* dst, const CbObject* src);
+double    cb_rt_object_angle(const CbObject* o);
+double    cb_rt_get_angle2(const CbObject* a, const CbObject* b);
+double    cb_rt_distance2(const CbObject* a, const CbObject* b);
+/* Appearance (PaintObject is three type-distinct overloads; the Map form is
+   cb_rt_paint_object_map above) */
+void      cb_rt_paint_object_image(CbObject* o, const CbImage* img);
+void      cb_rt_paint_object_object(CbObject* o, const CbObject* src);
+void      cb_rt_mask_object(CbObject* o, int32_t r, int32_t g, int32_t b);
+void      cb_rt_ghost_object(CbObject* o, double alpha);
+void      cb_rt_mirror_object(CbObject* o, int32_t dir);
+void      cb_rt_show_object(CbObject* o, int32_t visible);
+void      cb_rt_default_visible(int32_t visible);
+void      cb_rt_object_order(CbObject* o, int32_t direction);
+int32_t   cb_rt_object_size_x(const CbObject* o);
+int32_t   cb_rt_object_size_y(const CbObject* o);
+/* Animation (Play/LoopObject: arities 1/3/4/5) */
+void      cb_rt_play_object(CbObject* o);
+void      cb_rt_play_object3(CbObject* o, int32_t start_f, int32_t end_f);
+void      cb_rt_play_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_play_object5(CbObject* o, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+/* PlayObject(Map, ...): Map-handle overloads start the active tilemap's tile
+   animation; the Map first param disambiguates from the Object forms above
+   (defined in cb_map.cpp). Same 1/3/4/5 arity family. */
+void      cb_rt_play_map(CbMap* m);
+void      cb_rt_play_map3(CbMap* m, int32_t start_f, int32_t end_f);
+void      cb_rt_play_map4(CbMap* m, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_play_map5(CbMap* m, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+void      cb_rt_loop_object(CbObject* o);
+void      cb_rt_loop_object3(CbObject* o, int32_t start_f, int32_t end_f);
+void      cb_rt_loop_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_loop_object5(CbObject* o, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+void      cb_rt_stop_object(CbObject* o);
+int32_t   cb_rt_object_playing(const CbObject* o);
+double    cb_rt_object_frame(const CbObject* o);
+/* Custom data slots / life (get and set share one CB name, distinct arity) */
+int32_t   cb_rt_object_integer_get(const CbObject* o);
+void      cb_rt_object_integer_set(CbObject* o, int32_t value);
+double    cb_rt_object_float_get(const CbObject* o);
+void      cb_rt_object_float_set(CbObject* o, double value);
+CbString* cb_rt_object_string_get(const CbObject* o);
+void      cb_rt_object_string_set(CbObject* o, const CbString* value);
+int32_t   cb_rt_object_life_get(const CbObject* o);
+void      cb_rt_object_life_set(CbObject* o, int32_t frames);
+/* Enumeration (single shared cursor; NextObject returns Null at end) */
+void      cb_rt_init_object_list(void);
+CbObject* cb_rt_next_object(void);
+/* Collision (FD-036 Phase 5). SetupCollision registers a PERSISTENT check
+   (re-tested every update tick, not one-shot); the type-4 map overload takes a
+   Map handle (ignored — single active map) only to disambiguate from the object-
+   object form. ObjectRange's range2 is optional (its own arity overload).
+   GetCollision returns an Object handle (Null out of range, or for a map-wall
+   hit — a Map is not an Object); indices are 1-based. ObjectsOverlap is a one-
+   shot test with an optional type (default box). */
+void      cb_rt_setup_collision(CbObject* obj_a, CbObject* obj_b, int32_t type_a, int32_t type_b, int32_t handling);
+void      cb_rt_setup_collision_map(CbObject* obj_a, CbMap* map, int32_t type_a, int32_t type_b, int32_t handling);
+void      cb_rt_object_range(CbObject* o, double range1);
+void      cb_rt_object_range3(CbObject* o, double range1, double range2);
+void      cb_rt_reset_object_collision(CbObject* o);
+void      cb_rt_clear_collisions(void);
+int32_t   cb_rt_count_collisions(const CbObject* o);
+CbObject* cb_rt_get_collision(const CbObject* o, int32_t index);
+double    cb_rt_collision_x(const CbObject* o, int32_t index);
+double    cb_rt_collision_y(const CbObject* o, int32_t index);
+double    cb_rt_collision_angle(const CbObject* o, int32_t index);
+int32_t   cb_rt_objects_overlap(const CbObject* a, const CbObject* b);
+int32_t   cb_rt_objects_overlap3(const CbObject* a, const CbObject* b, int32_t type);
+/* Picking & line of sight (FD-036 Phase 5). ObjectPick raycasts from the picker
+   along its facing; PickedObject returns the nearest hit (Null if none),
+   PickedX/Y/Angle its contact (PickedAngle in degrees from the picked point —
+   bug-fixed vs cbEnchanted's stale radians). PixelPick is a registered no-op stub
+   (1- and 2-arg forms). ObjectSight returns 1 when no map wall blocks the line.
+   ScreenPositionObject moves an object under a screen coordinate. */
+void      cb_rt_object_pickable(CbObject* o, int32_t style);
+void      cb_rt_object_pick(CbObject* picker);
+void      cb_rt_pixel_pick(CbObject* picker);
+void      cb_rt_pixel_pick_acc(CbObject* picker, int32_t accuracy);
+CbObject* cb_rt_picked_object(void);
+double    cb_rt_picked_x(void);
+double    cb_rt_picked_y(void);
+double    cb_rt_picked_angle(void);
+int32_t   cb_rt_object_sight(const CbObject* a, const CbObject* b);
+void      cb_rt_screen_position_object(CbObject* o, double sx, double sy);
 
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/

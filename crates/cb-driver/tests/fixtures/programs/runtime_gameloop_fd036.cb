@@ -1,0 +1,111 @@
+// FD-036 Phase 5c: the game loop (UpdateGame) driving the per-update-tick
+// advancement of ObjectLife, animation, and the PERSISTENT collision checks
+// registered by SetupCollision (which 5a could not exercise without a tick).
+// Headless-safe: asserts deterministic state. The animated object is built from a
+// sprite sheet written by SaveImage into the test's isolated temp cwd. The
+// UpdateGame/DrawGame/DrawScreen dedup flags need a real display and are a
+// deferred visual smoke. The per-tick math is unit-tested in test_object.cpp /
+// test_collision.cpp.
+
+// ─── ObjectLife: decrement per UpdateGame tick, auto-delete at 0 ────────
+ClearObjects()
+Dim o As Object
+o = MakeObject()
+ObjectLife(o, 3)
+UpdateGame
+If ObjectLife(o) = 2 Then Print "life_tick_ok"
+UpdateGame                          // 2 -> 1
+UpdateGame                          // 1 -> 0 -> auto-delete
+Dim n As Integer
+n = 0
+InitObjectList()
+Dim it As Object
+it = NextObject()
+While it <> Null
+  n = n + 1
+  it = NextObject()
+Wend
+If n = 0 Then Print "life_autodelete_ok"
+
+// ─── Animation: UpdateGame advances a playing object's frame ────────────
+ClearObjects()
+Dim sheet As Image
+sheet = MakeImage(4, 9)
+SaveImage(sheet, "gl_sheet.bmp", 0)
+DeleteImage(sheet)
+Dim anim As Object
+anim = LoadAnimObject("gl_sheet.bmp", 2, 3, 0, 6)   // 2x3 frames
+LoopObject(anim, 0, 5, 1.0, 1)      // speed 1.0 per tick, looping
+If ObjectFrame(anim) = 0.0 Then Print "anim_start_ok"
+UpdateGame
+If ObjectFrame(anim) = 1.0 Then Print "anim_advance_ok"
+UpdateGame
+If ObjectFrame(anim) = 2.0 Then Print "anim_advance2_ok"
+
+// ─── Persistent box collision: report mode records but doesn't move ─────
+ClearObjects()
+Dim a As Object
+Dim b As Object
+a = MakeObject()
+b = MakeObject()
+ObjectRange(a, 10.0, 10.0)
+ObjectRange(b, 10.0, 10.0)
+PositionObject(a, 0.0, 0.0)
+PositionObject(b, 5.0, 0.0)         // overlapping boxes
+SetupCollision(a, b, 1, 1, 0)       // box-box, report (mode 0)
+If CountCollisions(a) = 0 Then Print "precollide_ok"   // no tick has run yet
+UpdateGame
+If CountCollisions(a) > 0 Then Print "collide_tick_ok"
+If GetCollision(a, 1) = b Then Print "getcollision_ok"
+If ObjectX(a) = 0.0 Then Print "report_nomove_ok"      // mode 0 does not move a
+If Abs(CollisionAngle(a, 1) - 180.0) < 0.001 Then Print "collisionangle_ok"
+UpdateGame
+If CountCollisions(a) > 0 Then Print "collide_persistent_ok"  // re-tested each tick
+PositionObject(b, 100.0, 0.0)       // move apart
+UpdateGame
+If CountCollisions(a) = 0 Then Print "collide_cleared_ok"     // list wiped + re-tested
+
+// ─── Circle slide: handling mode applies the resolved position ──────────
+ClearObjects()
+Dim p As Object
+Dim q As Object
+p = MakeObject()
+q = MakeObject()
+ObjectRange(p, 10.0)                 // circle diameter 10 (radius 5)
+ObjectRange(q, 10.0)
+PositionObject(p, 0.0, 0.0)
+PositionObject(q, 6.0, 0.0)          // overlapping circles (dist 6 < 10)
+SetupCollision(p, q, 2, 2, 2)        // circle-circle, slide (mode 2 moves p)
+UpdateGame
+// slide pushes p to q - (r1+r2+0.5) = 6 - 10.5 = -4.5
+If Abs(ObjectX(p) + 4.5) < 0.001 Then Print "slide_moved_ok"
+
+// ─── Map collision (type 4): box-vs-map report, circle-vs-map slide ─────
+// Exercises the hardest ports (RectMap / CircleMap tile-grid orchestration) end
+// to end. Wall on an 8x8/16px map (128x128 world, centred): internal tile (4,4)
+// has its collision box at world x[0,16].
+ClearObjects()
+ClearCollisions()
+Dim mp As Map
+mp = MakeMap(8, 8, 16, 16)
+EditMap(mp, 2, 5, 5, 1)             // 1-based (5,5) -> internal tile (4,4), layer 2
+Dim bw As Object
+bw = MakeObject()
+ObjectRange(bw, 10.0, 10.0)
+PositionObject(bw, -4.0, -8.0)      // box overlapping the wall's left edge
+SetupCollision(bw, mp, 1, 4, 0)     // box-map, report
+UpdateGame
+If CountCollisions(bw) > 0 Then Print "boxmap_collide_ok"
+If Abs(CollisionAngle(bw, 1) - 180.0) < 0.001 Then Print "boxmap_angle_ok"  // wall is to the right
+
+ClearObjects()
+ClearCollisions()
+Dim cw As Object
+cw = MakeObject()
+ObjectRange(cw, 12.0)               // circle radius 6
+PositionObject(cw, -5.0, -8.0)      // overlapping the wall (within radius)
+SetupCollision(cw, mp, 2, 4, 2)     // circle-map, slide -> pushed out to the wall edge
+UpdateGame
+If Abs(ObjectX(cw) + 6.0) < 0.01 Then Print "circlemap_slide_ok"   // edge 0 - radius 6
+
+Print "fd036_gameloop_done"

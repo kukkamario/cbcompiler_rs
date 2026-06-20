@@ -1,0 +1,58 @@
+// FD-036 Phase 5a: object collision — ObjectsOverlap one-shot tests, the
+// collision query surface, and SetupCollision registration smoke. Headless-safe:
+// asserts deterministic STATE with no display (MakeObject/MakeMap/ObjectsOverlap
+// touch no bitmap). The PERSISTENT SetupCollision path (re-tested each update
+// tick) is driven end-to-end by the Phase-5c game-loop fixture once UpdateGame
+// exists; the resolution geometry is unit-tested in runtime/tests/test_collision.cpp.
+
+Dim a As Object
+Dim b As Object
+a = MakeObject()
+b = MakeObject()
+
+// MakeObject leaves the collision range 0x0, so set explicit ranges first.
+ObjectRange(a, 10.0, 10.0)
+ObjectRange(b, 10.0, 10.0)
+
+// ─── ObjectsOverlap: box (default type) ─────────────────────────────────
+PositionObject(a, 0.0, 0.0)
+PositionObject(b, 5.0, 0.0)            // centres 5 apart, each 10 wide -> overlap
+If ObjectsOverlap(a, b) = 1 Then Print "box_overlap_ok"
+If ObjectsOverlap(a, b, 1) = 1 Then Print "box_overlap_type1_ok"
+PositionObject(b, 100.0, 0.0)          // far apart -> no overlap
+If ObjectsOverlap(a, b) = 0 Then Print "box_apart_ok"
+
+// ─── ObjectsOverlap: circle (type 2; range1 = diameter) ─────────────────
+ObjectRange(a, 10.0)                   // 2-arg form: range2 mirrors range1
+ObjectRange(b, 10.0)
+PositionObject(a, 0.0, 0.0)
+PositionObject(b, 6.0, 0.0)            // dist 6 < r1+r2 (10) -> overlap
+If ObjectsOverlap(a, b, 2) = 1 Then Print "circle_overlap_ok"
+PositionObject(b, 12.0, 0.0)           // dist 12 > 10 -> no overlap
+If ObjectsOverlap(a, b, 2) = 0 Then Print "circle_apart_ok"
+
+// ─── ObjectsOverlap: pixel stub + invalid type both return 0 ────────────
+PositionObject(b, 6.0, 0.0)            // overlapping again, but...
+If ObjectsOverlap(a, b, 3) = 0 Then Print "pixel_stub_ok"   // pixel not implemented
+If ObjectsOverlap(a, b, 9) = 0 Then Print "badtype_ok"      // invalid type -> 0
+
+// ─── Query surface on an object with no recorded collisions ─────────────
+If CountCollisions(a) = 0 Then Print "count_empty_ok"
+If GetCollision(a, 1) = Null Then Print "getcol_null_ok"    // 1-based, none -> Null
+If CollisionX(a, 1) = 0.0 Then Print "colx_zero_ok"
+
+// ─── SetupCollision registration smoke (object-object + Map overload) ────
+SetupCollision(a, b, 1, 1, 0)          // box-box, report
+ClearCollisions()
+Print "setup_smoke_ok"
+
+Dim m As Map
+m = MakeMap(4, 4, 16, 16)
+SetupCollision(a, m, 2, 4, 2)          // circle-vs-map, slide -> the Map overload
+ClearCollisions()
+Print "setup_map_smoke_ok"
+
+ResetObjectCollision(a)
+Print "reset_smoke_ok"
+
+Print "fd036_collision_done"

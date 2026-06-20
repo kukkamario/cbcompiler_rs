@@ -456,9 +456,12 @@ mod tests {
         // TestHandle and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 3);
+            assert_eq!(catalog.types.len(), 5);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
+            // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
+            assert_eq!(types_by_name["Object"].tag, 13);
+            assert_eq!(types_by_name["Map"].tag, 14);
         }
         #[cfg(cb_no_allegro)]
         assert_eq!(catalog.types.len(), 1);
@@ -509,6 +512,16 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
             assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
 
+            // Game loop (FD-036 Phase 5): UpdateGame/DrawGame are 0-arg commands.
+            let update_game = by_symbol["cb_rt_update_game"];
+            assert_eq!(update_game.name, "updategame");
+            assert_eq!(update_game.params.len(), 0);
+            assert_eq!(update_game.return_ty, IrType::Void);
+            let draw_game = by_symbol["cb_rt_draw_game"];
+            assert_eq!(draw_game.name, "drawgame");
+            assert_eq!(draw_game.params.len(), 0);
+            assert_eq!(draw_game.return_ty, IrType::Void);
+
             // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
             let make_image = by_symbol["cb_rt_make_image"];
             assert_eq!(make_image.name, "makeimage");
@@ -524,6 +537,49 @@ mod tests {
                 IrType::RuntimeType("Image".to_string())
             );
             assert_eq!(get_pixel.return_ty, IrType::Int);
+
+            // FD-036 multi-frame sprite sheets. Each optional `frame`/`useMask`
+            // arg is its own arity overload (the catalog has no default-arg
+            // mechanism); LoadAnimImage returns the existing `Image` type.
+            let image_ty = IrType::RuntimeType("Image".to_string());
+            let load_anim = by_symbol["cb_rt_load_anim_image"];
+            assert_eq!(load_anim.name, "loadanimimage");
+            assert_eq!(load_anim.params.len(), 5);
+            assert_eq!(load_anim.params[0].ty, IrType::String);
+            assert_eq!(load_anim.params[1].ty, IrType::Int);
+            assert_eq!(load_anim.return_ty, image_ty);
+
+            let make_frames = by_symbol["cb_rt_make_image_frames"];
+            assert_eq!(make_frames.name, "makeimage");
+            assert_eq!(make_frames.params.len(), 3);
+            assert_eq!(make_frames.return_ty, image_ty);
+
+            // drawimage: 3-arg (existing), 4-arg (frame), 5-arg (frame+useMask).
+            let draw_frame = by_symbol["cb_rt_draw_image_frame"];
+            assert_eq!(draw_frame.name, "drawimage");
+            assert_eq!(draw_frame.params.len(), 4);
+            assert_eq!(draw_frame.params[0].ty, image_ty);
+            assert_eq!(draw_frame.params[3].ty, IrType::Int);
+            assert_eq!(draw_frame.return_ty, IrType::Void);
+
+            let draw_frame_mask = by_symbol["cb_rt_draw_image_frame_mask"];
+            assert_eq!(draw_frame_mask.name, "drawimage");
+            assert_eq!(draw_frame_mask.params.len(), 5);
+
+            let ghost_frame = by_symbol["cb_rt_draw_ghost_image_frame"];
+            assert_eq!(ghost_frame.name, "drawghostimage");
+            assert_eq!(ghost_frame.params.len(), 5);
+            assert_eq!(ghost_frame.params[3].ty, IrType::Int);
+            assert_eq!(ghost_frame.params[4].ty, IrType::Float);
+
+            let box_frame = by_symbol["cb_rt_draw_image_box_frame"];
+            assert_eq!(box_frame.name, "drawimagebox");
+            assert_eq!(box_frame.params.len(), 8);
+            assert_eq!(box_frame.params[7].ty, IrType::Int);
+
+            let box_frame_mask = by_symbol["cb_rt_draw_image_box_frame_mask"];
+            assert_eq!(box_frame_mask.name, "drawimagebox");
+            assert_eq!(box_frame_mask.params.len(), 9);
 
             // Input: keyboard + mouse queries (FD-013 Batch 5). All are
             // Int->Int or ()->Int catalog entries dispatched generically.
@@ -547,6 +603,362 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
             assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
             assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
+
+            // Camera transform core (FD-036 Phase 2). No new opaque type — all
+            // Float/Int params and Float/Void returns. RotateCamera/TurnCamera
+            // take two angle args (logical, render) feeding two independent
+            // fields; DrawToWorld's three flags are Int.
+            let position_camera = by_symbol["cb_rt_position_camera"];
+            assert_eq!(position_camera.name, "positioncamera");
+            assert_eq!(position_camera.params.len(), 3);
+            assert_eq!(position_camera.params[0].ty, IrType::Float);
+            assert_eq!(position_camera.return_ty, IrType::Void);
+
+            assert_eq!(by_symbol["cb_rt_move_camera"].name, "movecamera");
+            assert_eq!(by_symbol["cb_rt_move_camera"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_translate_camera"].name, "translatecamera");
+            assert_eq!(by_symbol["cb_rt_translate_camera"].params.len(), 3);
+
+            let rotate_camera = by_symbol["cb_rt_rotate_camera"];
+            assert_eq!(rotate_camera.name, "rotatecamera");
+            assert_eq!(rotate_camera.params.len(), 2);
+            assert_eq!(rotate_camera.params[0].ty, IrType::Float);
+            assert_eq!(rotate_camera.params[1].ty, IrType::Float);
+            assert_eq!(rotate_camera.return_ty, IrType::Void);
+
+            let turn_camera = by_symbol["cb_rt_turn_camera"];
+            assert_eq!(turn_camera.name, "turncamera");
+            assert_eq!(turn_camera.params.len(), 2);
+            assert_eq!(turn_camera.params[1].ty, IrType::Float);
+
+            let camera_x = by_symbol["cb_rt_camera_x"];
+            assert_eq!(camera_x.name, "camerax");
+            assert_eq!(camera_x.params.len(), 0);
+            assert_eq!(camera_x.return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_camera_y"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_camera_angle"].name, "cameraangle");
+            assert_eq!(by_symbol["cb_rt_camera_angle"].return_ty, IrType::Float);
+
+            let draw_to_world = by_symbol["cb_rt_draw_to_world"];
+            assert_eq!(draw_to_world.name, "drawtoworld");
+            assert_eq!(draw_to_world.params.len(), 3);
+            assert_eq!(draw_to_world.params[0].ty, IrType::Int);
+            assert_eq!(draw_to_world.params[2].ty, IrType::Int);
+            assert_eq!(draw_to_world.return_ty, IrType::Void);
+
+            let mouse_wx = by_symbol["cb_rt_mouse_wx"];
+            assert_eq!(mouse_wx.name, "mousewx");
+            assert_eq!(mouse_wx.params.len(), 0);
+            assert_eq!(mouse_wx.return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_mouse_wy"].name, "mousewy");
+            assert_eq!(by_symbol["cb_rt_mouse_wy"].return_ty, IrType::Float);
+
+            // Tile maps (FD-036 Phase 3). `Map` is the opaque return of
+            // LoadMap/MakeMap (and EditMap's ignored first param). GetMap takes
+            // world Floats; GetMap2/EditMap take 1-based Int grid coords. SetTile
+            // has a 2- and 3-arg arity overload sharing the CB name.
+            let map_ty = IrType::RuntimeType("Map".to_string());
+            let load_map = by_symbol["cb_rt_load_map"];
+            assert_eq!(load_map.name, "loadmap");
+            assert_eq!(load_map.params.len(), 2);
+            assert_eq!(load_map.params[0].ty, IrType::String);
+            assert_eq!(load_map.params[1].ty, IrType::String);
+            assert_eq!(load_map.return_ty, map_ty);
+
+            let make_map = by_symbol["cb_rt_make_map"];
+            assert_eq!(make_map.name, "makemap");
+            assert_eq!(make_map.params.len(), 4);
+            assert_eq!(make_map.params[0].ty, IrType::Int);
+            assert_eq!(make_map.return_ty, map_ty);
+
+            assert_eq!(by_symbol["cb_rt_map_width"].name, "mapwidth");
+            assert_eq!(by_symbol["cb_rt_map_width"].params.len(), 0);
+            assert_eq!(by_symbol["cb_rt_map_width"].return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_map_height"].name, "mapheight");
+            assert_eq!(by_symbol["cb_rt_map_height"].return_ty, IrType::Int);
+
+            let get_map = by_symbol["cb_rt_get_map"];
+            assert_eq!(get_map.name, "getmap");
+            assert_eq!(get_map.params.len(), 3);
+            assert_eq!(get_map.params[0].ty, IrType::Int);
+            assert_eq!(get_map.params[1].ty, IrType::Float);
+            assert_eq!(get_map.params[2].ty, IrType::Float);
+            assert_eq!(get_map.return_ty, IrType::Int);
+
+            let get_map2 = by_symbol["cb_rt_get_map2"];
+            assert_eq!(get_map2.name, "getmap2");
+            assert_eq!(get_map2.params.len(), 3);
+            assert_eq!(get_map2.params[2].ty, IrType::Int);
+            assert_eq!(get_map2.return_ty, IrType::Int);
+
+            let edit_map = by_symbol["cb_rt_edit_map"];
+            assert_eq!(edit_map.name, "editmap");
+            assert_eq!(edit_map.params.len(), 5);
+            assert_eq!(edit_map.params[0].ty, map_ty); // ignored, but typed Map
+            assert_eq!(edit_map.params[1].ty, IrType::Int);
+            assert_eq!(edit_map.return_ty, IrType::Void);
+
+            assert_eq!(by_symbol["cb_rt_set_map"].name, "setmap");
+            assert_eq!(by_symbol["cb_rt_set_map"].params.len(), 2);
+
+            let set_tile = by_symbol["cb_rt_set_tile"];
+            assert_eq!(set_tile.name, "settile");
+            assert_eq!(set_tile.params.len(), 2);
+            let set_tile_slow = by_symbol["cb_rt_set_tile_slow"];
+            assert_eq!(set_tile_slow.name, "settile");
+            assert_eq!(set_tile_slow.params.len(), 3);
+
+            // Objects / sprites (FD-036 Phase 4). `Object` is the opaque tag-13
+            // handle that the creation funcs return and the rest borrow. Spot-
+            // check the overload families: the z/rotQuality arity overloads, the
+            // dual getter/setter slots, and PaintObject's three type-distinct
+            // rows (Object×Image, Object×Object, Map×Image).
+            let object_ty = IrType::RuntimeType("Object".to_string());
+            let image_ty2 = IrType::RuntimeType("Image".to_string());
+            let map_ty2 = IrType::RuntimeType("Map".to_string());
+
+            let load_object = by_symbol["cb_rt_load_object"];
+            assert_eq!(load_object.name, "loadobject");
+            assert_eq!(load_object.params.len(), 1);
+            assert_eq!(load_object.params[0].ty, IrType::String);
+            assert_eq!(load_object.return_ty, object_ty);
+            // 2-arg LoadObject: rotQuality overload (Int), same CB name.
+            let load_object_rq = by_symbol["cb_rt_load_object_rq"];
+            assert_eq!(load_object_rq.name, "loadobject");
+            assert_eq!(load_object_rq.params.len(), 2);
+            assert_eq!(load_object_rq.params[1].ty, IrType::Int);
+
+            let load_anim = by_symbol["cb_rt_load_anim_object"];
+            assert_eq!(load_anim.name, "loadanimobject");
+            assert_eq!(load_anim.params.len(), 5);
+            assert_eq!(load_anim.return_ty, object_ty);
+            assert_eq!(
+                by_symbol["cb_rt_load_anim_object_rq"].name,
+                "loadanimobject"
+            );
+            assert_eq!(by_symbol["cb_rt_load_anim_object_rq"].params.len(), 6);
+
+            let make_object = by_symbol["cb_rt_make_object"];
+            assert_eq!(make_object.name, "makeobject");
+            assert_eq!(make_object.params.len(), 0);
+            assert_eq!(make_object.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_make_object_floor"].name, "makeobjectfloor");
+
+            let clone_object = by_symbol["cb_rt_clone_object"];
+            assert_eq!(clone_object.name, "cloneobject");
+            assert_eq!(clone_object.params[0].ty, object_ty);
+            assert_eq!(clone_object.return_ty, object_ty);
+
+            // PositionObject: 3-arg primary + 4-arg z-ignored overload.
+            let pos_object = by_symbol["cb_rt_position_object"];
+            assert_eq!(pos_object.name, "positionobject");
+            assert_eq!(pos_object.params.len(), 3);
+            assert_eq!(pos_object.params[0].ty, object_ty);
+            assert_eq!(pos_object.params[1].ty, IrType::Float);
+            assert_eq!(pos_object.return_ty, IrType::Void);
+            assert_eq!(by_symbol["cb_rt_position_object_z"].name, "positionobject");
+            assert_eq!(by_symbol["cb_rt_position_object_z"].params.len(), 4);
+
+            let object_x = by_symbol["cb_rt_object_x"];
+            assert_eq!(object_x.name, "objectx");
+            assert_eq!(object_x.params[0].ty, object_ty);
+            assert_eq!(object_x.return_ty, IrType::Float);
+
+            // GetAngle2/Distance2: two Object args, Float return.
+            let get_angle2 = by_symbol["cb_rt_get_angle2"];
+            assert_eq!(get_angle2.name, "getangle2");
+            assert_eq!(get_angle2.params.len(), 2);
+            assert_eq!(get_angle2.params[0].ty, object_ty);
+            assert_eq!(get_angle2.params[1].ty, object_ty);
+            assert_eq!(get_angle2.return_ty, IrType::Float);
+
+            // PaintObject: three overloads disambiguated by param type.
+            let paint_img = by_symbol["cb_rt_paint_object_image"];
+            assert_eq!(paint_img.name, "paintobject");
+            assert_eq!(paint_img.params[0].ty, object_ty);
+            assert_eq!(paint_img.params[1].ty, image_ty2);
+            let paint_obj = by_symbol["cb_rt_paint_object_object"];
+            assert_eq!(paint_obj.name, "paintobject");
+            assert_eq!(paint_obj.params[0].ty, object_ty);
+            assert_eq!(paint_obj.params[1].ty, object_ty);
+            let paint_map = by_symbol["cb_rt_paint_object_map"];
+            assert_eq!(paint_map.name, "paintobject");
+            assert_eq!(paint_map.params[0].ty, map_ty2);
+            assert_eq!(paint_map.params[1].ty, image_ty2);
+
+            // MoveObject arity family: 2-arg (forward only), 3-arg (forward,
+            // side), 4-arg (+ ignored z) — all Object-first.
+            let move2 = by_symbol["cb_rt_move_object_fwd"];
+            assert_eq!(move2.name, "moveobject");
+            assert_eq!(move2.params.len(), 2);
+            assert_eq!(move2.params[0].ty, object_ty);
+            assert_eq!(move2.params[1].ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_move_object"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_move_object_z"].params.len(), 4);
+
+            // PlayObject arity family 1/3/4/5.
+            assert_eq!(by_symbol["cb_rt_play_object"].name, "playobject");
+            assert_eq!(by_symbol["cb_rt_play_object"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_play_object3"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_play_object4"].params.len(), 4);
+            let play5 = by_symbol["cb_rt_play_object5"];
+            assert_eq!(play5.name, "playobject");
+            assert_eq!(play5.params.len(), 5);
+            assert_eq!(play5.params[3].ty, IrType::Float);
+            assert_eq!(play5.params[4].ty, IrType::Int);
+
+            // PlayObject also accepts a Map (start tile animation), the same
+            // 1/3/4/5 arity family, disambiguated by the Map first param.
+            assert_eq!(by_symbol["cb_rt_play_map"].name, "playobject");
+            assert_eq!(by_symbol["cb_rt_play_map"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_play_map"].params[0].ty, map_ty2);
+            let play_map4 = by_symbol["cb_rt_play_map4"];
+            assert_eq!(play_map4.name, "playobject");
+            assert_eq!(play_map4.params.len(), 4);
+            assert_eq!(play_map4.params[0].ty, map_ty2);
+            assert_eq!(play_map4.params[3].ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_play_map5"].params.len(), 5);
+
+            // ObjectInteger get(1)/set(2) share one CB name; ObjectString get
+            // returns String. ObjectLife set marks usingLife.
+            let int_get = by_symbol["cb_rt_object_integer_get"];
+            assert_eq!(int_get.name, "objectinteger");
+            assert_eq!(int_get.params.len(), 1);
+            assert_eq!(int_get.return_ty, IrType::Int);
+            let int_set = by_symbol["cb_rt_object_integer_set"];
+            assert_eq!(int_set.name, "objectinteger");
+            assert_eq!(int_set.params.len(), 2);
+            assert_eq!(int_set.params[1].ty, IrType::Int);
+            assert_eq!(int_set.return_ty, IrType::Void);
+            assert_eq!(
+                by_symbol["cb_rt_object_string_get"].return_ty,
+                IrType::String
+            );
+            assert_eq!(by_symbol["cb_rt_object_life_set"].name, "objectlife");
+            assert_eq!(by_symbol["cb_rt_object_life_set"].params.len(), 2);
+
+            // ObjectSizeX/Y return Int; ObjectFrame returns Float.
+            assert_eq!(by_symbol["cb_rt_object_size_x"].return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_object_frame"].return_ty, IrType::Float);
+
+            // Enumeration: NextObject is a 0-arg Object return (Null at end).
+            let next_object = by_symbol["cb_rt_next_object"];
+            assert_eq!(next_object.name, "nextobject");
+            assert_eq!(next_object.params.len(), 0);
+            assert_eq!(next_object.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_init_object_list"].params.len(), 0);
+
+            // Collision (FD-036 Phase 5). SetupCollision is two type-distinct
+            // overloads — object-object (param[1] Object) and the type-4 Map form
+            // (param[1] Map) — like PaintObject. ObjectRange/ObjectsOverlap have an
+            // optional-arg arity overload. GetCollision returns an Object handle.
+            let setup = by_symbol["cb_rt_setup_collision"];
+            assert_eq!(setup.name, "setupcollision");
+            assert_eq!(setup.params.len(), 5);
+            assert_eq!(setup.params[0].ty, object_ty);
+            assert_eq!(setup.params[1].ty, object_ty);
+            assert_eq!(setup.params[2].ty, IrType::Int);
+            assert_eq!(setup.return_ty, IrType::Void);
+            let setup_map = by_symbol["cb_rt_setup_collision_map"];
+            assert_eq!(setup_map.name, "setupcollision");
+            assert_eq!(setup_map.params[1].ty, map_ty2);
+
+            let range = by_symbol["cb_rt_object_range"];
+            assert_eq!(range.name, "objectrange");
+            assert_eq!(range.params.len(), 2);
+            assert_eq!(range.params[0].ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_object_range3"].name, "objectrange");
+            assert_eq!(by_symbol["cb_rt_object_range3"].params.len(), 3);
+
+            assert_eq!(
+                by_symbol["cb_rt_reset_object_collision"].name,
+                "resetobjectcollision"
+            );
+            assert_eq!(by_symbol["cb_rt_clear_collisions"].params.len(), 0);
+
+            let count = by_symbol["cb_rt_count_collisions"];
+            assert_eq!(count.name, "countcollisions");
+            assert_eq!(count.params[0].ty, object_ty);
+            assert_eq!(count.return_ty, IrType::Int);
+
+            // GetCollision: (Object, Int) -> Object handle (Null at miss).
+            let get_col = by_symbol["cb_rt_get_collision"];
+            assert_eq!(get_col.name, "getcollision");
+            assert_eq!(get_col.params.len(), 2);
+            assert_eq!(get_col.params[0].ty, object_ty);
+            assert_eq!(get_col.params[1].ty, IrType::Int);
+            assert_eq!(get_col.return_ty, object_ty);
+
+            assert_eq!(by_symbol["cb_rt_collision_x"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_collision_y"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_collision_angle"].return_ty, IrType::Float);
+
+            let overlap = by_symbol["cb_rt_objects_overlap"];
+            assert_eq!(overlap.name, "objectsoverlap");
+            assert_eq!(overlap.params.len(), 2);
+            assert_eq!(overlap.params[0].ty, object_ty);
+            assert_eq!(overlap.return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_objects_overlap3"].name, "objectsoverlap");
+            assert_eq!(by_symbol["cb_rt_objects_overlap3"].params.len(), 3);
+
+            // Picking & line of sight (FD-036 Phase 5). PickedObject returns an
+            // Object handle; PixelPick is a no-op stub (1-/2-arg); ObjectSight
+            // returns Int. ScreenPositionObject is (Object, Float, Float).
+            let pickable = by_symbol["cb_rt_object_pickable"];
+            assert_eq!(pickable.name, "objectpickable");
+            assert_eq!(pickable.params.len(), 2);
+            assert_eq!(pickable.params[0].ty, object_ty);
+            assert_eq!(pickable.params[1].ty, IrType::Int);
+            let pick = by_symbol["cb_rt_object_pick"];
+            assert_eq!(pick.name, "objectpick");
+            assert_eq!(pick.params.len(), 1);
+            assert_eq!(pick.params[0].ty, object_ty);
+            assert_eq!(pick.return_ty, IrType::Void);
+            assert_eq!(by_symbol["cb_rt_pixel_pick"].name, "pixelpick");
+            assert_eq!(by_symbol["cb_rt_pixel_pick"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_pixel_pick_acc"].name, "pixelpick");
+            assert_eq!(by_symbol["cb_rt_pixel_pick_acc"].params.len(), 2);
+            let picked = by_symbol["cb_rt_picked_object"];
+            assert_eq!(picked.name, "pickedobject");
+            assert_eq!(picked.params.len(), 0);
+            assert_eq!(picked.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_picked_x"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_picked_angle"].return_ty, IrType::Float);
+            let sight = by_symbol["cb_rt_object_sight"];
+            assert_eq!(sight.name, "objectsight");
+            assert_eq!(sight.params.len(), 2);
+            assert_eq!(sight.params[0].ty, object_ty);
+            assert_eq!(sight.return_ty, IrType::Int);
+            let spo = by_symbol["cb_rt_screen_position_object"];
+            assert_eq!(spo.name, "screenpositionobject");
+            assert_eq!(spo.params.len(), 3);
+            assert_eq!(spo.params[0].ty, object_ty);
+            assert_eq!(spo.params[1].ty, IrType::Float);
+
+            // Object-aware camera (FD-036 Phase 5). PointCamera/CameraFollow/
+            // Clone* take an Object; CameraPick takes two screen Floats.
+            let point_cam = by_symbol["cb_rt_point_camera"];
+            assert_eq!(point_cam.name, "pointcamera");
+            assert_eq!(point_cam.params.len(), 1);
+            assert_eq!(point_cam.params[0].ty, object_ty);
+            let follow = by_symbol["cb_rt_camera_follow"];
+            assert_eq!(follow.name, "camerafollow");
+            assert_eq!(follow.params.len(), 3);
+            assert_eq!(follow.params[0].ty, object_ty);
+            assert_eq!(follow.params[1].ty, IrType::Int);
+            assert_eq!(follow.params[2].ty, IrType::Float);
+            assert_eq!(
+                by_symbol["cb_rt_clone_camera_position"].params[0].ty,
+                object_ty
+            );
+            assert_eq!(
+                by_symbol["cb_rt_clone_camera_orientation"].name,
+                "clonecameraorientation"
+            );
+            let cam_pick = by_symbol["cb_rt_camera_pick"];
+            assert_eq!(cam_pick.name, "camerapick");
+            assert_eq!(cam_pick.params.len(), 2);
+            assert_eq!(cam_pick.params[0].ty, IrType::Float);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

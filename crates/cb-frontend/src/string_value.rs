@@ -93,7 +93,11 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
 
         // Escape: at least one more byte must follow (`\` at end of body would
         // be a lexer-level issue, but stay defensive).
-        let escape_start_in_lit = body_offset_in_lit + i as u32;
+        // Absolute file offset of the `\`: the literal's start, past the opening
+        // quote (`body_offset_in_lit`), plus the index into `body`. `sub_span`
+        // expects absolute offsets (see `decode_raw`); omitting `lit_span.start`
+        // here pointed escape diagnostics at the wrong line (FD-036 follow-up).
+        let escape_start_in_lit = lit_span.start + body_offset_in_lit + i as u32;
         if i + 1 >= bytes.len() {
             // Lone `\` at end of body — invalid.
             let span = sub_span(lit_span, escape_start_in_lit, escape_start_in_lit + 1);
@@ -503,6 +507,26 @@ mod tests {
         assert_eq!(s, "aqb");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
+    }
+
+    #[test]
+    fn escaped_diagnostic_span_is_absolute() {
+        // Regression: the escape diagnostic must point at the `\` in the *file*,
+        // not at an offset relative to the literal. `decode_at` always starts
+        // at 0, so a missing base offset was invisible — place the literal at a
+        // non-zero start and assert the label span lands on the real `\`.
+        let prefix = "xxxxxxxx"; // 8 bytes before the literal
+        let lit = "\"ab\\qcd\""; // `\q` unknown; `\` is at literal byte index 3
+        let src = format!("{prefix}{lit}");
+        let start = prefix.len() as u32;
+        let span = Span::new(start, src.len() as u32, FileId(0));
+        let (s, d) = decode(StrLitKind::Escaped, &src, span);
+        assert_eq!(s, "abqcd");
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
+        // `\` at literal index 3 → absolute start+3; the `\q` span is 2 bytes.
+        assert_eq!(d[0].primary.span.start, start + 3);
+        assert_eq!(d[0].primary.span.end, start + 5);
     }
 
     #[test]

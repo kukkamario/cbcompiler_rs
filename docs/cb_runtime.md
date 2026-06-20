@@ -324,9 +324,11 @@ CoolBasic `…Animation` commands play a video file (single active video).
 ## Objects (Sprites)
 
 The object system represents 2D sprites with position, rotation, scale, optional
-animation, custom data slots, and collision. Objects are integer handles. "Floor"
-objects draw before regular objects (background layering). Positions are in world
-space unless noted.
+animation, custom data slots, and collision. `Object` is an **opaque handle type**
+(tag 13) — in cbcompiler_rs the handle's bit pattern is the runtime's `CbObject*`,
+mirroring `Image`/`Font`/`Map`; there is no integer id (cbEnchanted's legacy
+`Integer` handles and shared id space are dropped). "Floor" objects draw before
+regular objects (background layering). Positions are in world space unless noted.
 
 ### Creation & destruction
 
@@ -336,9 +338,9 @@ space unless noted.
 | `LoadAnimObject` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer [, rotQuality: Integer]` | `Object` | Loads a sprite-sheet object. `rotQuality` as in `LoadObject` (accepted but ignored) |
 | `MakeObject` | — | `Object` | Creates an empty (imageless) object |
 | `MakeObjectFloor` | — | `Object` | Creates a floor object (drawn before regular objects) |
-| `CloneObject` | `obj: Object` | `Object` | Copies an object's image, mask, frames, animation, range and visibility; **position and angle reset to 0** (not copied). Map objects can't be cloned |
+| `CloneObject` | `obj: Object` | `Object` | Copies an object's image (shared, reference-counted), mask, frames, animation and range; **position and angle reset to 0** and **visibility is forced on** (`visible=true`, faithful to cbEnchanted — not copied). Map objects can't be cloned |
 | `DeleteObject` | `obj: Object` | — | Deletes an object and clears its collisions |
-| `ClearObjects` | — | — | Deletes all objects and the tilemap (map freed via `DeleteTileMap`; the object registry is fully cleared) |
+| `ClearObjects` | — | — | Deletes all objects and clears the draw chains. **Objects-only — the active tilemap is left alone** (cbcompiler_rs divergence: the map is an independent singleton owned by `LoadMap`/`MakeMap`, not a floor object, so `ClearObjects` does not free it) |
 
 ### Position & movement
 
@@ -346,7 +348,7 @@ space unless noted.
 |----------|-----------|---------|-------------|
 | `PositionObject` | `obj: Object, x: Float, y: Float [, z: Float]` | — | Sets absolute world position (`z` accepted but ignored) |
 | `ScreenPositionObject` | `obj: Object, sx: Float, sy: Float` | — | Sets position from screen coords (converted via camera) |
-| `MoveObject` | `obj: Object, forward: Float, side: Float [, z: Float]` | — | Moves relative to the object's facing angle (`z` accepted but ignored) |
+| `MoveObject` | `obj: Object, forward: Float [, side: Float] [, z: Float]` | — | Moves relative to the object's facing angle. The 2-arg form moves straight forward (`side = 0`, the common idiom); `z` accepted but ignored |
 | `TranslateObject` | `obj: Object, dx: Float, dy: Float [, dz: Float]` | — | Moves by an absolute world delta (`dz` forwarded to the object's depth) |
 | `CloneObjectPosition` | `dst: Object, src: Object` | — | Copies `src`'s position to `dst` |
 | `ObjectX` | `obj: Object` | `Float` | World X of the object center |
@@ -357,7 +359,7 @@ space unless noted.
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `RotateObject` | `obj: Object, angle: Float` | — | Sets absolute rotation (degrees; 0°=right, 90°=down) |
-| `TurnObject` | `obj: Object, speed: Float` | — | Rotates continuously at `speed` degrees per update |
+| `TurnObject` | `obj: Object, speed: Float` | — | Rotates **by** `speed` degrees, **relative** to the current angle (a one-shot delta applied when the command runs — *not* a stored per-frame turn rate) |
 | `PointObject` | `obj: Object, target: Object` | — | Rotates `obj` to face `target` |
 | `CloneObjectOrientation` | `dst: Object, src: Object` | — | Copies `src`'s angle to `dst` |
 | `ObjectAngle` | `obj: Object` | `Float` | Current rotation (degrees) |
@@ -368,7 +370,9 @@ space unless noted.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `PaintObject` | `obj: Object, source: Integer` | — | Replaces the object's image; positive id = another object's image, negative = `-imageId` |
+| `PaintObject` | `obj: Object, image: Image` | — | Replaces the object's image with a masked clone of the image |
+| `PaintObject` | `obj: Object, source: Object` | — | Replaces the object's image with a clone of another object's image |
+| `PaintObject` | `map: Map, image: Image` | — | Repaints the active tilemap's tileset with the image (the `map` handle is popped but ignored, like `EditMap`) |
 | `MaskObject` | `obj: Object, r: Integer, g: Integer, b: Integer` | — | Sets a transparent color key |
 | `GhostObject` | `obj: Object, alpha: Float` | — | Sets alpha 0–100 (clamped) |
 | `MirrorObject` | `obj: Object, direction: Integer` | — | Mirrors the image: 0=horizontal, 1=vertical, 2=both (regular objects only) |
@@ -383,6 +387,7 @@ space unless noted.
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `PlayObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Plays frames once (optional args; `speed` default 0.1, `continuous` default off); `endFrame = -1` stops and resets |
+| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation (each animated tile cycles `tile..tile+animLength`, i.e. `animLength+1` frames); only `speed` applies and tiles do not advance until called. Higher `speed` = slower (it divides the elapsed-time step, faithful to cbEnchanted); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
 | `LoopObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Loops the frame range continuously (optional args; `speed` default 0.1) |
 | `StopObject` | `obj: Object` | — | Stops animation, keeping the current frame |
 | `ObjectPlaying` | `obj: Object` | `Integer` | 1 if an animation is playing |
@@ -395,7 +400,7 @@ space unless noted.
 | `ObjectInteger` | `obj: Object [, value: Integer]` | `Integer` / — | Get/set a per-object integer slot |
 | `ObjectFloat` | `obj: Object [, value: Float]` | `Float` / — | Get/set a per-object float slot |
 | `ObjectString` | `obj: Object [, value: String]` | `String` / — | Get/set a per-object string slot |
-| `ObjectLife` | `obj: Object [, frames: Integer]` | `Integer` / — | Get/set object lifetime in **drawn frames**; decremented once per DrawScreen, auto-deletes at 0 |
+| `ObjectLife` | `obj: Object [, frames: Integer]` | `Integer` / — | Get/set object lifetime in **update ticks**; decremented once per tick (the implicit `DrawScreen` update, *or* an explicit `UpdateGame`/`DrawGame`), auto-deletes at 0 |
 
 ### Collision
 
@@ -403,7 +408,7 @@ See the [collision model](#collision-model) note for types and handling modes.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `SetupCollision` | `objA: Object, typeA: Integer, objB: Object, typeB: Integer, handling: Integer` | — | Registers a collision check. Types: 1=box, 2=circle, 4=map (B only). `handling`: 0=report, 1=stop (circle), 2=slide |
+| `SetupCollision` | `objA: Object, objB: Object, typeA: Integer, typeB: Integer, handling: Integer` | — | Registers a collision check. Types: 1=box, 2=circle, 4=map (B only). `handling`: 0=report, 1=stop (circle), 2=slide |
 | `ObjectRange` | `obj: Object, range1: Float [, range2: Float]` | — | Collision bounds: box = width,height; circle = diameter |
 | `ResetObjectCollision` | `obj: Object` | — | Clears recorded collisions for the object this frame |
 | `ClearCollisions` | — | — | Removes all collision checks |
@@ -431,8 +436,8 @@ See the [collision model](#collision-model) note for types and handling modes.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `InitObjectList` | — | — | Resets the object iterator |
-| `NextObject` | — | `Object` | Next object id (0 at end); call `InitObjectList` first |
+| `InitObjectList` | — | — | Resets the shared object iterator |
+| `NextObject` | — | `Object` | Next object handle in creation order, or `Null` at the end; call `InitObjectList` first. (cbcompiler_rs divergence: returns an `Object` handle / `Null` rather than cbEnchanted's id / `0`, and does **not** surface map ids — `Map` is a separate opaque type) |
 
 ---
 
@@ -447,8 +452,8 @@ screen Y.
 | `PositionCamera` | `x: Float, y: Float, zoom: Float` | — | Sets absolute position and zoom (`zoom > 0.00001`) |
 | `MoveCamera` | `forward: Float, side: Float, dzoom: Float` | — | Moves relative to the camera angle, adjusting zoom |
 | `TranslateCamera` | `dx: Float, dy: Float, dzoom: Float` | — | Moves in absolute world space, adjusting zoom |
-| `RotateCamera` | `angle: Float` | — | Sets absolute camera rotation (degrees) |
-| `TurnCamera` | `degrees: Float` | — | Rotates by `degrees` (wraps 0–360) |
+| `RotateCamera` | `logical: Float, render: Float` | — | Sets absolute rotation. `logical` (degrees) is reported by `CameraAngle` and drives `MoveCamera`'s heading; `render` (degrees) is the world-matrix rotation. The two fields are **independent** (faithful to cbEnchanted) and may diverge |
+| `TurnCamera` | `dLogical: Float, dRender: Float` | — | Rotates relatively: `dLogical` (degrees) wraps to 0–360; `dRender` (degrees) accumulates into the world-matrix rotation (stored internally in radians, wrapped to 0–2π) |
 | `PointCamera` | `obj: Object` | — | Rotates the camera to point at an object |
 | `CameraFollow` | `obj: Object, style: Integer, setting: Float` | — | Follows an object. `style` 1=smooth (divide distance by `setting`), 2=margin deadzone (`setting`=px), 3=orbit (`setting`=distance) |
 | `CloneCameraPosition` | `obj: Object` | — | Snaps camera position to an object; stops following |
@@ -469,7 +474,7 @@ game code (0 = empty). Only one map is active at a time.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `LoadMap` | `mapPath: String, tilesetPath: String` | `Map` | Loads a `.map` file + tileset image; 0 on failure; replaces any existing map |
+| `LoadMap` | `mapPath: String, tilesetPath: String` | `Map` | Loads a `.til` map file + tileset image; `Null` on failure; replaces any existing map |
 | `MakeMap` | `wTiles: Integer, hTiles: Integer, tileW: Integer, tileH: Integer` | `Map` | Creates an empty tilemap; replaces any existing map |
 | `MapWidth` | — | `Integer` | Map width in tiles |
 | `MapHeight` | — | `Integer` | Map height in tiles |
@@ -478,6 +483,17 @@ game code (0 = empty). Only one map is active at a time.
 | `EditMap` | `map: Map, layer: Integer, tx: Integer, ty: Integer, tile: Integer` | — | Sets a tile at a 1-based grid position (out-of-bounds ignored). `map` is popped but ignored — the single active map is edited |
 | `SetMap` | `backLayer: Integer, overLayer: Integer` | — | Toggles visibility of the background (0) and foreground (1) layers |
 | `SetTile` | `tile: Integer, animLength: Integer [, animSlowness: Integer]` | — | Configures per-tile animation (frame count + slowness; `animSlowness` default 1) |
+
+The map is loaded from a CoolBasic `.til` binary (little-endian; on-disk layer
+order 0, 2, 1, 3; two absolute seeks for editor metadata). The format is
+**compatibility-frozen** and was byte-verified against a real asset; the per-tile
+animation block stores `tileCount` entries but only `tileCount-1` are read (the
+trailing 8 bytes are ignored), matching cbEnchanted. `EditMap`'s `map` argument
+is popped but ignored — the single active map is edited. `SetTile` stores per-tile
+animation params; tile animation advances on the FD-036 Phase 5 game-loop update
+tick — a deterministic **frame-step** (cbEnchanted's was wall-clock-based; the port
+uses a fixed step per tick so headless runs reproduce). The map renders inside the
+object draw order (background layer 0 before objects, foreground layer 1 after).
 
 ---
 
@@ -759,8 +775,7 @@ intentionally. Known status and divergences as of the latest runtime work
   bitmaps), `Ellipse`, `CopyBox` (current target only), `PutPixel2`/`GetPixel2`
   (ARGB aliases; the buffer-id arg models only the current target). `ScreenGamma`
   is stored but not applied and `ScreenShot` is a no-op without a window
-  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017,
-  single-frame — multi-frame `LoadAnimImage`/`frame` params deferred):
+  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017):
   `CloneImage`, `ResizeImage`, `RotateImage` (rotated bounding box, centered
   hotspot), `PickImageColor`/`PickImageColor2`, `SaveImage` (`frame` ignored),
   `DrawGhostImage` (alpha 0–100), `DrawImageBox`, `DefaultMask`, `ImagesOverlap`
@@ -769,6 +784,25 @@ intentionally. Known status and divergences as of the latest runtime work
   gained a **hotspot** (default top-left); `HotSpot(img, x, y)` is the per-image
   form (x<0 || y<0 auto-centers) — cbEnchanted's integer-id `0`/`1` default toggle
   has no analogue since `Image` is an opaque handle, not an int id.
+- **Multi-frame sprite sheets** (FD-036, `runtime/cb_gfx.cpp`). `LoadAnimImage`
+  slices an `Image` into `frameW × frameH` cells; the `frame` parameter is honored
+  by `DrawImage`/`DrawGhostImage`/`DrawImageBox` (overloaded per arity — the
+  catalog has no default-arg mechanism). `frame` is 0-based, taken `% framesX`,
+  and **not clamped**; an image with no anim params (`anim_length == 0`) ignores
+  `frame` and draws whole (single-frame fallback). `MakeImage(w, h, frameCount)`
+  accepts but **ignores** `frameCount` (no frame size to slice by → stays
+  single-frame, matching cbEnchanted). The slice math **deliberately fixes**
+  cbEnchanted's row-index/offset bugs (`cbimage.cpp` used `/framesY` and
+  `*frameWidth`, correct only for square single-row sheets); the port uses
+  `row = frame / framesX` and `top = row * frameHeight`. **`useMask` on
+  `DrawImage`/`DrawImageBox` is accepted but ignored** — this port's masking is
+  destructive (`MaskImage` bakes alpha into the single bitmap, leaving no unmasked
+  copy to select between), with a `// TODO(FD-036)` to revisit by storing
+  masked+unmasked bitmaps. `SaveImage`/`ImagesCollide` `frame` args stay inert
+  (matches cbEnchanted). `HotSpot(-1, -1)` centers on a single frame when a frame
+  size is set, else the whole image. `anim_begin`/`startFrame` is stored but never
+  read (parity with cbEnchanted). `LoadAnimImage` shares `MakeImage`'s
+  memory-bitmap fallback so sheets load without a display.
 - **Input** (FD-013 Batch 5, `runtime/cb_input.cpp`). Keyboard
   (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the scancode table are ported 1:1.
   Input advances per frame inside `DrawScreen`. The mouse functions
@@ -795,11 +829,70 @@ intentionally. Known status and divergences as of the latest runtime work
 - **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
   cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
   implementing.
-- **Not yet implemented** in cbcompiler_rs: objects/sprites, collision, camera,
-  tile maps, sound, video playback, particles, file I/O, memblocks,
-  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, multi-frame sprite sheets
-  (`LoadAnimImage` and the `frame` params), and the plumbing-heavy System funcs
-  (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
+- **Camera** (FD-036 Phase 2 + Phase 5) is implemented: the world↔screen transform
+  core (`PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`,
+  `TurnCamera`, `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw
+  command), and `MouseWX`/`MouseWY`. The object-referencing camera funcs
+  (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`, `CameraPick`)
+  landed in **Phase 5** with two cbEnchanted bug fixes: `PointCamera` aims with the
+  object's X (not Y twice), and `CloneCameraOrientation` sets **both** angle fields
+  (cbEnchanted left the render matrix desynced). `CameraFollow`'s style-2 deadzone
+  uses the physical window size; the follow step runs once per `DrawScreen`.
+  Faithful to cbEnchanted, the camera keeps two independent angle fields —
+  `CameraAngle` (degrees, also driving `MoveCamera`'s heading) and the render-matrix
+  angle — which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
+- **Tile maps** (FD-036 Phase 3, `runtime/cb_map.cpp`) are implemented: a single
+  active tilemap (`LoadMap`/`MakeMap`, `MapWidth`/`MapHeight`, `GetMap`/`GetMap2`,
+  `EditMap`, `SetMap`, `SetTile`) with the four-layer model and the `.til` binary
+  format, rendered in world space via the Phase 2 camera. The `.til` format was
+  byte-verified against a real CoolBasic asset (`testmap.til`). Defensive
+  divergences from cbEnchanted: all funcs null-guard the active map (cbEnchanted
+  null-derefs), layer indices are bounds-checked (0 / no-op out of range), and
+  `SetTile`'s array-grow bug is fixed. The map renders inside the object draw order
+  (Phase 4) and, since **Phase 5**, layer 2 backs object map-collision (type 4) and
+  `ObjectSight` (a DDA wall walk). Tile animation advances on the Phase 5 game-loop
+  update tick — a deterministic **frame-step** (cbEnchanted scales by a wall-clock
+  timestep; the port uses a fixed step per tick so headless runs reproduce).
+- **Objects / sprites** (FD-036 Phase 4, `runtime/cb_object.cpp`) are implemented:
+  creation/lifecycle (`LoadObject`/`LoadAnimObject`/`MakeObject`/`MakeObjectFloor`/
+  `CloneObject`/`DeleteObject`/`ClearObjects`), position/movement, rotation/angle
+  (incl. `GetAngle2`/`Distance2`/`PointObject`), appearance (`PaintObject` — three
+  handle-typed overloads — `MaskObject`/`GhostObject`/`MirrorObject`/`ShowObject`/
+  `DefaultVisible`/`ObjectOrder`/`ObjectSizeX`/`Y`), animation (`PlayObject`/
+  `LoopObject`/`StopObject`/`ObjectPlaying`/`ObjectFrame`), custom data slots
+  (`ObjectInteger`/`Float`/`String`), `ObjectLife`, and enumeration
+  (`InitObjectList`/`NextObject`). `Object` is the opaque tag-13 handle (no integer
+  ids; the registry is creation-order + per-draw-chain vectors). Textures are
+  **shared and reference-counted**: `CloneObject` shares the bitmap (resets pos/
+  angle, forces `visible=true`); `PaintObject`/`MaskObject` mutate the shared
+  bitmap in place so all clones see the change; `MirrorObject` repoints the one
+  object to a fresh private bitmap. The render pass now reproduces cbEnchanted's
+  `drawObjects` order under one world transform — map background → floor objects →
+  regular objects → map foreground — replacing Phase 3's standalone map pass.
+- **Collision, picking & game loop** (FD-036 Phase 5, `runtime/cb_object.cpp` +
+  `runtime/cb_collision_data.h`) are implemented. **Collision**: `SetupCollision`
+  is a *persistent* registration re-tested every update tick (object-object, plus a
+  `Map`-handle overload for type-4 map walls); box-box, circle-circle, box-map and
+  circle-map geometry with report/stop/slide handling; `ObjectRange`,
+  `ResetObjectCollision`, `ClearCollisions`, `CountCollisions`, the 1-based
+  `GetCollision`/`CollisionX`/`Y`/`Angle`, and `ObjectsOverlap`. Faithful quirks:
+  `Stop` handling is circle-only, box↔circle object pairs never collide
+  (cbEnchanted's dead `CircleRect`/`RectCircle` tests), `MakeObject`/`MakeObjectFloor`
+  leave `ObjectRange` 0×0 (so their collisions are inert until set), and pixel
+  overlap is unimplemented (→ 0). `GetCollision` returns an `Object` handle (or
+  `Null`), never an integer; a map-wall hit yields `Null` (a `Map` is not an
+  `Object`). **Picking**: `ObjectPickable`/`ObjectPick` (nearest raycast hit),
+  `PickedObject`/`X`/`Y`/`Angle` (`PickedAngle` fixed to degrees-from-hit, vs
+  cbEnchanted's stale radians), `PixelPick` (registered no-op stub), `ObjectSight`,
+  and `ScreenPositionObject`/`CameraPick` (screen→world then test). **Game loop**:
+  `UpdateGame`/`DrawGame` run the built-in update/draw with `gameUpdated`/`gameDrawn`
+  dedup against `DrawScreen`'s implicit pass — there are **no user CB callbacks**
+  (cbEnchanted's hooks are defined but never registered). The update tick advances
+  animation and `ObjectLife` (auto-deleting at 0), wipes per-frame collision lists,
+  steps map-tile animation, and re-runs every collision check.
+- **Not yet implemented** in cbcompiler_rs: sound, video playback, particles, file
+  I/O, memblocks, `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the
+  plumbing-heavy System funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)
 

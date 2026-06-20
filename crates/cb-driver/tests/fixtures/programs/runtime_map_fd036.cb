@@ -1,0 +1,40 @@
+// FD-036 Phase 3: tile maps. Headless-safe — asserts deterministic map STATE
+// (dimensions, GetMap2/GetMap/EditMap data) and that LoadMap parses the real
+// CoolBasic asset testmap.til + tileset.bmp (staged into the cwd by the test
+// harness). The on-screen render is exercised by the visual/manual smoke; the
+// world<->tile coordinate math is unit-tested in runtime/tests/test_map.cpp.
+
+// Null-safety: with no map loaded the queries return 0 (cbEnchanted would
+// null-deref tileMap; we guard).
+Print Str(MapWidth())           // 0
+
+// MakeMap: an empty grid. Data round-trips through EditMap/GetMap2 (1-based).
+Dim m As Map
+m = MakeMap(8, 6, 16, 16)
+Print Str(MapWidth())           // 8
+Print Str(MapHeight())          // 6
+EditMap(m, 0, 3, 2, 42)
+Print Str(GetMap2(0, 3, 2))     // 42
+Print Str(GetMap2(0, 99, 99))   // 0  (out of bounds)
+EditMap(m, 0, 99, 99, 7)        // out-of-bounds edit ignored
+Print Str(GetMap2(0, 3, 2))     // 42 (unchanged)
+SetMap(1, 0)                    // layer visibility (smoke)
+SetTile(1, 4)                   // 2-arg form, animSlowness defaults to 1 (smoke)
+SetTile(2, 4, 8)                // 3-arg form (smoke)
+Print "makemap_ok"
+
+// LoadMap: the real CoolBasic asset. Replaces the made map. The asserted cells
+// were byte-read from testmap.til (20x15 map, 32px tiles).
+Dim tm As Map
+tm = LoadMap("testmap.til", "tileset.bmp")
+Print Str(MapWidth())           // 20
+Print Str(MapHeight())          // 15
+Print Str(GetMap2(0, 1, 1))     // 39   background top-left
+Print Str(GetMap2(0, 20, 15))   // 74   background bottom-right
+Print Str(GetMap2(2, 1, 1))     // 1    collision layer (solid)
+Print Str(GetMap2(1, 1, 1))     // 173  foreground layer
+Print Str(GetMap(0, 0.0, 0.0))  // 251  world centre -> tile (10,7)
+
+// Render smoke: DrawScreen composites the map (a no-op without a display).
+DrawScreen
+Print "fd036_map_done"

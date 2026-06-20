@@ -1,0 +1,127 @@
+// FD-036 Phase 4: sprite Objects. Headless-safe — asserts deterministic object
+// STATE (position, angle, slots, life, frame, size, enumeration count) with no
+// display. The on-screen render is exercised by the visual/manual smoke; the
+// pure object math is unit-tested in runtime/tests/test_object.cpp.
+//
+// Directly-set positions/angles/slots are compared exactly; trig-derived angles
+// (GetAngle2/PointObject) use a tolerance. The animated object is built from a
+// sprite sheet written by SaveImage into the test's isolated temp cwd.
+
+// ─── Basic object: lifecycle + transform ───────────────────────────────
+Dim o As Object
+o = MakeObject()
+If o <> Null Then Print "make_ok"
+
+PositionObject(o, 10.0, 20.0)
+If ObjectX(o) = 10.0 Then Print "posx_ok"
+If ObjectY(o) = 20.0 Then Print "posy_ok"
+
+RotateObject(o, 90.0)
+If ObjectAngle(o) = 90.0 Then Print "angle_ok"
+TurnObject(o, 45.0)                 // relative one-shot: 90 + 45 = 135
+If ObjectAngle(o) = 135.0 Then Print "turn_ok"
+TurnObject(o, 300.0)                // 135 + 300 = 435 -> wraps to 75
+If ObjectAngle(o) = 75.0 Then Print "turn_wrap_ok"
+
+PositionObject(o, 5.0, 6.0, 99.0)   // 4-arg z overload: z ignored
+If ObjectX(o) = 5.0 Then Print "posz_ok"
+
+RotateObject(o, 0.0)
+PositionObject(o, 0.0, 0.0)
+MoveObject(o, 10.0, 0.0)            // facing 0deg -> +x by 10
+If ObjectX(o) = 10.0 Then Print "move_ok"
+TranslateObject(o, 0.0, 5.0)       // absolute delta
+If ObjectY(o) = 5.0 Then Print "translate_ok"
+
+// ─── Custom data slots + life ───────────────────────────────────────────
+ObjectInteger(o, 7)
+If ObjectInteger(o) = 7 Then Print "int_ok"
+ObjectFloat(o, 2.5)
+If ObjectFloat(o) = 2.5 Then Print "float_ok"
+ObjectString(o, "hi")
+If ObjectString(o) = "hi" Then Print "string_ok"
+ObjectLife(o, 100)
+If ObjectLife(o) = 100 Then Print "life_ok"
+
+// ─── Visibility / draw-order smoke (no state getter) ────────────────────
+ShowObject(o, 0)
+ShowObject(o, 1)
+ObjectOrder(o, 1)
+ObjectOrder(o, -1)
+Print "appearance_smoke_ok"
+
+// ─── Two-object angle / distance ────────────────────────────────────────
+Dim a As Object
+Dim b As Object
+a = MakeObject()
+b = MakeObject()
+PositionObject(a, 0.0, 0.0)
+PositionObject(b, 10.0, 0.0)
+If Abs(GetAngle2(a, b) - 0.0) < 0.001 Then Print "angle2_right_ok"
+If Distance2(a, b) = 10.0 Then Print "distance2_ok"
+PositionObject(b, 0.0, 10.0)
+If Abs(GetAngle2(a, b) - 90.0) < 0.001 Then Print "angle2_up_ok"
+PointObject(a, b)
+If Abs(ObjectAngle(a) - 90.0) < 0.001 Then Print "point_ok"
+CloneObjectPosition(a, b)
+If ObjectX(a) = 0.0 Then Print "clonepos_ok"
+CloneObjectOrientation(b, a)
+If Abs(ObjectAngle(b) - 90.0) < 0.001 Then Print "cloneorient_ok"
+
+// ─── CloneObject resets position + angle ────────────────────────────────
+PositionObject(o, 50.0, 60.0)
+RotateObject(o, 123.0)
+Dim c As Object
+c = CloneObject(o)
+If ObjectX(c) = 0.0 Then Print "clone_posx_reset_ok"
+If ObjectY(c) = 0.0 Then Print "clone_posy_reset_ok"
+If ObjectAngle(c) = 0.0 Then Print "clone_angle_reset_ok"
+
+// ─── Animated object from a built sprite sheet ──────────────────────────
+Dim sheet As Image
+sheet = MakeImage(4, 9)
+SaveImage(sheet, "obj_sheet.bmp", 0)
+DeleteImage(sheet)
+
+Dim anim As Object
+anim = LoadAnimObject("obj_sheet.bmp", 2, 3, 0, 6)   // 2x3 frames, 6 total
+If anim <> Null Then Print "loadanim_ok"
+If ObjectSizeX(anim) = 2 Then Print "sizex_ok"
+If ObjectSizeY(anim) = 3 Then Print "sizey_ok"
+PlayObject(anim, 1, 4, 0.5, 0)      // start frame 1 -> ObjectFrame = 1
+If ObjectPlaying(anim) = 1 Then Print "playing_ok"
+If ObjectFrame(anim) = 1.0 Then Print "frame_ok"
+StopObject(anim)
+If ObjectPlaying(anim) = 0 Then Print "stopped_ok"
+LoopObject(anim, 0, 5, 0.2, 1)
+If ObjectPlaying(anim) = 1 Then Print "loop_ok"
+
+// PaintObject(Object, Image): repaint with a fresh image -> size tracks it.
+Dim paintimg As Image
+paintimg = MakeImage(8, 8)
+PaintObject(anim, paintimg)
+If ObjectSizeX(anim) = 8 Then Print "paint_ok"
+DeleteImage(paintimg)
+
+// ─── Enumeration: clear, create a known set, walk the iterator ──────────
+ClearObjects()
+Dim e1 As Object
+Dim e2 As Object
+Dim e3 As Object
+e1 = MakeObject()
+e2 = MakeObject()
+e3 = MakeObjectFloor()
+Dim count As Integer
+count = 0
+InitObjectList()
+Dim it As Object
+it = NextObject()
+While it <> Null
+  count = count + 1
+  it = NextObject()
+Wend
+Print Str(count)                    // 3
+
+// ─── Render smoke: DrawScreen composites the object pass (no-op headless) ─
+DrawScreen
+Print "fd036_object_done"

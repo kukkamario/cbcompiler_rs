@@ -133,6 +133,17 @@ constexpr CbTypeTag CB_TYPE_FONT = 12;
 template<> struct type_tag<      CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 template<> struct type_tag<const CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 
+// Object — the sprite opaque handle (FD-036 Phase 4).
+constexpr CbTypeTag CB_TYPE_OBJECT = 13;
+template<> struct type_tag<      CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
+template<> struct type_tag<const CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
+
+// Map — the tilemap opaque handle (FD-036 Phase 3). Object is tag 13; the map
+// is tag 14.
+constexpr CbTypeTag CB_TYPE_MAP = 14;
+template<> struct type_tag<      CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
+template<> struct type_tag<const CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -188,6 +199,8 @@ static constexpr CbTypeDesc catalog_types[] = {
     // be inconsistent.
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
+    { "Object",     ::cb_catalog::CB_TYPE_OBJECT },
+    { "Map",        ::cb_catalog::CB_TYPE_MAP },
 #endif
 };
 
@@ -317,6 +330,9 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("gfxmodeexists",    cb_rt_gfx_mode_exists),
     CB_FN("drawscreen",       cb_rt_drawscreen),
     CB_FN("drawscreen",       cb_rt_drawscreen_args),
+    // Game loop (FD-036 Phase 5): built-in object update/draw, deduped per frame.
+    CB_FN("updategame",       cb_rt_update_game),
+    CB_FN("drawgame",         cb_rt_draw_game),
     CB_FN("screengamma",      cb_rt_screen_gamma),
     CB_FN("screenshot",       cb_rt_screenshot),
     CB_FN("cls",              cb_rt_cls),
@@ -369,10 +385,158 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawghostimage",   cb_rt_draw_ghost_image),
     CB_FN("drawimagebox",     cb_rt_draw_image_box),
     CB_FN("hotspot",          cb_rt_hotspot),
+    // FD-036 multi-frame sprite sheets — `frame`/`useMask` overloads (one CB_FN
+    // per arity; useMask is accepted but ignored). LoadAnimImage returns the
+    // existing `Image` opaque type, so no new type tag is registered.
+    CB_FN("loadanimimage",    cb_rt_load_anim_image),
+    CB_FN("makeimage",        cb_rt_make_image_frames),
+    CB_FN("drawimage",        cb_rt_draw_image_frame),
+    CB_FN("drawimage",        cb_rt_draw_image_frame_mask),
+    CB_FN("drawghostimage",   cb_rt_draw_ghost_image_frame),
+    CB_FN("drawimagebox",     cb_rt_draw_image_box_frame),
+    CB_FN("drawimagebox",     cb_rt_draw_image_box_frame_mask),
     CB_FN("imagesoverlap",    cb_rt_images_overlap),
     CB_FN("imagescollide",    cb_rt_images_collide),
     CB_FN("screenwidth",      cb_rt_screen_width),
     CB_FN("screenheight",     cb_rt_screen_height),
+
+    // Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+    // No new opaque type — camera state is process-global. RotateCamera/
+    // TurnCamera take two angle args (logical, render) feeding two independent
+    // fields (cbEnchanted's desyncable angles).
+    CB_FN("positioncamera",   cb_rt_position_camera),
+    CB_FN("movecamera",       cb_rt_move_camera),
+    CB_FN("translatecamera",  cb_rt_translate_camera),
+    CB_FN("rotatecamera",     cb_rt_rotate_camera),
+    CB_FN("turncamera",       cb_rt_turn_camera),
+    CB_FN("camerax",          cb_rt_camera_x),
+    CB_FN("cameray",          cb_rt_camera_y),
+    CB_FN("cameraangle",      cb_rt_camera_angle),
+    CB_FN("drawtoworld",      cb_rt_draw_to_world),
+    CB_FN("mousewx",          cb_rt_mouse_wx),
+    CB_FN("mousewy",          cb_rt_mouse_wy),
+    // Object-aware camera (FD-036 Phase 5, deferred from Phase 2). These take an
+    // `Object`; CameraPick converts a screen point to world then picks.
+    CB_FN("pointcamera",            cb_rt_point_camera),
+    CB_FN("camerafollow",           cb_rt_camera_follow),
+    CB_FN("clonecameraposition",    cb_rt_clone_camera_position),
+    CB_FN("clonecameraorientation", cb_rt_clone_camera_orientation),
+    CB_FN("camerapick",             cb_rt_camera_pick),
+
+    // Tile maps (cb_map.cpp, FD-036 Phase 3). `Map` is the opaque handle
+    // registered above (tag 14). One active map; EditMap's `map` arg is popped
+    // but ignored. SetTile has a 2- and 3-arg form (animSlowness defaults to 1).
+    CB_FN("loadmap",          cb_rt_load_map),
+    CB_FN("makemap",          cb_rt_make_map),
+    CB_FN("mapwidth",         cb_rt_map_width),
+    CB_FN("mapheight",        cb_rt_map_height),
+    CB_FN("getmap",           cb_rt_get_map),
+    CB_FN("getmap2",          cb_rt_get_map2),
+    CB_FN("editmap",          cb_rt_edit_map),
+    CB_FN("setmap",           cb_rt_set_map),
+    CB_FN("settile",          cb_rt_set_tile),
+    CB_FN("settile",          cb_rt_set_tile_slow),
+
+    // Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+    // handle registered above (tag 13). Per-arity overloads share the CB name
+    // with distinct C symbols (the settile/drawimage pattern); the lower-arity C
+    // function bakes the defaults. Documented-but-ignored z/dz/rotQuality args are
+    // exposed as separate higher-arity overloads. PaintObject (Object×Image,
+    // Object×Object, Map×Image) and PlayObject (Object… vs Map…, to start tile
+    // animation) are type-distinct overloads — sema's resolve_overload scores
+    // exact type matches; the Map forms of both live in cb_map.cpp.
+    CB_FN("loadobject",            cb_rt_load_object),
+    CB_FN("loadobject",            cb_rt_load_object_rq),
+    CB_FN("loadanimobject",        cb_rt_load_anim_object),
+    CB_FN("loadanimobject",        cb_rt_load_anim_object_rq),
+    CB_FN("makeobject",            cb_rt_make_object),
+    CB_FN("makeobjectfloor",       cb_rt_make_object_floor),
+    CB_FN("cloneobject",           cb_rt_clone_object),
+    CB_FN("deleteobject",          cb_rt_delete_object),
+    CB_FN("clearobjects",          cb_rt_clear_objects),
+    CB_FN("positionobject",        cb_rt_position_object),
+    CB_FN("positionobject",        cb_rt_position_object_z),
+    CB_FN("moveobject",            cb_rt_move_object_fwd),
+    CB_FN("moveobject",            cb_rt_move_object),
+    CB_FN("moveobject",            cb_rt_move_object_z),
+    CB_FN("translateobject",       cb_rt_translate_object),
+    CB_FN("translateobject",       cb_rt_translate_object_z),
+    CB_FN("cloneobjectposition",   cb_rt_clone_object_position),
+    CB_FN("objectx",               cb_rt_object_x),
+    CB_FN("objecty",               cb_rt_object_y),
+    CB_FN("rotateobject",          cb_rt_rotate_object),
+    CB_FN("turnobject",            cb_rt_turn_object),
+    CB_FN("pointobject",           cb_rt_point_object),
+    CB_FN("cloneobjectorientation", cb_rt_clone_object_orientation),
+    CB_FN("objectangle",           cb_rt_object_angle),
+    CB_FN("getangle2",             cb_rt_get_angle2),
+    CB_FN("distance2",             cb_rt_distance2),
+    CB_FN("paintobject",           cb_rt_paint_object_image),
+    CB_FN("paintobject",           cb_rt_paint_object_object),
+    CB_FN("paintobject",           cb_rt_paint_object_map),
+    CB_FN("maskobject",            cb_rt_mask_object),
+    CB_FN("ghostobject",           cb_rt_ghost_object),
+    CB_FN("mirrorobject",          cb_rt_mirror_object),
+    CB_FN("showobject",            cb_rt_show_object),
+    CB_FN("defaultvisible",        cb_rt_default_visible),
+    CB_FN("objectorder",           cb_rt_object_order),
+    CB_FN("objectsizex",           cb_rt_object_size_x),
+    CB_FN("objectsizey",           cb_rt_object_size_y),
+    CB_FN("playobject",            cb_rt_play_object),
+    CB_FN("playobject",            cb_rt_play_object3),
+    CB_FN("playobject",            cb_rt_play_object4),
+    CB_FN("playobject",            cb_rt_play_object5),
+    CB_FN("playobject",            cb_rt_play_map),
+    CB_FN("playobject",            cb_rt_play_map3),
+    CB_FN("playobject",            cb_rt_play_map4),
+    CB_FN("playobject",            cb_rt_play_map5),
+    CB_FN("loopobject",            cb_rt_loop_object),
+    CB_FN("loopobject",            cb_rt_loop_object3),
+    CB_FN("loopobject",            cb_rt_loop_object4),
+    CB_FN("loopobject",            cb_rt_loop_object5),
+    CB_FN("stopobject",            cb_rt_stop_object),
+    CB_FN("objectplaying",         cb_rt_object_playing),
+    CB_FN("objectframe",           cb_rt_object_frame),
+    CB_FN("objectinteger",         cb_rt_object_integer_get),
+    CB_FN("objectinteger",         cb_rt_object_integer_set),
+    CB_FN("objectfloat",           cb_rt_object_float_get),
+    CB_FN("objectfloat",           cb_rt_object_float_set),
+    CB_FN("objectstring",          cb_rt_object_string_get),
+    CB_FN("objectstring",          cb_rt_object_string_set),
+    CB_FN("objectlife",            cb_rt_object_life_get),
+    CB_FN("objectlife",            cb_rt_object_life_set),
+    CB_FN("initobjectlist",        cb_rt_init_object_list),
+    CB_FN("nextobject",            cb_rt_next_object),
+
+    // Collision (FD-036 Phase 5). SetupCollision is two type-distinct overloads
+    // (object-object vs the type-4 Map form); ObjectRange/ObjectsOverlap have an
+    // optional-arg arity overload. GetCollision returns an `Object` handle.
+    CB_FN("setupcollision",        cb_rt_setup_collision),
+    CB_FN("setupcollision",        cb_rt_setup_collision_map),
+    CB_FN("objectrange",           cb_rt_object_range),
+    CB_FN("objectrange",           cb_rt_object_range3),
+    CB_FN("resetobjectcollision",  cb_rt_reset_object_collision),
+    CB_FN("clearcollisions",       cb_rt_clear_collisions),
+    CB_FN("countcollisions",       cb_rt_count_collisions),
+    CB_FN("getcollision",          cb_rt_get_collision),
+    CB_FN("collisionx",            cb_rt_collision_x),
+    CB_FN("collisiony",            cb_rt_collision_y),
+    CB_FN("collisionangle",        cb_rt_collision_angle),
+    CB_FN("objectsoverlap",        cb_rt_objects_overlap),
+    CB_FN("objectsoverlap",        cb_rt_objects_overlap3),
+
+    // Picking & line of sight (FD-036 Phase 5). PickedObject returns an `Object`
+    // handle; PixelPick is a registered no-op stub (1- and 2-arg forms).
+    CB_FN("objectpickable",        cb_rt_object_pickable),
+    CB_FN("objectpick",            cb_rt_object_pick),
+    CB_FN("pixelpick",             cb_rt_pixel_pick),
+    CB_FN("pixelpick",             cb_rt_pixel_pick_acc),
+    CB_FN("pickedobject",          cb_rt_picked_object),
+    CB_FN("pickedx",               cb_rt_picked_x),
+    CB_FN("pickedy",               cb_rt_picked_y),
+    CB_FN("pickedangle",           cb_rt_picked_angle),
+    CB_FN("objectsight",           cb_rt_object_sight),
+    CB_FN("screenpositionobject",  cb_rt_screen_position_object),
 
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),
