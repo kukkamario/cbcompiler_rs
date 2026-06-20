@@ -1,21 +1,26 @@
 #ifndef CB_MAP_H
 #define CB_MAP_H
 
-// Internal tilemap <-> graphics glue (FD-036 Phase 3). NOT catalog ABI and NOT
-// a CB-visible function. cb_map.cpp owns the single active tilemap; cb_gfx.cpp
-// calls cb_map_render_active() from DrawScreen to composite the map (background
-// layer 0 then foreground layer 1) through the camera, on top of the user's
-// frame and beneath the AddText overlay. Mirrors cb_camera.h's gfx glue.
-//
-// In cbEnchanted the map draws inside the object draw order (drawObjects); with
-// no object subsystem yet (FD-036 Phase 4/5), this standalone pass stands in.
-// Phase 5 relocates the call into the full drawObjects order.
+// Internal tilemap <-> graphics glue (FD-036 Phase 3/4). NOT catalog ABI and NOT
+// a CB-visible function. cb_map.cpp owns the single active tilemap; the Phase-4
+// object render orchestrator (cb_object.cpp's cb_objects_render_all) brackets the
+// world transform and calls cb_map_render_layer() for the two drawn layers, so
+// the map composites in cbEnchanted's drawObjects order (background layer 0
+// before objects, foreground layer 1 after). This replaced Phase 3's standalone
+// cb_map_render_active pass (retired).
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void cb_map_render_active(void);
+// Draws one map layer (slot 0 = background, 1 = foreground) under the world
+// transform the caller has already set. Honors layerShowing/painted/visible and
+// is a no-op when no map is active. The orchestrator owns the transform bracket.
+void cb_map_render_layer(int slot);
+
+// Whether a tilemap is currently active (1) or none is loaded (0). The render
+// orchestrator's early-out checks this alongside the object draw chains.
+int cb_map_active(void);
 
 #ifdef __cplusplus
 }

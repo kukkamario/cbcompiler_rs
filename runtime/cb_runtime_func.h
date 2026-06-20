@@ -34,6 +34,11 @@ typedef struct CbFont CbFont;
    active tilemap; defined in cb_map.cpp. Created by LoadMap/MakeMap. */
 typedef struct CbMap CbMap;
 
+/* Object handle — the CB-visible `Object` opaque type (FD-036 Phase 4, tag 13).
+   A 2D sprite; defined in cb_object.cpp. Created by LoadObject/LoadAnimObject/
+   MakeObject/MakeObjectFloor/CloneObject, freed by DeleteObject. */
+typedef struct CbObject CbObject;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -236,6 +241,84 @@ void    cb_rt_edit_map(CbMap* map_ignored, int32_t layer, int32_t tx, int32_t ty
 void    cb_rt_set_map(int32_t back_layer, int32_t over_layer);
 void    cb_rt_set_tile(int32_t tile, int32_t anim_length);
 void    cb_rt_set_tile_slow(int32_t tile, int32_t anim_length, int32_t anim_slowness);
+/* PaintObject(map, image): repaints the active tilemap's tileset (cb_map.cpp).
+   The `map` handle is popped but ignored, like EditMap. */
+void    cb_rt_paint_object_map(CbMap* map, const CbImage* img);
+
+/* Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+   CbObject* handle (tag 13); LoadObject/LoadAnimObject/MakeObject/MakeObjectFloor/
+   CloneObject return it (Null on failure). Many funcs are overloaded by arity/
+   type — sema resolves them; each maps to a distinct C symbol below sharing one
+   CB name in catalog.cpp. Documented-but-ignored z/dz/rotQuality args are
+   exposed as per-arity overloads (this port controls emission; the catalog has
+   no default-arg mechanism for runtime funcs). The query funcs return 0 / no-op
+   on a null handle. Angles are degrees, 0° = right. */
+/* Creation / destruction */
+CbObject* cb_rt_load_object(const CbString* path);
+CbObject* cb_rt_load_object_rq(const CbString* path, int32_t rot_quality);
+CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_w, int32_t frame_h,
+                                 int32_t start_frame, int32_t frame_count);
+CbObject* cb_rt_load_anim_object_rq(const CbString* path, int32_t frame_w, int32_t frame_h,
+                                    int32_t start_frame, int32_t frame_count, int32_t rot_quality);
+CbObject* cb_rt_make_object(void);
+CbObject* cb_rt_make_object_floor(void);
+CbObject* cb_rt_clone_object(const CbObject* src);
+void      cb_rt_delete_object(CbObject* o);
+void      cb_rt_clear_objects(void);
+/* Position / movement (z/dz forms ignore the depth arg) */
+void      cb_rt_position_object(CbObject* o, double x, double y);
+void      cb_rt_position_object_z(CbObject* o, double x, double y, double z);
+void      cb_rt_move_object(CbObject* o, double forward, double side);
+void      cb_rt_move_object_z(CbObject* o, double forward, double side, double z);
+void      cb_rt_translate_object(CbObject* o, double dx, double dy);
+void      cb_rt_translate_object_z(CbObject* o, double dx, double dy, double dz);
+void      cb_rt_clone_object_position(CbObject* dst, const CbObject* src);
+double    cb_rt_object_x(const CbObject* o);
+double    cb_rt_object_y(const CbObject* o);
+/* Rotation / angle */
+void      cb_rt_rotate_object(CbObject* o, double angle);
+void      cb_rt_turn_object(CbObject* o, double speed);
+void      cb_rt_point_object(CbObject* o, const CbObject* target);
+void      cb_rt_clone_object_orientation(CbObject* dst, const CbObject* src);
+double    cb_rt_object_angle(const CbObject* o);
+double    cb_rt_get_angle2(const CbObject* a, const CbObject* b);
+double    cb_rt_distance2(const CbObject* a, const CbObject* b);
+/* Appearance (PaintObject is three type-distinct overloads; the Map form is
+   cb_rt_paint_object_map above) */
+void      cb_rt_paint_object_image(CbObject* o, const CbImage* img);
+void      cb_rt_paint_object_object(CbObject* o, const CbObject* src);
+void      cb_rt_mask_object(CbObject* o, int32_t r, int32_t g, int32_t b);
+void      cb_rt_ghost_object(CbObject* o, double alpha);
+void      cb_rt_mirror_object(CbObject* o, int32_t dir);
+void      cb_rt_show_object(CbObject* o, int32_t visible);
+void      cb_rt_default_visible(int32_t visible);
+void      cb_rt_object_order(CbObject* o, int32_t direction);
+int32_t   cb_rt_object_size_x(const CbObject* o);
+int32_t   cb_rt_object_size_y(const CbObject* o);
+/* Animation (Play/LoopObject: arities 1/3/4/5) */
+void      cb_rt_play_object(CbObject* o);
+void      cb_rt_play_object3(CbObject* o, int32_t start_f, int32_t end_f);
+void      cb_rt_play_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_play_object5(CbObject* o, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+void      cb_rt_loop_object(CbObject* o);
+void      cb_rt_loop_object3(CbObject* o, int32_t start_f, int32_t end_f);
+void      cb_rt_loop_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_loop_object5(CbObject* o, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+void      cb_rt_stop_object(CbObject* o);
+int32_t   cb_rt_object_playing(const CbObject* o);
+double    cb_rt_object_frame(const CbObject* o);
+/* Custom data slots / life (get and set share one CB name, distinct arity) */
+int32_t   cb_rt_object_integer_get(const CbObject* o);
+void      cb_rt_object_integer_set(CbObject* o, int32_t value);
+double    cb_rt_object_float_get(const CbObject* o);
+void      cb_rt_object_float_set(CbObject* o, double value);
+CbString* cb_rt_object_string_get(const CbObject* o);
+void      cb_rt_object_string_set(CbObject* o, const CbString* value);
+int32_t   cb_rt_object_life_get(const CbObject* o);
+void      cb_rt_object_life_set(CbObject* o, int32_t frames);
+/* Enumeration (single shared cursor; NextObject returns Null at end) */
+void      cb_rt_init_object_list(void);
+CbObject* cb_rt_next_object(void);
 
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/

@@ -16,7 +16,7 @@
 #include "cb_runtime.h"
 #include "cb_input.h"
 #include "cb_camera.h"
-#include "cb_map.h"
+#include "cb_object.h"
 #include "cb_font.h"
 #include "cb_geom.h"
 
@@ -270,13 +270,14 @@ static void render_queued_texts(void);
 static void do_draw_screen(bool clear_after) {
     if (!display) return;
 
-    // FD-036 Phase 3: composite the active tilemap (background then foreground)
-    // through the camera onto the backbuffer — on top of this frame's user draws
-    // and beneath the AddText overlay (mirrors cbEnchanted's DrawScreen ->
-    // drawObjects ordering). A no-op when no map is loaded. Ensure the backbuffer
-    // is the target first (a stray DrawToImage must not redirect the map).
+    // FD-036 Phase 4: composite the full object pass through the camera onto the
+    // backbuffer — on top of this frame's user draws and beneath the AddText
+    // overlay (mirrors cbEnchanted's DrawScreen -> drawObjects ordering: map
+    // background → floor objects → regular objects → map foreground). A no-op when
+    // there is nothing to draw. Ensure the backbuffer is the target first (a stray
+    // DrawToImage must not redirect the pass).
     al_set_target_backbuffer(display);
-    cb_map_render_active();
+    cb_objects_render_all();
 
     // Composite queued (Locate/AddText) text onto this frame before presenting.
     render_queued_texts();
@@ -1107,6 +1108,14 @@ extern "C" ALLEGRO_EVENT_QUEUE* cb_gfx_event_queue(void) {
 extern "C" void cb_gfx_design_size(int32_t* w, int32_t* h) {
     if (w) *w = design_w;
     if (h) *h = design_h;
+}
+
+// Internal glue for cb_object.cpp / cb_map.cpp (FD-036 Phase 4): the live bitmap
+// behind an `Image` handle, used by PaintObject(Object/Map, Image). Forward-
+// declared at each call site rather than in a public header. Null when the image
+// or its bitmap is null.
+extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img) {
+    return (img && img->bmp) ? img->bmp : nullptr;
 }
 
 // Whether a graphics mode is available. Best-effort: any positive resolution is

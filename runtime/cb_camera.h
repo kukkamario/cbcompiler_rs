@@ -35,6 +35,12 @@ int cb_camera_draw_cmd_to_world(void);
 int cb_camera_image_to_world(void);
 int cb_camera_text_to_world(void);
 
+// cb_camera.cpp -> cb_object.cpp (FD-036 Phase 4): the current zoom, and the
+// world-space size of the visible draw area (cbEnchanted getDrawAreaWidth/Height
+// — rotated screen extent / zoom). Floor objects tile to fill this area.
+double cb_camera_zoom(void);
+void cb_camera_draw_area(double* w, double* h);
+
 // cb_gfx.cpp -> cb_camera.cpp: the logical design resolution (cbEnchanted's
 // defaultWidth/Height; 400x300 until a Screen command sets it). The camera
 // centers its world transform on (w/2, h/2).

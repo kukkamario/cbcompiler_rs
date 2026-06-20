@@ -324,9 +324,11 @@ CoolBasic `…Animation` commands play a video file (single active video).
 ## Objects (Sprites)
 
 The object system represents 2D sprites with position, rotation, scale, optional
-animation, custom data slots, and collision. Objects are integer handles. "Floor"
-objects draw before regular objects (background layering). Positions are in world
-space unless noted.
+animation, custom data slots, and collision. `Object` is an **opaque handle type**
+(tag 13) — in cbcompiler_rs the handle's bit pattern is the runtime's `CbObject*`,
+mirroring `Image`/`Font`/`Map`; there is no integer id (cbEnchanted's legacy
+`Integer` handles and shared id space are dropped). "Floor" objects draw before
+regular objects (background layering). Positions are in world space unless noted.
 
 ### Creation & destruction
 
@@ -336,9 +338,9 @@ space unless noted.
 | `LoadAnimObject` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer [, rotQuality: Integer]` | `Object` | Loads a sprite-sheet object. `rotQuality` as in `LoadObject` (accepted but ignored) |
 | `MakeObject` | — | `Object` | Creates an empty (imageless) object |
 | `MakeObjectFloor` | — | `Object` | Creates a floor object (drawn before regular objects) |
-| `CloneObject` | `obj: Object` | `Object` | Copies an object's image, mask, frames, animation, range and visibility; **position and angle reset to 0** (not copied). Map objects can't be cloned |
+| `CloneObject` | `obj: Object` | `Object` | Copies an object's image (shared, reference-counted), mask, frames, animation and range; **position and angle reset to 0** and **visibility is forced on** (`visible=true`, faithful to cbEnchanted — not copied). Map objects can't be cloned |
 | `DeleteObject` | `obj: Object` | — | Deletes an object and clears its collisions |
-| `ClearObjects` | — | — | Deletes all objects and the tilemap (map freed via `DeleteTileMap`; the object registry is fully cleared) |
+| `ClearObjects` | — | — | Deletes all objects and clears the draw chains. **Objects-only — the active tilemap is left alone** (cbcompiler_rs divergence: the map is an independent singleton owned by `LoadMap`/`MakeMap`, not a floor object, so `ClearObjects` does not free it) |
 
 ### Position & movement
 
@@ -368,7 +370,9 @@ space unless noted.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `PaintObject` | `obj: Object, source: Integer` | — | Replaces the object's image; positive id = another object's image, negative = `-imageId` |
+| `PaintObject` | `obj: Object, image: Image` | — | Replaces the object's image with a masked clone of the image |
+| `PaintObject` | `obj: Object, source: Object` | — | Replaces the object's image with a clone of another object's image |
+| `PaintObject` | `map: Map, image: Image` | — | Repaints the active tilemap's tileset with the image (the `map` handle is popped but ignored, like `EditMap`) |
 | `MaskObject` | `obj: Object, r: Integer, g: Integer, b: Integer` | — | Sets a transparent color key |
 | `GhostObject` | `obj: Object, alpha: Float` | — | Sets alpha 0–100 (clamped) |
 | `MirrorObject` | `obj: Object, direction: Integer` | — | Mirrors the image: 0=horizontal, 1=vertical, 2=both (regular objects only) |
@@ -431,8 +435,8 @@ See the [collision model](#collision-model) note for types and handling modes.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `InitObjectList` | — | — | Resets the object iterator |
-| `NextObject` | — | `Object` | Next object id (0 at end); call `InitObjectList` first |
+| `InitObjectList` | — | — | Resets the shared object iterator |
+| `NextObject` | — | `Object` | Next object handle in creation order, or `Null` at the end; call `InitObjectList` first. (cbcompiler_rs divergence: returns an `Object` handle / `Null` rather than cbEnchanted's id / `0`, and does **not** surface map ids — `Map` is a separate opaque type) |
 
 ---
 
@@ -843,8 +847,27 @@ intentionally. Known status and divergences as of the latest runtime work
   hook for now; FD-036 Phase 5 relocates it into the object draw order, which
   also drives time-based tile animation (`SetTile` stores the params; `GetMap`
   collision/`ObjectSight` use of layer 2 also land in Phase 5).
-- **Not yet implemented** in cbcompiler_rs: objects/sprites, collision,
-  sound, video playback, particles, file I/O, memblocks,
+- **Objects / sprites** (FD-036 Phase 4, `runtime/cb_object.cpp`) are implemented:
+  creation/lifecycle (`LoadObject`/`LoadAnimObject`/`MakeObject`/`MakeObjectFloor`/
+  `CloneObject`/`DeleteObject`/`ClearObjects`), position/movement, rotation/angle
+  (incl. `GetAngle2`/`Distance2`/`PointObject`), appearance (`PaintObject` — three
+  handle-typed overloads — `MaskObject`/`GhostObject`/`MirrorObject`/`ShowObject`/
+  `DefaultVisible`/`ObjectOrder`/`ObjectSizeX`/`Y`), animation (`PlayObject`/
+  `LoopObject`/`StopObject`/`ObjectPlaying`/`ObjectFrame`), custom data slots
+  (`ObjectInteger`/`Float`/`String`), `ObjectLife`, and enumeration
+  (`InitObjectList`/`NextObject`). `Object` is the opaque tag-13 handle (no integer
+  ids; the registry is creation-order + per-draw-chain vectors). Textures are
+  **shared and reference-counted**: `CloneObject` shares the bitmap (resets pos/
+  angle, forces `visible=true`); `PaintObject`/`MaskObject` mutate the shared
+  bitmap in place so all clones see the change; `MirrorObject` repoints the one
+  object to a fresh private bitmap. The render pass now reproduces cbEnchanted's
+  `drawObjects` order under one world transform — map background → floor objects →
+  regular objects → map foreground — replacing Phase 3's standalone map pass.
+  Animation advancement and `ObjectLife` decrement are pinned (pure helpers,
+  unit-tested) but driven by the Phase 5 game-loop update tick; collision,
+  picking, `ScreenPositionObject`, and the object-aware Camera funcs are Phase 5.
+- **Not yet implemented** in cbcompiler_rs: object collision &
+  picking (FD-036 Phase 5), sound, video playback, particles, file I/O, memblocks,
   `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System
   funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 

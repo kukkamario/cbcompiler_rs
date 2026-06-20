@@ -456,10 +456,11 @@ mod tests {
         // TestHandle and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 4);
+            assert_eq!(catalog.types.len(), 5);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
-            // Map is tag 14 (FD-036 Phase 3); tag 13 is reserved for Object.
+            // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
+            assert_eq!(types_by_name["Object"].tag, 13);
             assert_eq!(types_by_name["Map"].tag, 14);
         }
         #[cfg(cb_no_allegro)]
@@ -696,6 +697,124 @@ mod tests {
             let set_tile_slow = by_symbol["cb_rt_set_tile_slow"];
             assert_eq!(set_tile_slow.name, "settile");
             assert_eq!(set_tile_slow.params.len(), 3);
+
+            // Objects / sprites (FD-036 Phase 4). `Object` is the opaque tag-13
+            // handle that the creation funcs return and the rest borrow. Spot-
+            // check the overload families: the z/rotQuality arity overloads, the
+            // dual getter/setter slots, and PaintObject's three type-distinct
+            // rows (Object×Image, Object×Object, Map×Image).
+            let object_ty = IrType::RuntimeType("Object".to_string());
+            let image_ty2 = IrType::RuntimeType("Image".to_string());
+            let map_ty2 = IrType::RuntimeType("Map".to_string());
+
+            let load_object = by_symbol["cb_rt_load_object"];
+            assert_eq!(load_object.name, "loadobject");
+            assert_eq!(load_object.params.len(), 1);
+            assert_eq!(load_object.params[0].ty, IrType::String);
+            assert_eq!(load_object.return_ty, object_ty);
+            // 2-arg LoadObject: rotQuality overload (Int), same CB name.
+            let load_object_rq = by_symbol["cb_rt_load_object_rq"];
+            assert_eq!(load_object_rq.name, "loadobject");
+            assert_eq!(load_object_rq.params.len(), 2);
+            assert_eq!(load_object_rq.params[1].ty, IrType::Int);
+
+            let load_anim = by_symbol["cb_rt_load_anim_object"];
+            assert_eq!(load_anim.name, "loadanimobject");
+            assert_eq!(load_anim.params.len(), 5);
+            assert_eq!(load_anim.return_ty, object_ty);
+            assert_eq!(
+                by_symbol["cb_rt_load_anim_object_rq"].name,
+                "loadanimobject"
+            );
+            assert_eq!(by_symbol["cb_rt_load_anim_object_rq"].params.len(), 6);
+
+            let make_object = by_symbol["cb_rt_make_object"];
+            assert_eq!(make_object.name, "makeobject");
+            assert_eq!(make_object.params.len(), 0);
+            assert_eq!(make_object.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_make_object_floor"].name, "makeobjectfloor");
+
+            let clone_object = by_symbol["cb_rt_clone_object"];
+            assert_eq!(clone_object.name, "cloneobject");
+            assert_eq!(clone_object.params[0].ty, object_ty);
+            assert_eq!(clone_object.return_ty, object_ty);
+
+            // PositionObject: 3-arg primary + 4-arg z-ignored overload.
+            let pos_object = by_symbol["cb_rt_position_object"];
+            assert_eq!(pos_object.name, "positionobject");
+            assert_eq!(pos_object.params.len(), 3);
+            assert_eq!(pos_object.params[0].ty, object_ty);
+            assert_eq!(pos_object.params[1].ty, IrType::Float);
+            assert_eq!(pos_object.return_ty, IrType::Void);
+            assert_eq!(by_symbol["cb_rt_position_object_z"].name, "positionobject");
+            assert_eq!(by_symbol["cb_rt_position_object_z"].params.len(), 4);
+
+            let object_x = by_symbol["cb_rt_object_x"];
+            assert_eq!(object_x.name, "objectx");
+            assert_eq!(object_x.params[0].ty, object_ty);
+            assert_eq!(object_x.return_ty, IrType::Float);
+
+            // GetAngle2/Distance2: two Object args, Float return.
+            let get_angle2 = by_symbol["cb_rt_get_angle2"];
+            assert_eq!(get_angle2.name, "getangle2");
+            assert_eq!(get_angle2.params.len(), 2);
+            assert_eq!(get_angle2.params[0].ty, object_ty);
+            assert_eq!(get_angle2.params[1].ty, object_ty);
+            assert_eq!(get_angle2.return_ty, IrType::Float);
+
+            // PaintObject: three overloads disambiguated by param type.
+            let paint_img = by_symbol["cb_rt_paint_object_image"];
+            assert_eq!(paint_img.name, "paintobject");
+            assert_eq!(paint_img.params[0].ty, object_ty);
+            assert_eq!(paint_img.params[1].ty, image_ty2);
+            let paint_obj = by_symbol["cb_rt_paint_object_object"];
+            assert_eq!(paint_obj.name, "paintobject");
+            assert_eq!(paint_obj.params[0].ty, object_ty);
+            assert_eq!(paint_obj.params[1].ty, object_ty);
+            let paint_map = by_symbol["cb_rt_paint_object_map"];
+            assert_eq!(paint_map.name, "paintobject");
+            assert_eq!(paint_map.params[0].ty, map_ty2);
+            assert_eq!(paint_map.params[1].ty, image_ty2);
+
+            // PlayObject arity family 1/3/4/5.
+            assert_eq!(by_symbol["cb_rt_play_object"].name, "playobject");
+            assert_eq!(by_symbol["cb_rt_play_object"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_play_object3"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_play_object4"].params.len(), 4);
+            let play5 = by_symbol["cb_rt_play_object5"];
+            assert_eq!(play5.name, "playobject");
+            assert_eq!(play5.params.len(), 5);
+            assert_eq!(play5.params[3].ty, IrType::Float);
+            assert_eq!(play5.params[4].ty, IrType::Int);
+
+            // ObjectInteger get(1)/set(2) share one CB name; ObjectString get
+            // returns String. ObjectLife set marks usingLife.
+            let int_get = by_symbol["cb_rt_object_integer_get"];
+            assert_eq!(int_get.name, "objectinteger");
+            assert_eq!(int_get.params.len(), 1);
+            assert_eq!(int_get.return_ty, IrType::Int);
+            let int_set = by_symbol["cb_rt_object_integer_set"];
+            assert_eq!(int_set.name, "objectinteger");
+            assert_eq!(int_set.params.len(), 2);
+            assert_eq!(int_set.params[1].ty, IrType::Int);
+            assert_eq!(int_set.return_ty, IrType::Void);
+            assert_eq!(
+                by_symbol["cb_rt_object_string_get"].return_ty,
+                IrType::String
+            );
+            assert_eq!(by_symbol["cb_rt_object_life_set"].name, "objectlife");
+            assert_eq!(by_symbol["cb_rt_object_life_set"].params.len(), 2);
+
+            // ObjectSizeX/Y return Int; ObjectFrame returns Float.
+            assert_eq!(by_symbol["cb_rt_object_size_x"].return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_object_frame"].return_ty, IrType::Float);
+
+            // Enumeration: NextObject is a 0-arg Object return (Null at end).
+            let next_object = by_symbol["cb_rt_next_object"];
+            assert_eq!(next_object.name, "nextobject");
+            assert_eq!(next_object.params.len(), 0);
+            assert_eq!(next_object.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_init_object_list"].params.len(), 0);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

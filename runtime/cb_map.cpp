@@ -27,6 +27,11 @@
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_image.h>
 
+// Internal glue: the live bitmap behind an `Image` handle (defined in cb_gfx.cpp)
+// — used by PaintObject(Map, Image). Forward-declared rather than widening a
+// public header (mirrors cb_object.cpp / cb_input.cpp's cb_gfx glue).
+extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
+
 #include <fstream>
 #include <string>
 #include <utility>
@@ -239,18 +244,42 @@ extern "C" void cb_rt_set_tile_slow(int32_t tile, int32_t anim_length,
     set_tile_impl(tile, anim_length, anim_slowness);
 }
 
-// ─── Render pass (glue for cb_gfx.cpp; see cb_map.h) ────────────────────
+// ─── Appearance ─────────────────────────────────────────────────────────
 
-extern "C" void cb_map_render_active(void) {
+// PaintObject(map, image): repaints the active tilemap's tileset with an image.
+// The `map` handle is popped but ignored (single active map, like EditMap).
+// cbEnchanted: maps can only be painted with an image (objectinterface.cpp:265).
+extern "C" void cb_rt_paint_object_map(CbMap* map_ignored, const CbImage* img) {
+    (void)map_ignored;
+    if (!active_map) return;
+    ALLEGRO_BITMAP* src = cb_gfx_image_bitmap(img);
+    if (!src) return;
+
+    int prev_flags = al_get_new_bitmap_flags();
+    int flags = prev_flags;
+    if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
+    al_set_new_bitmap_flags(flags);
+    ALLEGRO_BITMAP* clone = al_clone_bitmap(src);
+    al_set_new_bitmap_flags(prev_flags);
+    if (!clone) return;
+
+    const CbMapData& d = active_map->data;
+    al_convert_mask_to_alpha(clone, al_map_rgb(d.maskR, d.maskG, d.maskB));
+    if (active_map->texture) al_destroy_bitmap(active_map->texture);
+    active_map->texture = clone;
+    active_map->painted = true;
+}
+
+// ─── Render pass (glue for the Phase-4 object orchestrator; see cb_map.h) ─
+
+extern "C" int cb_map_active(void) { return active_map != nullptr ? 1 : 0; }
+
+// Draws one layer under the world transform the caller (cb_objects_render_all)
+// has already set — no transform bracket here, so the map composites in the
+// object draw order (background before objects, foreground after).
+extern "C" void cb_map_render_layer(int slot) {
     if (!active_map || !active_map->painted || !active_map->visible) return;
     if (!active_map->texture || !al_get_target_bitmap()) return;
-
-    // Background (layer 0) then foreground (layer 1), both under the plain world
-    // transform; restore identity so the text overlay draws in screen space.
-    al_use_transform(cb_camera_world_transform());
-    draw_layer(0);
-    draw_layer(1);
-    ALLEGRO_TRANSFORM id;
-    al_identity_transform(&id);
-    al_use_transform(&id);
+    if (slot < 0 || slot > 1) return;
+    draw_layer(slot);
 }

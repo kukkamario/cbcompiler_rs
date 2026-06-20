@@ -133,8 +133,13 @@ constexpr CbTypeTag CB_TYPE_FONT = 12;
 template<> struct type_tag<      CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 template<> struct type_tag<const CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 
-// Map — the tilemap opaque handle (FD-036 Phase 3). Tag 13 is reserved for
-// `Object` (FD-036 Phase 4); the map is tag 14.
+// Object — the sprite opaque handle (FD-036 Phase 4).
+constexpr CbTypeTag CB_TYPE_OBJECT = 13;
+template<> struct type_tag<      CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
+template<> struct type_tag<const CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
+
+// Map — the tilemap opaque handle (FD-036 Phase 3). Object is tag 13; the map
+// is tag 14.
 constexpr CbTypeTag CB_TYPE_MAP = 14;
 template<> struct type_tag<      CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
 template<> struct type_tag<const CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
@@ -194,6 +199,7 @@ static constexpr CbTypeDesc catalog_types[] = {
     // be inconsistent.
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
+    { "Object",     ::cb_catalog::CB_TYPE_OBJECT },
     { "Map",        ::cb_catalog::CB_TYPE_MAP },
 #endif
 };
@@ -420,6 +426,71 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("setmap",           cb_rt_set_map),
     CB_FN("settile",          cb_rt_set_tile),
     CB_FN("settile",          cb_rt_set_tile_slow),
+
+    // Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+    // handle registered above (tag 13). Per-arity overloads share the CB name
+    // with distinct C symbols (the settile/drawimage pattern); the lower-arity C
+    // function bakes the defaults. Documented-but-ignored z/dz/rotQuality args are
+    // exposed as separate higher-arity overloads. PaintObject is three type-
+    // distinct overloads (Object×Image, Object×Object, Map×Image) — sema's
+    // resolve_overload scores exact type matches; the Map form lives in cb_map.cpp.
+    CB_FN("loadobject",            cb_rt_load_object),
+    CB_FN("loadobject",            cb_rt_load_object_rq),
+    CB_FN("loadanimobject",        cb_rt_load_anim_object),
+    CB_FN("loadanimobject",        cb_rt_load_anim_object_rq),
+    CB_FN("makeobject",            cb_rt_make_object),
+    CB_FN("makeobjectfloor",       cb_rt_make_object_floor),
+    CB_FN("cloneobject",           cb_rt_clone_object),
+    CB_FN("deleteobject",          cb_rt_delete_object),
+    CB_FN("clearobjects",          cb_rt_clear_objects),
+    CB_FN("positionobject",        cb_rt_position_object),
+    CB_FN("positionobject",        cb_rt_position_object_z),
+    CB_FN("moveobject",            cb_rt_move_object),
+    CB_FN("moveobject",            cb_rt_move_object_z),
+    CB_FN("translateobject",       cb_rt_translate_object),
+    CB_FN("translateobject",       cb_rt_translate_object_z),
+    CB_FN("cloneobjectposition",   cb_rt_clone_object_position),
+    CB_FN("objectx",               cb_rt_object_x),
+    CB_FN("objecty",               cb_rt_object_y),
+    CB_FN("rotateobject",          cb_rt_rotate_object),
+    CB_FN("turnobject",            cb_rt_turn_object),
+    CB_FN("pointobject",           cb_rt_point_object),
+    CB_FN("cloneobjectorientation", cb_rt_clone_object_orientation),
+    CB_FN("objectangle",           cb_rt_object_angle),
+    CB_FN("getangle2",             cb_rt_get_angle2),
+    CB_FN("distance2",             cb_rt_distance2),
+    CB_FN("paintobject",           cb_rt_paint_object_image),
+    CB_FN("paintobject",           cb_rt_paint_object_object),
+    CB_FN("paintobject",           cb_rt_paint_object_map),
+    CB_FN("maskobject",            cb_rt_mask_object),
+    CB_FN("ghostobject",           cb_rt_ghost_object),
+    CB_FN("mirrorobject",          cb_rt_mirror_object),
+    CB_FN("showobject",            cb_rt_show_object),
+    CB_FN("defaultvisible",        cb_rt_default_visible),
+    CB_FN("objectorder",           cb_rt_object_order),
+    CB_FN("objectsizex",           cb_rt_object_size_x),
+    CB_FN("objectsizey",           cb_rt_object_size_y),
+    CB_FN("playobject",            cb_rt_play_object),
+    CB_FN("playobject",            cb_rt_play_object3),
+    CB_FN("playobject",            cb_rt_play_object4),
+    CB_FN("playobject",            cb_rt_play_object5),
+    CB_FN("loopobject",            cb_rt_loop_object),
+    CB_FN("loopobject",            cb_rt_loop_object3),
+    CB_FN("loopobject",            cb_rt_loop_object4),
+    CB_FN("loopobject",            cb_rt_loop_object5),
+    CB_FN("stopobject",            cb_rt_stop_object),
+    CB_FN("objectplaying",         cb_rt_object_playing),
+    CB_FN("objectframe",           cb_rt_object_frame),
+    CB_FN("objectinteger",         cb_rt_object_integer_get),
+    CB_FN("objectinteger",         cb_rt_object_integer_set),
+    CB_FN("objectfloat",           cb_rt_object_float_get),
+    CB_FN("objectfloat",           cb_rt_object_float_set),
+    CB_FN("objectstring",          cb_rt_object_string_get),
+    CB_FN("objectstring",          cb_rt_object_string_set),
+    CB_FN("objectlife",            cb_rt_object_life_get),
+    CB_FN("objectlife",            cb_rt_object_life_set),
+    CB_FN("initobjectlist",        cb_rt_init_object_list),
+    CB_FN("nextobject",            cb_rt_next_object),
 
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),

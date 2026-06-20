@@ -284,6 +284,16 @@ fn runtime_map_fd036() {
 }
 
 #[test]
+fn runtime_object_fd036() {
+    // MakeObject/Position/Rotate/Turn/slot/life round-trips, GetAngle2/Distance2,
+    // CloneObject pos+angle reset, a built sprite-sheet object (Play/Stop/Loop/
+    // Size/Frame), PaintObject, and InitObjectList/NextObject enumeration. Writes
+    // the sheet via SaveImage, so it needs an isolated working directory. The pure
+    // object math is unit-tested headlessly in runtime/tests/test_object.cpp.
+    run_graphics_isolated("runtime_object_fd036");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run_graphics("runtime_text_fd018");
 }

@@ -177,3 +177,18 @@ extern "C" const ALLEGRO_TRANSFORM* cb_camera_world_transform(void) {
 extern "C" int cb_camera_draw_cmd_to_world(void) { return draw_cmd_to_world; }
 extern "C" int cb_camera_image_to_world(void) { return draw_image_to_world; }
 extern "C" int cb_camera_text_to_world(void) { return draw_text_to_world; }
+
+extern "C" double cb_camera_zoom(void) { return camera_zoom; }
+
+// The world-space draw area (cbEnchanted CameraInterface::getDrawAreaWidth/
+// Height): the rotated extent of the design resolution, divided by zoom. Used by
+// the floor-object tiling fill (cb_object.cpp). Visual-only — not golden-tested.
+extern "C" void cb_camera_draw_area(double* w, double* h) {
+    int dw = 0, dh = 0;
+    cb_gfx_design_size(&dw, &dh);
+    double c = std::fabs(std::cos(camera_rad_angle));
+    double s = std::fabs(std::sin(camera_rad_angle));
+    double inv = 1.0 / (camera_zoom > kMinZoom ? camera_zoom : kMinZoom);
+    if (w) *w = (c * dw + s * dh) * inv;
+    if (h) *h = (c * dh + s * dw) * inv;
+}
