@@ -306,7 +306,7 @@ void render_floor(const CbObject* o, ALLEGRO_BITMAP* bmp) {
     double camX = cb_rt_camera_x();
     double camY = cb_rt_camera_y();
     double scrW = 0.0, scrH = 0.0;
-    cb_camera_draw_area(&scrW, &scrH);
+    cb::camera::draw_area(&scrW, &scrH);
 
     double areaTop = camY + 0.5 * scrH;
     double areaBottom = camY - 0.5 * scrH;
@@ -947,7 +947,7 @@ void circle_circle_test(CbCollisionCheck& c) {
 // around the object; fixed cardinal contact normals (top 270 / right 180 /
 // bottom 90 / left 0). The map-wall "other" is Null (a Map is not an Object).
 void rect_map_test(CbCollisionCheck& c) {
-    const CbMapData* m = cb_map_active_data();
+    const CbMapData* m = cb::map::active_data();
     if (!m || m->tileWidth <= 0 || m->tileHeight <= 0) return;
     CbObject* a = c.a;
     bool collided[4] = {false, false, false, false};
@@ -1020,7 +1020,7 @@ void rect_map_test(CbCollisionCheck& c) {
 // lookup decides rect-style flush push-out vs corner push-out). The goto
 // breakouts become a `done` flag that stops each pass at the first resolved tile.
 void circle_map_test(CbCollisionCheck& c) {
-    const CbMapData* m = cb_map_active_data();
+    const CbMapData* m = cb::map::active_data();
     if (!m || m->tileWidth <= 0 || m->tileHeight <= 0) return;
     CbObject* a = c.a;
     bool collided[4] = {false, false, false, false};
@@ -1329,7 +1329,7 @@ extern "C" double cb_rt_picked_angle(void) { return last_picked_angle; }
 // guards cbEnchanted's null-deref when no map exists).
 extern "C" int32_t cb_rt_object_sight(const CbObject* a, const CbObject* b) {
     if (!a || !b) return 0;
-    const CbMapData* m = cb_map_active_data();
+    const CbMapData* m = cb::map::active_data();
     if (!m) return 1;
     double x1 = a->posX, y1 = a->posY, x2 = b->posX, y2 = b->posY;
     cb_map_world_to_map(*m, x1, y1);
@@ -1361,7 +1361,7 @@ extern "C" void cb_object_pick_at(double wx, double wy) {
 // screen coordinate (screen→world through the camera, then position).
 extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) {
     if (!o) return;
-    cb_camera_screen_to_world(&sx, &sy);
+    cb::camera::screen_to_world(&sx, &sy);
     o->posX = sx;
     o->posY = sy;
 }
@@ -1402,7 +1402,7 @@ extern "C" void cb_objects_update_all(void) {
         }
         o->collisions.clear();  // eraseCollisions: wipe last tick's contacts
     }
-    cb_map_tick_animation();    // advance animated map tiles
+    cb::map::tick_animation();    // advance animated map tiles
     cb_run_collision_checks();  // re-test every registered check
     for (CbObject* o : live_objects) o->checkCollisions = true;  // re-arm
 }
@@ -1414,14 +1414,14 @@ extern "C" void cb_objects_update_all(void) {
 // 1). A no-op when there is nothing to draw. The caller (do_draw_screen) has
 // already set the backbuffer as the target.
 extern "C" void cb_objects_render_all(void) {
-    if (!cb_map_active() && floor_objects.empty() && regular_objects.empty()) return;
+    if (!cb::map::active() && floor_objects.empty() && regular_objects.empty()) return;
     if (!al_get_target_bitmap()) return;
 
-    al_use_transform(cb_camera_world_transform());
-    cb_map_render_layer(0);
+    al_use_transform(cb::camera::world_transform());
+    cb::map::render_layer(0);
     for (CbObject* o : floor_objects) render_object(o);
     for (CbObject* o : regular_objects) render_object(o);
-    cb_map_render_layer(1);
+    cb::map::render_layer(1);
 
     ALLEGRO_TRANSFORM id;
     al_identity_transform(&id);

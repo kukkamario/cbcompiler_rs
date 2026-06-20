@@ -324,7 +324,7 @@ static void do_draw_screen(bool clear_after) {
     // DrawToImage must not redirect the pass).
     al_set_target_backbuffer(g_display);
     if (!game_updated) cb_objects_update_all();
-    cb_camera_update_follow();
+    cb::camera::update_follow();
     if (!game_drawn) cb_objects_render_all();
     game_updated = false;
     game_drawn   = false;
@@ -525,7 +525,7 @@ static bool gfx_begin_world(int category_flag) {
     bool world = category_flag &&
                  g_display && current_target == al_get_backbuffer(g_display);
     if (world) {
-        al_use_transform(cb_camera_render_transform());
+        al_use_transform(cb::camera::render_transform());
     }
     return world;
 }
@@ -540,7 +540,7 @@ static void gfx_end_world(bool active) {
 
 extern "C" void cb_rt_line(double x1, double y1, double x2, double y2) {
     if (!current_target) return;
-    bool w = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool w = gfx_begin_world(cb::camera::draw_cmd_to_world());
     al_draw_line((float)x1, (float)y1, (float)x2, (float)y2, draw_color, 1.0f);
     gfx_end_world(w);
 }
@@ -548,7 +548,7 @@ extern "C" void cb_rt_line(double x1, double y1, double x2, double y2) {
 // `d` is a diameter (CoolBasic convention); Allegro draws by radius.
 extern "C" void cb_rt_circle(double x, double y, double d) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     float r = (float)d / 2.0f;
     al_draw_circle((float)x + r, (float)y + r, r, draw_color, 1.0f);
     gfx_end_world(world);
@@ -556,7 +556,7 @@ extern "C" void cb_rt_circle(double x, double y, double d) {
 
 extern "C" void cb_rt_circle_fill(double x, double y, double d, int32_t fill) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     float r = (float)d / 2.0f;
     if (fill) {
         al_draw_filled_circle((float)x + r, (float)y + r, r, draw_color);
@@ -568,7 +568,7 @@ extern "C" void cb_rt_circle_fill(double x, double y, double d, int32_t fill) {
 
 extern "C" void cb_rt_box(double x, double y, double w, double h) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     al_draw_rectangle((float)x, (float)y, (float)(x + w), (float)(y + h),
                       draw_color, 1.0f);
     gfx_end_world(world);
@@ -576,7 +576,7 @@ extern "C" void cb_rt_box(double x, double y, double w, double h) {
 
 extern "C" void cb_rt_box_fill(double x, double y, double w, double h, int32_t fill) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     if (fill) {
         al_draw_filled_rectangle((float)x, (float)y, (float)(x + w), (float)(y + h),
                                  draw_color);
@@ -589,7 +589,7 @@ extern "C" void cb_rt_box_fill(double x, double y, double w, double h, int32_t f
 
 extern "C" void cb_rt_dot(double x, double y) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     al_draw_pixel((float)x, (float)y, draw_color);
     gfx_end_world(world);
 }
@@ -598,7 +598,7 @@ extern "C" void cb_rt_dot(double x, double y) {
 // top-left convention. Allegro draws from the center with radii.
 extern "C" void cb_rt_ellipse(double x, double y, double w, double h, int32_t fill) {
     if (!current_target) return;
-    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
+    bool world = gfx_begin_world(cb::camera::draw_cmd_to_world());
     float rx = (float)w / 2.0f;
     float ry = (float)h / 2.0f;
     float cx = (float)x + rx;
@@ -776,7 +776,7 @@ extern "C" CbImage* cb_rt_load_image(const CbString* path) {
 
 extern "C" void cb_rt_draw_image(const CbImage* img, double x, double y) {
     if (!img || !img->bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     al_draw_bitmap(img->bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
     gfx_end_world(world);
 }
@@ -955,7 +955,7 @@ extern "C" void cb_rt_save_image(const CbImage* img, const CbString* path, int32
 // 100=opaque). Honors the hotspot.
 extern "C" void cb_rt_draw_ghost_image(const CbImage* img, double x, double y, double alpha) {
     if (!img || !img->bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     float a = (float)(alpha / 100.0);
     if (a < 0.0f) a = 0.0f;
     if (a > 1.0f) a = 1.0f;
@@ -968,7 +968,7 @@ extern "C" void cb_rt_draw_ghost_image(const CbImage* img, double x, double y, d
 extern "C" void cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
                                      double sw, double sh, double tx, double ty) {
     if (!img || !img->bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     al_draw_bitmap_region(img->bmp, (float)sx, (float)sy, (float)sw, (float)sh,
                           (float)tx, (float)ty, 0);
     gfx_end_world(world);
@@ -1119,7 +1119,7 @@ extern "C" CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_
 static void draw_image_frame_bmp(const CbImage* img, ALLEGRO_BITMAP* bmp,
                                  double x, double y, int32_t frame) {
     if (!img || !bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     float l, t, w, h;
     if (image_frame_src_rect(img, frame, l, t, w, h)) {
         al_draw_bitmap_region(bmp, l, t, w, h,
@@ -1149,7 +1149,7 @@ extern "C" void cb_rt_draw_image_frame_mask(const CbImage* img, double x, double
 extern "C" void cb_rt_draw_ghost_image_frame(const CbImage* img, double x, double y,
                                              int32_t frame, double alpha) {
     if (!img || !img->bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     float a = (float)(alpha / 100.0);
     if (a < 0.0f) a = 0.0f;
     if (a > 1.0f) a = 1.0f;
@@ -1174,7 +1174,7 @@ static void draw_image_box_frame_bmp(const CbImage* img, ALLEGRO_BITMAP* bmp,
                                      double sx, double sy, double sw, double sh,
                                      double tx, double ty, int32_t frame) {
     if (!img || !bmp || !current_target) return;
-    bool world = gfx_begin_world(cb_camera_image_to_world());
+    bool world = gfx_begin_world(cb::camera::image_to_world());
     float l, t, w, h;
     double ox = 0.0, oy = 0.0;
     if (image_frame_src_rect(img, frame, l, t, w, h)) {
@@ -1309,7 +1309,7 @@ static void render_queued_texts(void) {
 extern "C" void cb_rt_text(double x, double y, const CbString* s) {
     ensure_init();
     if (!current_target || !current_font) return;
-    bool world = gfx_begin_world(cb_camera_text_to_world());
+    bool world = gfx_begin_world(cb::camera::text_to_world());
     std::string txt = cb_text_to_utf8(s);
     al_draw_text(current_font, draw_color, (float)x, (float)y, 0, txt.c_str());
     gfx_end_world(world);

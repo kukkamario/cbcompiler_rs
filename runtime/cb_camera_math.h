@@ -65,10 +65,10 @@ inline CbAffine cb_affine_invert(const CbAffine& m) {
     return r;
 }
 
-// The camera world transform (cbEnchanted CameraInterface::getWorldTransform):
+// The camera world transform:
 // identity -> translate(-cx,+cy) -> rotate(rad) -> scale(zoom) ->
 // translate(designW/2, designH/2). Centering uses the logical design resolution
-// with *integer* halves (matching cbEnchanted's getDefaultWidth()/2), NOT the
+// with *integer* halves (CoolBasic centers on getDefaultWidth()/2), NOT the
 // window size. Y is NOT inverted here — that lives in the wrappers below.
 inline CbAffine cb_build_world_transform(double cx, double cy, double rad_angle,
                                          double zoom, int design_w, int design_h) {
@@ -80,9 +80,8 @@ inline CbAffine cb_build_world_transform(double cx, double cy, double rad_angle,
     return m;
 }
 
-// Screen<->world wrappers (cbEnchanted camerainterface.cpp:131-139). The Y-flip
-// lives here, not in the matrix: screen->world inverts then flips; world->screen
-// flips then transforms.
+// Screen<->world wrappers. The Y-flip lives here, not in the matrix:
+// screen->world inverts then flips; world->screen flips then transforms.
 inline void cb_screen_to_world(const CbAffine& world, double& x, double& y) {
     CbAffine inv = cb_affine_invert(world);
     cb_affine_apply(inv, x, y);
@@ -99,11 +98,11 @@ inline void cb_world_to_screen(const CbAffine& world, double& x, double& y) {
 // screen (i.e. applying this equals cb_world_to_screen). Algebraically this is
 // the world transform with the c/d column negated.
 //
-// Divergence from cbEnchanted (documented, visual-only): cbEnchanted flips Y on
-// a primitive's anchor point only (convertCoords), leaving width/height in
-// screen orientation; folding the flip into the transform flips the whole
-// primitive, giving a true world-space extent for Box/Ellipse. Line/Dot/Circle/
-// image/text draws (single anchor or symmetric) are identical either way.
+// Divergence from CoolBasic (documented, visual-only): CoolBasic flips Y on a
+// primitive's anchor point only, leaving width/height in screen orientation;
+// folding the flip into the transform flips the whole primitive, giving a true
+// world-space extent for Box/Ellipse. Line/Dot/Circle/image/text draws (single
+// anchor or symmetric) are identical either way.
 inline CbAffine cb_build_render_transform(double cx, double cy, double rad_angle,
                                           double zoom, int design_w, int design_h) {
     CbAffine m = cb_build_world_transform(cx, cy, rad_angle, zoom, design_w, design_h);
