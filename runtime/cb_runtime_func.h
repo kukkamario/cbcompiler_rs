@@ -198,6 +198,24 @@ int32_t cb_rt_screen_height(void);
 int32_t cb_rt_screen_depth(void);
 int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
 
+/* Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+   No new opaque type — camera state is process-global. RotateCamera/TurnCamera
+   take two angle args (logical degrees, render degrees) that map to two
+   independent fields (faithful to cbEnchanted's desyncable angles). DrawToWorld
+   toggles world-space rendering of user draws; MouseWX/WY convert the mouse to
+   world coordinates. */
+void    cb_rt_position_camera(double x, double y, double zoom);
+void    cb_rt_move_camera(double forward, double side, double dzoom);
+void    cb_rt_translate_camera(double dx, double dy, double dzoom);
+void    cb_rt_rotate_camera(double logical, double render);
+void    cb_rt_turn_camera(double d_logical, double d_render);
+double  cb_rt_camera_x(void);
+double  cb_rt_camera_y(void);
+double  cb_rt_camera_angle(void);
+void    cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images, int32_t draw_text);
+double  cb_rt_mouse_wx(void);
+double  cb_rt_mouse_wy(void);
+
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/
    ClearText manage a persistent on-screen text queue re-rendered each DrawScreen.

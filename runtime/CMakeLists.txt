@@ -31,6 +31,7 @@ add_library(cb_runtime STATIC
     cb_strfuncs.cpp
     cb_system.cpp
     cb_gfx.cpp
+    cb_camera.cpp
     cb_font.cpp
     cb_input.cpp
 )
@@ -150,9 +151,10 @@ file(GENERATE
 #   cmake --build build-tests --config Release
 #   ctest --test-dir build-tests -C Release --output-on-failure
 #
-# The pure-logic suites (geom, utf8) only #include cb_geom.h / cb_utf8.h; the
-# input suite drives the extern "C" state machine in cb_runtime with synthetic
-# ALLEGRO_EVENTs (no display), so the target links cb_runtime + Allegro.
+# The pure-logic suites (geom, utf8, camera) only #include cb_geom.h /
+# cb_utf8.h / cb_camera_math.h; the input suite drives the extern "C" state
+# machine in cb_runtime with synthetic ALLEGRO_EVENTs (no display), so the
+# target links cb_runtime + Allegro.
 option(CB_RUNTIME_TESTS "Build the native C++ unit tests (requires GoogleTest)" OFF)
 if(CB_RUNTIME_TESTS)
     enable_testing()
@@ -160,6 +162,7 @@ if(CB_RUNTIME_TESTS)
     add_executable(cb_runtime_tests
         tests/test_geom.cpp
         tests/test_utf8.cpp
+        tests/test_camera.cpp
         tests/test_input.cpp
     )
     target_link_libraries(cb_runtime_tests PRIVATE

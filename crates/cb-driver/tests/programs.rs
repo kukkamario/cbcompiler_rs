@@ -230,6 +230,13 @@ fn runtime_image_fd036() {
 }
 
 #[test]
+fn runtime_camera_fd036() {
+    // Asserts deterministic camera state (CameraX/Y/Angle); the world<->screen
+    // affine math is unit-tested headlessly in runtime/tests/test_camera.cpp.
+    run_graphics("runtime_camera_fd036");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run_graphics("runtime_text_fd018");
 }

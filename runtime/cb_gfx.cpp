@@ -15,6 +15,7 @@
 
 #include "cb_runtime.h"
 #include "cb_input.h"
+#include "cb_camera.h"
 #include "cb_font.h"
 #include "cb_geom.h"
 
@@ -71,6 +72,13 @@ static ALLEGRO_COLOR        draw_color;
 static ALLEGRO_COLOR        clear_color;
 static int32_t              screen_w      = 0;
 static int32_t              screen_h      = 0;
+
+// Logical design resolution (cbEnchanted's defaultWidth/Height). The camera
+// world transform centers on (design_w/2, design_h/2). Defaults to 400x300 (the
+// cbEnchanted default) and is updated to the requested size by `Screen` — kept
+// separate from screen_w/h so the default survives when no window is opened.
+static int32_t              design_w      = 400;
+static int32_t              design_h      = 300;
 
 // The active render target — the display backbuffer or an image's bitmap.
 // Drawing primitives and PutPixel/Cls/Lock act on this. Mirrors the legacy
@@ -165,6 +173,12 @@ static void ensure_init(void) {
 
 extern "C" void cb_rt_screen(int32_t w, int32_t h) {
     ensure_init();
+
+    // The requested size is the logical design resolution (cbEnchanted sets
+    // defaultWidth/Height here). Record it before the display logic so the
+    // camera centers correctly even if the display fails to open (headless).
+    design_w = w;
+    design_h = h;
 
     if (display) {
         al_destroy_display(display);
@@ -419,36 +433,70 @@ extern "C" void cb_rt_smooth_2d(int32_t enabled) {
     smooth_2d = enabled != 0;
 }
 
+// ─── DrawToWorld transform (FD-036 Phase 2) ─────────────────────────────
+//
+// When a DrawToWorld category flag is set AND we are drawing to the screen
+// (not an image — cbEnchanted's `!drawingOnImage()`), a user draw command runs
+// under the camera's world transform; otherwise under identity. We set it at the
+// top of each participating command and restore identity after, so a world draw
+// never leaks into a later screen draw or an image-processing copy (which all
+// assume identity). `category` is one of the cb_camera flag getters.
+static bool gfx_begin_world(int category_flag) {
+    bool world = category_flag &&
+                 display && current_target == al_get_backbuffer(display);
+    if (world) {
+        al_use_transform(cb_camera_render_transform());
+    }
+    return world;
+}
+
+static void gfx_end_world(bool active) {
+    if (active) {
+        ALLEGRO_TRANSFORM id;
+        al_identity_transform(&id);
+        al_use_transform(&id);
+    }
+}
+
 extern "C" void cb_rt_line(double x1, double y1, double x2, double y2) {
     if (!current_target) return;
+    bool w = gfx_begin_world(cb_camera_draw_cmd_to_world());
     al_draw_line((float)x1, (float)y1, (float)x2, (float)y2, draw_color, 1.0f);
+    gfx_end_world(w);
 }
 
 // `d` is a diameter (CoolBasic convention); Allegro draws by radius.
 extern "C" void cb_rt_circle(double x, double y, double d) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     float r = (float)d / 2.0f;
     al_draw_circle((float)x + r, (float)y + r, r, draw_color, 1.0f);
+    gfx_end_world(world);
 }
 
 extern "C" void cb_rt_circle_fill(double x, double y, double d, int32_t fill) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     float r = (float)d / 2.0f;
     if (fill) {
         al_draw_filled_circle((float)x + r, (float)y + r, r, draw_color);
     } else {
         al_draw_circle((float)x + r, (float)y + r, r, draw_color, 1.0f);
     }
+    gfx_end_world(world);
 }
 
 extern "C" void cb_rt_box(double x, double y, double w, double h) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     al_draw_rectangle((float)x, (float)y, (float)(x + w), (float)(y + h),
                       draw_color, 1.0f);
+    gfx_end_world(world);
 }
 
 extern "C" void cb_rt_box_fill(double x, double y, double w, double h, int32_t fill) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     if (fill) {
         al_draw_filled_rectangle((float)x, (float)y, (float)(x + w), (float)(y + h),
                                  draw_color);
@@ -456,17 +504,21 @@ extern "C" void cb_rt_box_fill(double x, double y, double w, double h, int32_t f
         al_draw_rectangle((float)x, (float)y, (float)(x + w), (float)(y + h),
                           draw_color, 1.0f);
     }
+    gfx_end_world(world);
 }
 
 extern "C" void cb_rt_dot(double x, double y) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     al_draw_pixel((float)x, (float)y, draw_color);
+    gfx_end_world(world);
 }
 
 // Ellipse with top-left (x,y) and full diameters (w,h); matches our Circle's
 // top-left convention. Allegro draws from the center with radii.
 extern "C" void cb_rt_ellipse(double x, double y, double w, double h, int32_t fill) {
     if (!current_target) return;
+    bool world = gfx_begin_world(cb_camera_draw_cmd_to_world());
     float rx = (float)w / 2.0f;
     float ry = (float)h / 2.0f;
     float cx = (float)x + rx;
@@ -476,6 +528,7 @@ extern "C" void cb_rt_ellipse(double x, double y, double w, double h, int32_t fi
     } else {
         al_draw_ellipse(cx, cy, rx, ry, draw_color, 1.0f);
     }
+    gfx_end_world(world);
 }
 
 // ─── Pixel operations ──────────────────────────────────────────────────
@@ -605,7 +658,9 @@ extern "C" CbImage* cb_rt_load_image(const CbString* path) {
 
 extern "C" void cb_rt_draw_image(const CbImage* img, double x, double y) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     al_draw_bitmap(img->bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    gfx_end_world(world);
 }
 
 extern "C" void cb_rt_mask_image(CbImage* img, int32_t r, int32_t g, int32_t b) {
@@ -775,19 +830,23 @@ extern "C" void cb_rt_save_image(const CbImage* img, const CbString* path, int32
 // 100=opaque). Honors the hotspot.
 extern "C" void cb_rt_draw_ghost_image(const CbImage* img, double x, double y, double alpha) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     float a = (float)(alpha / 100.0);
     if (a < 0.0f) a = 0.0f;
     if (a > 1.0f) a = 1.0f;
     al_draw_tinted_bitmap(img->bmp, al_map_rgba_f(1.0f, 1.0f, 1.0f, a),
                           (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+    gfx_end_world(world);
 }
 
 // Draws the source sub-rectangle (sx,sy,sw,sh) of an image at (tx,ty).
 extern "C" void cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
                                      double sw, double sh, double tx, double ty) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     al_draw_bitmap_region(img->bmp, (float)sx, (float)sy, (float)sw, (float)sh,
                           (float)tx, (float)ty, 0);
+    gfx_end_world(world);
 }
 
 // Per-image hotspot (scale/rotate/draw origin). x<0 || y<0 auto-centers.
@@ -934,6 +993,7 @@ extern "C" CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_
 // to the whole bitmap for a single-frame image.
 extern "C" void cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     float l, t, w, h;
     if (image_frame_src_rect(img, frame, l, t, w, h)) {
         al_draw_bitmap_region(img->bmp, l, t, w, h,
@@ -941,6 +1001,7 @@ extern "C" void cb_rt_draw_image_frame(const CbImage* img, double x, double y, i
     } else {
         al_draw_bitmap(img->bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
     }
+    gfx_end_world(world);
 }
 
 // DrawImage(img, x, y, frame, useMask): the documented 5-arg form.
@@ -958,6 +1019,7 @@ extern "C" void cb_rt_draw_image_frame_mask(const CbImage* img, double x, double
 extern "C" void cb_rt_draw_ghost_image_frame(const CbImage* img, double x, double y,
                                              int32_t frame, double alpha) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     float a = (float)(alpha / 100.0);
     if (a < 0.0f) a = 0.0f;
     if (a > 1.0f) a = 1.0f;
@@ -970,6 +1032,7 @@ extern "C" void cb_rt_draw_ghost_image_frame(const CbImage* img, double x, doubl
         al_draw_tinted_bitmap(img->bmp, tint,
                               (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
     }
+    gfx_end_world(world);
 }
 
 // DrawImageBox(img, sx, sy, sw, sh, tx, ty, frame): same source/dest convention
@@ -980,6 +1043,7 @@ extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double
                                            double sw, double sh, double tx, double ty,
                                            int32_t frame) {
     if (!img || !img->bmp || !current_target) return;
+    bool world = gfx_begin_world(cb_camera_image_to_world());
     float l, t, w, h;
     double ox = 0.0, oy = 0.0;
     if (image_frame_src_rect(img, frame, l, t, w, h)) {
@@ -988,6 +1052,7 @@ extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double
     }
     al_draw_bitmap_region(img->bmp, (float)(ox + sx), (float)(oy + sy),
                           (float)sw, (float)sh, (float)tx, (float)ty, 0);
+    gfx_end_world(world);
 }
 
 // DrawImageBox(..., frame, useMask): the documented 9-arg form. useMask ignored
@@ -1026,6 +1091,13 @@ extern "C" ALLEGRO_DISPLAY* cb_gfx_display(void) {
 
 extern "C" ALLEGRO_EVENT_QUEUE* cb_gfx_event_queue(void) {
     return event_queue;
+}
+
+// Internal glue for cb_camera.cpp (FD-036): the logical design resolution the
+// camera centers its world transform on. Declared in cb_camera.h.
+extern "C" void cb_gfx_design_size(int32_t* w, int32_t* h) {
+    if (w) *w = design_w;
+    if (h) *h = design_h;
 }
 
 // Whether a graphics mode is available. Best-effort: any positive resolution is
@@ -1088,13 +1160,15 @@ static void render_queued_texts(void) {
 }
 
 // Text(x, y, s): draws immediately at (x, y) in the current font/color onto the
-// active render target. (DrawToWorld/camera coordinates are not yet modelled, so
-// this is always screen/target space.)
+// active render target. Honors DrawToWorld's text flag (FD-036): when set and
+// drawing to the screen, (x, y) is interpreted in world coordinates.
 extern "C" void cb_rt_text(double x, double y, const CbString* s) {
     ensure_init();
     if (!current_target || !current_font) return;
+    bool world = gfx_begin_world(cb_camera_text_to_world());
     std::string txt = cb_text_to_utf8(s);
     al_draw_text(current_font, draw_color, (float)x, (float)y, 0, txt.c_str());
+    gfx_end_world(world);
 }
 
 // CenterText(x, y, s, style): style 0=horizontal centering, 1=vertical, 2=both

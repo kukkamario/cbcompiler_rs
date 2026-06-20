@@ -1,0 +1,52 @@
+// FD-036 Phase 2: camera transform core. Headless-safe — only the deterministic
+// camera STATE is asserted here (CameraX/Y/Angle after each command). The
+// world<->screen affine math is unit-tested in runtime/tests/test_camera.cpp,
+// and DrawToWorld's visual effect needs a display (smoke-tested via examples/).
+// MakeImage installs the input subsystem so MouseWX/WY are callable without a
+// window.
+
+Dim img As Image
+img = MakeImage(8, 8)
+
+// PositionCamera sets absolute position + zoom (zoom must exceed 0.00001).
+PositionCamera(100.0, 50.0, 2.0)
+Print Str(CameraX())          // 100
+Print Str(CameraY())          // 50
+
+// RotateCamera takes two angle args — logical (reported by CameraAngle) and
+// render (the world matrix). They are independent; CameraAngle reports logical.
+RotateCamera(30.0, 45.0)
+Print Str(CameraAngle())      // 30
+
+// TurnCamera turns both fields relatively; CameraAngle tracks the logical delta.
+TurnCamera(15.0, 5.0)
+Print Str(CameraAngle())      // 45
+
+// CameraAngle wraps to [0,360): 45 - 90 = -45 -> 315.
+TurnCamera(-90.0, 0.0)
+Print Str(CameraAngle())      // 315
+
+// TranslateCamera moves in absolute world space.
+TranslateCamera(5.0, -8.0, 0.0)
+Print Str(CameraX())          // 105
+Print Str(CameraY())          // 42
+
+// MoveCamera moves along the heading. With both angles reset to 0 the heading
+// is +X, so forward advances X exactly and the (0) side term adds nothing.
+RotateCamera(0.0, 0.0)
+MoveCamera(10.0, 0.0, 0.0)
+Print Str(CameraX())          // 115
+Print Str(CameraY())          // 42
+
+// DrawToWorld toggles world-space user draws (visual effect needs a display).
+DrawToWorld(1, 1, 1)
+DrawToWorld(0, 0, 0)
+Print "drawtoworld_ok"
+
+// MouseWX/WY convert the mouse through the camera; the value depends on the live
+// mouse position, so only the call path is exercised (math: test_camera.cpp).
+wx# = MouseWX()
+wy# = MouseWY()
+Print "mousew_ok"
+
+Print "fd036_camera_done"

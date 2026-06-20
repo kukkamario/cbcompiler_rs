@@ -590,6 +590,55 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_mouse_move_x"].name, "mousemovex");
             assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
             assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
+
+            // Camera transform core (FD-036 Phase 2). No new opaque type — all
+            // Float/Int params and Float/Void returns. RotateCamera/TurnCamera
+            // take two angle args (logical, render) feeding two independent
+            // fields; DrawToWorld's three flags are Int.
+            let position_camera = by_symbol["cb_rt_position_camera"];
+            assert_eq!(position_camera.name, "positioncamera");
+            assert_eq!(position_camera.params.len(), 3);
+            assert_eq!(position_camera.params[0].ty, IrType::Float);
+            assert_eq!(position_camera.return_ty, IrType::Void);
+
+            assert_eq!(by_symbol["cb_rt_move_camera"].name, "movecamera");
+            assert_eq!(by_symbol["cb_rt_move_camera"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_translate_camera"].name, "translatecamera");
+            assert_eq!(by_symbol["cb_rt_translate_camera"].params.len(), 3);
+
+            let rotate_camera = by_symbol["cb_rt_rotate_camera"];
+            assert_eq!(rotate_camera.name, "rotatecamera");
+            assert_eq!(rotate_camera.params.len(), 2);
+            assert_eq!(rotate_camera.params[0].ty, IrType::Float);
+            assert_eq!(rotate_camera.params[1].ty, IrType::Float);
+            assert_eq!(rotate_camera.return_ty, IrType::Void);
+
+            let turn_camera = by_symbol["cb_rt_turn_camera"];
+            assert_eq!(turn_camera.name, "turncamera");
+            assert_eq!(turn_camera.params.len(), 2);
+            assert_eq!(turn_camera.params[1].ty, IrType::Float);
+
+            let camera_x = by_symbol["cb_rt_camera_x"];
+            assert_eq!(camera_x.name, "camerax");
+            assert_eq!(camera_x.params.len(), 0);
+            assert_eq!(camera_x.return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_camera_y"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_camera_angle"].name, "cameraangle");
+            assert_eq!(by_symbol["cb_rt_camera_angle"].return_ty, IrType::Float);
+
+            let draw_to_world = by_symbol["cb_rt_draw_to_world"];
+            assert_eq!(draw_to_world.name, "drawtoworld");
+            assert_eq!(draw_to_world.params.len(), 3);
+            assert_eq!(draw_to_world.params[0].ty, IrType::Int);
+            assert_eq!(draw_to_world.params[2].ty, IrType::Int);
+            assert_eq!(draw_to_world.return_ty, IrType::Void);
+
+            let mouse_wx = by_symbol["cb_rt_mouse_wx"];
+            assert_eq!(mouse_wx.name, "mousewx");
+            assert_eq!(mouse_wx.params.len(), 0);
+            assert_eq!(mouse_wx.return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_mouse_wy"].name, "mousewy");
+            assert_eq!(by_symbol["cb_rt_mouse_wy"].return_ty, IrType::Float);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

@@ -447,8 +447,8 @@ screen Y.
 | `PositionCamera` | `x: Float, y: Float, zoom: Float` | — | Sets absolute position and zoom (`zoom > 0.00001`) |
 | `MoveCamera` | `forward: Float, side: Float, dzoom: Float` | — | Moves relative to the camera angle, adjusting zoom |
 | `TranslateCamera` | `dx: Float, dy: Float, dzoom: Float` | — | Moves in absolute world space, adjusting zoom |
-| `RotateCamera` | `angle: Float` | — | Sets absolute camera rotation (degrees) |
-| `TurnCamera` | `degrees: Float` | — | Rotates by `degrees` (wraps 0–360) |
+| `RotateCamera` | `logical: Float, render: Float` | — | Sets absolute rotation. `logical` (degrees) is reported by `CameraAngle` and drives `MoveCamera`'s heading; `render` (degrees) is the world-matrix rotation. The two fields are **independent** (faithful to cbEnchanted) and may diverge |
+| `TurnCamera` | `dLogical: Float, dRender: Float` | — | Rotates relatively: `logical` wraps in degrees (0–360), the render angle accumulates (wraps 0–2π) |
 | `PointCamera` | `obj: Object` | — | Rotates the camera to point at an object |
 | `CameraFollow` | `obj: Object, style: Integer, setting: Float` | — | Follows an object. `style` 1=smooth (divide distance by `setting`), 2=margin deadzone (`setting`=px), 3=orbit (`setting`=distance) |
 | `CloneCameraPosition` | `obj: Object` | — | Snaps camera position to an object; stops following |
@@ -813,7 +813,16 @@ intentionally. Known status and divergences as of the latest runtime work
 - **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
   cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
   implementing.
-- **Not yet implemented** in cbcompiler_rs: objects/sprites, collision, camera,
+- **Camera** (FD-036 Phase 2) is implemented: the world↔screen transform core
+  (`PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`,
+  `TurnCamera`, `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw
+  command), and `MouseWX`/`MouseWY`. The object-referencing camera funcs
+  (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`,
+  `CameraPick`) are deferred to Phase 5 (they need Objects). Faithful to
+  cbEnchanted, the camera keeps two independent angle fields — `CameraAngle`
+  (degrees, also driving `MoveCamera`'s heading) and the render-matrix angle —
+  which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
+- **Not yet implemented** in cbcompiler_rs: objects/sprites, collision,
   tile maps, sound, video playback, particles, file I/O, memblocks,
   `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System
   funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).

@@ -384,6 +384,22 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("screenwidth",      cb_rt_screen_width),
     CB_FN("screenheight",     cb_rt_screen_height),
 
+    // Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+    // No new opaque type — camera state is process-global. RotateCamera/
+    // TurnCamera take two angle args (logical, render) feeding two independent
+    // fields (cbEnchanted's desyncable angles).
+    CB_FN("positioncamera",   cb_rt_position_camera),
+    CB_FN("movecamera",       cb_rt_move_camera),
+    CB_FN("translatecamera",  cb_rt_translate_camera),
+    CB_FN("rotatecamera",     cb_rt_rotate_camera),
+    CB_FN("turncamera",       cb_rt_turn_camera),
+    CB_FN("camerax",          cb_rt_camera_x),
+    CB_FN("cameray",          cb_rt_camera_y),
+    CB_FN("cameraangle",      cb_rt_camera_angle),
+    CB_FN("drawtoworld",      cb_rt_draw_to_world),
+    CB_FN("mousewx",          cb_rt_mouse_wx),
+    CB_FN("mousewy",          cb_rt_mouse_wy),
+
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),
     CB_FN("centertext",       cb_rt_center_text),

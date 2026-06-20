@@ -1,6 +1,6 @@
 # FD-036: Game-Object Runtime Cluster — Multi-frame Images, Camera, Tile Maps, Objects & Game Loop
 
-**Status:** In Progress (Phase 1 of 5 complete)
+**Status:** In Progress (Phase 2 of 5 complete)
 **Priority:** Medium
 **Effort:** High (> 4 hours; multi-PR — landed phase by phase)
 **Impact:** Brings CoolBasic's central game-programming abstractions online — multi-frame sprites, the camera, tile maps, sprite **Objects**, collision, and the `UpdateGame`/`DrawGame` loop — unlocking the bulk of idiomatic CoolBasic game code.
@@ -56,8 +56,19 @@ Slicing + `frame`-param plumbing on the existing `Image` type (`runtime/cb_gfx.c
 - Pre-existing `DrawImageBox` arg-order discrepancy: this port's signature is `(srcX, srcY, w, h, dstX, dstY)` vs the documented/cbEnchanted `(dstX, dstY, srcX, srcY, w, h)`. The new `frame` overloads were kept consistent with the existing port order rather than reordering an FD-017 function mid-phase.
 - `cb_rt_load_image` (single-frame `LoadImage`) still lacks the headless memory-bitmap fallback that `LoadAnimImage` now has.
 
-### Phase 2 — Camera transform core
+### Phase 2 — Camera transform core ✅ DONE
 New `runtime/cb_camera.{h,cpp}`: `PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`, `TurnCamera`, `CameraX`, `CameraY`, `CameraAngle`, the Allegro world transform (world Y inverted **in the screen↔world wrapper functions, not the matrix** — see *Camera & transform* under Reference-verified behavior), `DrawToWorld` (three independent user-draw flags, **orthogonal** to the always-on object/map world pass), and `MouseWX`/`MouseWY`. **No Object dependency.** The object-referencing camera funcs are deferred to Phase 5.
+
+**Landed:** New Allegro-free `cb_camera_math.h` (a 2D affine reproducing Allegro's `al_*_transform` composition exactly, so it is the single source of truth for both screen↔world conversion and the render `ALLEGRO_TRANSFORM`); `cb_camera.{h,cpp}` holding the live state and the 11 `cb_rt_*` entry points; a new `design_w/h` (400×300 default, set by `Screen`) in `cb_gfx.cpp` that the transform centers on; `DrawToWorld` wired into every user draw command (`Line`/`Box`/`Circle`/`Ellipse`/`Dot`/`DrawImage*`/`DrawGhostImage*`/`DrawImageBox*`/`Text`) via a set-world-then-restore-identity helper gated by `!drawing_on_image`. Headless gtest `runtime/tests/test_camera.cpp` (affine round-trips, design-resolution centering, render==world→screen), `cb-runtime-sys` arity asserts, and graphics-gated golden fixture `runtime_camera_fd036`. `cb_runtime.md` updated.
+
+**Decisions resolved during impl:**
+- **Dual-angle model kept faithful (user decision):** `camera_angle` (degrees — `CameraAngle()` + `MoveCamera` heading) and `camera_rad_angle` (radians — world matrix) are independent fields; `RotateCamera(logical, render)`/`TurnCamera(dLogical, dRender)` take **two** angle args (cbEnchanted's LIFO "dummy" pop dropped — a real-CoolBasic-bytecode artifact this compiler doesn't need). `cb_runtime.md` corrected from its prior single-arg form.
+- **`DrawToWorld` fully wired (user decision):** the Y-flip is folded into a dedicated *render transform* (world matrix with the c/d column negated) so raw world coords map straight to screen — identical to cbEnchanted for line/dot/circle/image/text, differing only in Box/Ellipse *extent* orientation (cbEnchanted flips the anchor only; documented, visual-only divergence).
+- **Headless testability:** the transform math is Allegro-free (`cb_camera_math.h`, like `cb_geom.h`) so it unit-tests via the `CB_RUNTIME_TESTS` gtest path with no display; the catalog rows stay behind `#ifndef CB_NO_ALLEGRO` (SDK-free build compiles them out cleanly).
+
+**Follow-ups noted (not blocking):**
+- `MouseWX`/`MouseWY` exact values aren't golden-asserted (live mouse position is non-deterministic); their math is pinned by `test_camera.cpp` and the catalog/libffi path is smoke-tested in the fixture.
+- The object-aware camera funcs (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`, `CameraPick`, `ScreenPositionObject`) and `CameraFollow`'s use of the physical window size remain deferred to Phase 5 per the dependency analysis.
 
 ### Phase 3 — Tile Maps
 New `runtime/cb_map.{h,cpp}` + register the `Map` opaque type (tag 14): `LoadMap`, `MakeMap`, `MapWidth`, `MapHeight`, `GetMap`, `GetMap2`, `EditMap`, `SetMap`, `SetTile`. Layer model (0=background, 1=foreground, 2=collision always-active, 3=data), 1-based tile ids (0=empty), single active map, rendered via the Phase 2 camera.
