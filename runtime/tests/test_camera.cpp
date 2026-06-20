@@ -15,7 +15,7 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kEps = 1e-9;
 
-// Default logical design resolution (cbEnchanted's 400x300).
+// Default logical design resolution (CoolBasic's 400x300).
 constexpr int kW = 400;
 constexpr int kH = 300;
 }  // namespace
@@ -30,7 +30,7 @@ TEST(CameraTransform, OriginMapsToDesignCenter) {
     EXPECT_NEAR(y, kH / 2, kEps);
 }
 
-// Centering uses the design resolution with integer halves (cbEnchanted's
+// Centering uses the design resolution with integer halves (CoolBasic's
 // getDefaultWidth()/2): an odd design width centers at floor(w/2), and changing
 // the design size moves the center — proving it is not the window size.
 TEST(CameraTransform, CenteringUsesIntegerDesignHalves) {

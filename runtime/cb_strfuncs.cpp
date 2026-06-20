@@ -10,19 +10,18 @@
 // `cb_rt_string_len`, `cb_rt_string_data`, `cb_rt_string_retain`, and the
 // immortal empty sentinel via `cb_runtime_string_api.empty`. It deliberately
 // does NOT touch cb_string.cpp's private internals (alloc_with_data, data_of,
-// CB_EMPTY_STRING_INSTANCE). That keeps the core's surface minimal and makes
+// k_empty_string_instance). That keeps the core's surface minimal and makes
 // this library a worked example of how a plugin builds strings using nothing
 // but the core ABI.
 //
-// Two deliberate departures from the legacy implementation, per FD-013:
-//   - CODEPOINT semantics. The legacy ran on UTF-32, so char-indexed ops were
-//     O(1); the v4 ABI stores UTF-8, so Left/Right/StrRemove/InStr walk the
-//     bytes to map a 1-based character index to a byte offset. CB strings are
-//     UTF-8 (§3.1) and the docs count "characters", so this is the correct
-//     visible behaviour.
-//   - CLAMP, never abort. Legacy Left/Right called a fatal error() on
-//     out-of-range arguments; there is no runtime->interpreter trap channel
-//     here, so we saturate instead (Left("hi",5) -> "hi", n<=0 -> "").
+// Two CoolBasic-visible behaviours worth explaining (FD-013):
+//   - CODEPOINT semantics. The v4 ABI stores UTF-8, so Left/Right/StrRemove/
+//     InStr walk the bytes to map a 1-based CHARACTER index to a byte offset
+//     (O(n) in the index, not O(1)). CB strings are UTF-8 (§3.1) and the docs
+//     count "characters", so this is the correct visible behaviour.
+//   - CLAMP, never abort. There is no runtime->interpreter trap channel for the
+//     string library, so out-of-range arguments saturate rather than raising a
+//     fatal error (Left("hi",5) -> "hi", n<=0 -> "").
 //
 // Upper/Lower do ASCII-only case mapping: bytes >= 0x80 (UTF-8 continuation
 // and lead bytes) are passed through untouched, so multibyte sequences are
@@ -45,7 +44,7 @@ namespace {
 
 // Owning reference to the immortal empty sentinel; the canonical "" result.
 // Reached through the public CbStringApi rather than the core's private
-// CB_EMPTY_STRING_INSTANCE symbol. retain on the sentinel is a no-op.
+// k_empty_string_instance symbol. retain on the sentinel is a no-op.
 CbString* make_empty() {
     return cb_rt_string_retain(const_cast<CbString*>(cb_runtime_string_api.empty));
 }
@@ -196,7 +195,7 @@ extern "C" CbString* cb_rt_chr(int32_t code) {
 }
 
 extern "C" CbString* cb_rt_hex(int32_t value) {
-    // Uppercase, zero-padded to 8 hex digits (matches legacy CBF_hex).
+    // Uppercase, zero-padded to 8 hex digits (CoolBasic's Hex$ width).
     static const char digits[] = "0123456789ABCDEF";
     uint8_t buf[8];
     uint32_t u = static_cast<uint32_t>(value);
@@ -210,14 +209,13 @@ extern "C" CbString* cb_rt_hex(int32_t value) {
 // ─── FD-017 completeness pass ─────────────────────────────────────────────
 //
 // All char indices/counts are 1-based and measured in Unicode codepoints (the
-// UTF-8 divergence from cbEnchanted's single-byte CP-1252 is intentional and
+// UTF-8 divergence from CoolBasic's single-byte CP-1252 is intentional and
 // documented — FD-017 Q1). Out-of-range arguments clamp or return ""; nothing
-// aborts. Where a choice diverges from the cbEnchanted reference it is called
-// out inline.
+// aborts.
 
-// `len` codepoints from 1-based `pos`. pos<=0 -> "" (cbEnchanted errors here).
-// pos past the end -> "". Negative len -> "" (cbEnchanted's size_type wrap that
-// turns negative len into "rest of string" is an unintended quirk we drop).
+// `len` codepoints from 1-based `pos`. pos<=0 or len<=0 -> "" (we clamp instead
+// of erroring); pos past the end -> "". A negative `len` yields "" rather than
+// wrapping (via size_type underflow) into "rest of string".
 extern "C" CbString* cb_rt_str_mid(const CbString* s, int32_t pos, int32_t len) {
     if (pos <= 0 || len <= 0) return make_empty();
     std::size_t blen = cb_rt_string_len(s);
@@ -283,8 +281,8 @@ extern "C" CbString* cb_rt_str_rset(const CbString* s, int32_t len) {
 }
 
 // Value of the first character. Under our codepoint semantics this is the first
-// Unicode codepoint (the inverse of Chr); cbEnchanted returns the first CP-1252
-// byte (0–255). ASCII agrees. Empty string -> 0.
+// Unicode codepoint (the inverse of Chr); CoolBasic returns the first CP-1252
+// byte (0–255), which agrees for ASCII. Empty string -> 0.
 extern "C" int32_t cb_rt_str_asc(const CbString* s) {
     std::size_t blen = cb_rt_string_len(s);
     if (blen == 0) return 0;
@@ -323,7 +321,7 @@ extern "C" CbString* cb_rt_bin(int32_t value) {
     return cb_rt_string_from_literal(buf, 32);
 }
 
-// `s` repeated `count` times. cbEnchanted quirk: the result is seeded with one
+// `s` repeated `count` times. CoolBasic quirk: the result is seeded with one
 // copy of `s` and the loop appends count-1 more, so count<1 still yields ONE
 // copy. Replicated for parity.
 extern "C" CbString* cb_rt_str_repeat(const CbString* s, int32_t count) {
@@ -339,8 +337,8 @@ extern "C" CbString* cb_rt_str_repeat(const CbString* s, int32_t count) {
     return ret_str(r);
 }
 
-// Reversed string. Reverses by CODEPOINT (cbEnchanted reverses bytes, which
-// corrupts multibyte UTF-8 — we keep the result valid UTF-8).
+// Reversed string. Reverses by CODEPOINT, not by byte: a byte-level reversal
+// would corrupt multibyte UTF-8 sequences, so we keep the result valid UTF-8.
 extern "C" CbString* cb_rt_str_flip(const CbString* s) {
     std::size_t blen = cb_rt_string_len(s);
     if (blen == 0) return make_empty();
@@ -364,10 +362,8 @@ extern "C" CbString* cb_rt_str_flip(const CbString* s) {
 }
 
 // Insert `txt` at 1-based codepoint `pos` (pos<=1 -> front, pos past end ->
-// append). pos<0 -> "" (cbEnchanted errors). NOTE: this uses proper 1-based
-// indexing (pos-1), matching StrRemove/StrMove and the documented contract;
-// cbEnchanted's StrInsert omits the -1 its siblings apply — an off-by-one we
-// deliberately do not reproduce.
+// append). pos<0 -> "". Uses proper 1-based indexing (pos-1) for consistency
+// with StrRemove/StrMove and the documented contract.
 extern "C" CbString* cb_rt_str_insert(const CbString* s, int32_t pos,
                                       const CbString* txt) {
     if (pos < 0) return make_empty();
@@ -389,7 +385,7 @@ extern "C" CbString* cb_rt_str_insert(const CbString* s, int32_t pos,
 
 // Cut `len` codepoints at 1-based `pos` and re-insert them `offset` codepoints
 // further along. pos<=0 / len<0 / offset<0 -> "". If the cut runs past the end,
-// `s` is returned unchanged. Mirrors cbEnchanted (in codepoints).
+// `s` is returned unchanged. Operates in codepoints.
 extern "C" CbString* cb_rt_str_move(const CbString* s, int32_t pos, int32_t len,
                                     int32_t offset) {
     if (pos <= 0 || len < 0 || offset < 0) return make_empty();
@@ -427,8 +423,8 @@ extern "C" CbString* cb_rt_str_move(const CbString* s, int32_t pos, int32_t len,
 }
 
 // Number of `sep`-separated words. Empty `s` -> 0; empty `sep` -> space. Count
-// is 1 + occurrences of `sep` (search advances one byte per match, mirroring
-// cbEnchanted).
+// is 1 + occurrences of `sep` (the search advances one byte per match, a
+// CoolBasic counting quirk).
 extern "C" int32_t cb_rt_count_words(const CbString* s, const CbString* sep) {
     std::string str = bytes_of(s);
     if (str.empty()) return 0;
@@ -444,7 +440,7 @@ extern "C" int32_t cb_rt_count_words(const CbString* s, const CbString* sep) {
 }
 
 // The n-th (1-based) `sep`-separated word. Empty `sep` -> space. n past the
-// last word yields the final segment (mirrors cbEnchanted). n <= 0 clamps to
+// last word yields the final segment (CoolBasic behaviour). n <= 0 clamps to
 // "" like the other 1-based string functions (Mid/Left), rather than returning
 // the first word (FD-022).
 extern "C" CbString* cb_rt_get_word(const CbString* s, int32_t n,

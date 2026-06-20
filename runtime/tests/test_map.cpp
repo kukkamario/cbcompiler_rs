@@ -157,7 +157,7 @@ TEST(MapGrid, GetAndBounds) {
     EXPECT_EQ(cb_map_get(m, 0, 3, 0), 0);
     EXPECT_EQ(cb_map_get(m, 0, -1, 0), 0);
     EXPECT_EQ(cb_map_get(m, 0, 0, 2), 0);
-    // Out-of-range layer -> 0 (defensive; cbEnchanted would index OOB).
+    // Out-of-range layer -> 0 (defensive; CoolBasic would index OOB).
     EXPECT_EQ(cb_map_get(m, 4, 0, 0), 0);
     EXPECT_EQ(cb_map_get(m, -1, 0, 0), 0);
     // getHit reads the collision layer (2).
@@ -236,7 +236,7 @@ TEST(MapCreate, EmptyGrid) {
 
 // FD-036: tile animation advance (cb_map_advance_frame). Regression for the
 // animLength==1 case (a real cdm2.til tile): it is a 2-frame tile (tile, tile+1).
-// cbEnchanted resets to 0 once (int)cur EXCEEDS animLength, so (int)cur ranges
+// CoolBasic resets to 0 once (int)cur EXCEEDS animLength, so (int)cur ranges
 // 0..animLength. The earlier wrap kept cur in [0, animLength), so an animLength==1
 // tile never left frame 0 — no visible animation. The render reads `tile +
 // (int)cur`, so the integer frame is what matters.
@@ -255,7 +255,7 @@ TEST(MapAnim, AnimLengthOneIsTwoFrames) {
     EXPECT_EQ((int32_t)cur, 0);
 }
 
-// animSpeed and slowness both divide the per-tick step (cbEnchanted: higher
+// animSpeed and slowness both divide the per-tick step (CoolBasic: higher
 // speed = slower); reset happens only once (int)cur exceeds animLength.
 TEST(MapAnim, SpeedAndSlownessDivideTheStep) {
     EXPECT_FLOAT_EQ(cb_map_advance_frame(0.0f, 3, 1, 1.0f, 1.0f), 1.0f);  // base

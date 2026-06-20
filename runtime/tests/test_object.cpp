@@ -94,7 +94,7 @@ TEST(ObjectTurn, WrapsTo360) {
     EXPECT_NEAR(cb_object_turn(90.0, 30.0), 120.0, kEps);
     EXPECT_NEAR(cb_object_turn(350.0, 20.0), 10.0, kEps);   // 370 -> 10
     EXPECT_NEAR(cb_object_turn(10.0, -20.0), 350.0, kEps);  // -10 -> 350
-    // Exactly 360 stays 360 (cbEnchanted wraps only on > 360).
+    // Exactly 360 stays 360 (CoolBasic wraps only on > 360).
     EXPECT_NEAR(cb_object_turn(0.0, 360.0), 360.0, kEps);
 }
 

@@ -8,10 +8,9 @@
 // with an Allegro tileset bitmap and the catalog entry points; everything that
 // does not touch a bitmap lives here.
 //
-// Ported from cbEnchanted's CBMap (src/cbmap.cpp). The Rust port may pick its
-// own in-memory layout; only the observable behaviour and the on-disk .til
-// format must match. The .til format below was byte-verified against a real
-// CoolBasic asset (D:\CoolBasic\Media\testmap.til).
+// The Rust port may pick its own in-memory layout; only the observable
+// behaviour and the on-disk .til format must match. The .til format below was
+// byte-verified against a real CoolBasic asset.
 
 #include <cmath>
 #include <cstddef>
@@ -19,13 +18,13 @@
 #include <cstring>
 #include <vector>
 
-// The four tile layers (cbEnchanted's array indices, NOT the on-disk order):
+// The four tile layers (in-memory array indices, NOT the on-disk order):
 //   0 = background (drawn), 1 = foreground (drawn last), 2 = collision
 //   (always active, nonzero = solid), 3 = data (per-tile ints, never drawn).
 // Tile ids are 1-based in game code (0 = empty); the tileset is sliced 0-based
 // after a `tile--`. Anim arrays are sized by `tileCount` (for a loaded map this
 // is the .til's stored tile count; for MakeMap it is width*height, faithfully
-// odd as cbEnchanted's create() does). The map is centred on (posX, posY),
+// odd as CoolBasic's create does). The map is centred on (posX, posY),
 // default world origin.
 struct CbMapData {
     int32_t mapWidth = 0;
@@ -58,11 +57,10 @@ inline float cb_map_rd_f32(const uint8_t* p) {
     return f;
 }
 
-// ─── .til binary parser (cbEnchanted cbmap.cpp:58-199) ──────────────────
+// ─── .til binary parser ──────────────────
 // Parses the data half of a .til file (the tileset image is loaded separately,
 // in cb_map.cpp). Returns false on any magic/version mismatch or truncation —
-// mirroring cbEnchanted, plus defensive bounds checks (cbEnchanted reads from
-// an fstream and would over-read a short file).
+// with defensive bounds checks so a short or corrupt file cannot over-read.
 //
 // Layout (little-endian; two absolute seeks skip editor metadata):
 //   0    : magic {40,192,13,139}
@@ -76,7 +74,7 @@ inline float cb_map_rd_f32(const uint8_t* p) {
 //   then : tiles magic {250,41,8,162}
 //   then : per tile i = 1..tileCount-1: int32 animLength[i], int32 animSlowness[i]
 //          (index 0 unused). NB the file stores `tileCount` entries but
-//          cbEnchanted reads only `tileCount-1`; the trailing 8 bytes are
+//          CoolBasic reads only `tileCount-1`; the trailing 8 bytes are
 //          ignored. We replicate that read for byte-compatibility.
 inline bool cb_map_parse(const uint8_t* b, size_t len, CbMapData& out) {
     auto have = [&](size_t off, size_t n) { return n <= len && off <= len - n; };
@@ -99,7 +97,7 @@ inline bool cb_map_parse(const uint8_t* b, size_t len, CbMapData& out) {
     out.tileHeight = cb_map_rd_i32(b + 828);
     out.mapWidth = cb_map_rd_i32(b + 832);
     out.mapHeight = cb_map_rd_i32(b + 836);
-    // Defensive: cbEnchanted trusts these; we reject degenerate dims so the
+    // Defensive: CoolBasic trusts these; we reject degenerate dims so the
     // cell count / index math below can't overflow or divide by zero.
     if (out.mapWidth <= 0 || out.mapHeight <= 0) return false;
     if (out.tileWidth <= 0 || out.tileHeight <= 0) return false;
@@ -150,9 +148,9 @@ inline bool cb_map_parse(const uint8_t* b, size_t len, CbMapData& out) {
     return true;
 }
 
-// ─── In-place construction (MakeMap; cbEnchanted create()) ──────────────
+// ─── In-place construction (MakeMap) ──────────────
 // Allocates four zeroed layers. tileCount = width*height (faithful to
-// cbEnchanted, where it merely sizes the anim arrays).
+// CoolBasic, where it merely sizes the anim arrays).
 inline void cb_map_create(CbMapData& out, int32_t w, int32_t h, int32_t tile_w,
                           int32_t tile_h) {
     out.mapWidth = w;
@@ -168,10 +166,9 @@ inline void cb_map_create(CbMapData& out, int32_t w, int32_t h, int32_t tile_w,
 }
 
 // ─── Grid accessors ─────────────────────────────────────────────────────
-// Every accessor bounds-checks the layer index (cbEnchanted indexes layers[]
-// unchecked = UB for an out-of-range layer; under unsafe_code="deny" we return
-// 0 / no-op instead) and the tile coordinates (0 outside the map, as cbEnchanted
-// does).
+// Every accessor bounds-checks the layer index (an out-of-range layer indexed
+// unchecked would be UB; under unsafe_code="deny" we return 0 / no-op instead)
+// and the tile coordinates (0 outside the map, matching CoolBasic).
 inline bool cb_map_layer_valid(int layer) { return layer >= 0 && layer < 4; }
 
 inline int32_t cb_map_get(const CbMapData& m, int layer, int32_t tx, int32_t ty) {
@@ -190,9 +187,9 @@ inline void cb_map_edit(CbMapData& m, int layer, int32_t tx, int32_t ty, int32_t
     m.layers[layer][(size_t)ty * (size_t)m.mapWidth + (size_t)tx] = tile;
 }
 
-// World coordinates -> tile id (cbEnchanted getMapWorldCoordinates). The map is
-// centred on (posX, posY); world Y is up. Uses cbEnchanted's truncating int()
-// cast (not floor), so boundary behaviour matches.
+// World coordinates -> tile id. The map is centred on (posX, posY); world Y is
+// up. Uses CoolBasic's truncating int() cast (not floor), so boundary behaviour
+// matches.
 inline int32_t cb_map_get_world(const CbMapData& m, int layer, double x, double y) {
     if (!cb_map_layer_valid(layer)) return 0;
     int32_t tx = (int32_t)((x - m.posX + m.mapWidth * m.tileWidth * 0.5) / m.tileWidth);
@@ -201,9 +198,9 @@ inline int32_t cb_map_get_world(const CbMapData& m, int layer, double x, double 
 }
 
 // Source rect (top-left) in the tileset for a 1-based tile id. Returns false for
-// the empty tile (0). Mirrors cbEnchanted drawTile: `tile--`, framesX =
-// tilesetWidth / tileWidth, fx = tile % framesX, fy = tile / framesX. (This
-// slice is correct in cbEnchanted, unlike the Phase 1 image-frame slice.)
+// the empty tile (0). The slice: `tile--`, framesX = tilesetWidth / tileWidth,
+// fx = tile % framesX, fy = tile / framesX (the CoolBasic tile slice, correct
+// as written — unlike the image-frame slice in cb_gfx.cpp).
 inline bool cb_map_tile_src(const CbMapData& m, int32_t tile, int32_t tileset_w,
                             int32_t& sx, int32_t& sy) {
     if (tile == 0) return false;
@@ -219,15 +216,15 @@ inline bool cb_map_tile_src(const CbMapData& m, int32_t tile, int32_t tileset_w,
 
 // World anchor (pre-Y-flip) for the top-left of grid tile (gx, gy): the inverse
 // of worldCoordinatesToMapCoordinates. The render loop draws the tile bitmap at
-// (wx, -wy) under the plain world transform (cbEnchanted's convertCoords flips
-// the anchor Y for world draws).
+// (wx, -wy) under the plain world transform (the anchor Y is flipped for world
+// draws).
 inline void cb_map_tile_anchor(const CbMapData& m, int32_t gx, int32_t gy,
                                double& wx, double& wy) {
     wx = (double)gx * m.tileWidth - m.mapWidth * m.tileWidth * 0.5 + m.posX;
     wy = m.mapHeight * m.tileHeight * 0.5 - (double)gy * m.tileHeight + m.posY;
 }
 
-// ─── Line of sight (FD-036 Phase 5; cbmap.cpp:603-665) ──────────────────
+// ─── Line of sight (FD-036 Phase 5) ──────────────────
 // World coordinates -> tilemap-relative pixels (origin at the map's top-left,
 // Y growing down). The inverse of mapCoordinatesToWorldCoordinates.
 inline void cb_map_world_to_map(const CbMapData& m, double& x, double& y) {
@@ -238,7 +235,7 @@ inline void cb_map_world_to_map(const CbMapData& m, double& x, double& y) {
 // DDA ray walk over the collision layer (layer 2). x1/y1/x2/y2 are tilemap-
 // relative pixels (run cb_map_world_to_map first). Returns true if a wall
 // (nonzero collision tile) lies strictly between the two points — ObjectSight
-// negates this (1 = clear line). Mirrors cbEnchanted's grid traversal exactly,
+// negates this (1 = clear line). Reproduces CoolBasic's grid traversal exactly,
 // incl. the 1e-5 nudge and the "stop at the end tile or out of bounds" guard.
 inline bool cb_map_ray_cast(const CbMapData& m, double x1, double y1, double x2,
                             double y2) {
@@ -281,9 +278,9 @@ inline bool cb_map_ray_cast(const CbMapData& m, double x1, double y1, double x2,
     return false;
 }
 
-// ─── Tile animation advance (FD-036; cbmap.cpp:373-376) ──────────────────────
-// Advance one animated tile's currentFrame by `timestep` seconds. Faithful to
-// cbEnchanted: cur += timestep / (slowness * animSpeed), reset to 0 once
+// ─── Tile animation advance (FD-036) ──────────────────────
+// Advance one animated tile's currentFrame by `timestep` seconds, following the
+// CoolBasic formula: cur += timestep / (slowness * animSpeed), reset to 0 once
 // (int)cur *exceeds* animLength — so the tile cycles tile..tile+animLength, i.e.
 // animLength+1 frames (animLength==1 is a 2-frame tile). The render samples
 // `tile + (int)cur`. Caller passes animSpeed > 0 and animLength > 0; a

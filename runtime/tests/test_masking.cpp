@@ -11,26 +11,14 @@
 // no display is needed. Drawing onto an image target uses the identity transform
 // (gfx_begin_world only engages for the backbuffer), so pixel positions are exact.
 
-#include <allegro5/allegro.h>
+// cb_gfx.h provides the cb::gfx::image_bitmap test hook and (via
+// cb_runtime_func.h) the cb_rt_* image entry points + the opaque CbImage handle.
+#include "cb_gfx.h"
 
+#include <allegro5/allegro.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
-
-// The runtime entry points under test are extern "C" in cb_gfx.cpp; forward-
-// declare the few we use rather than pulling in the whole catalog header. CbImage
-// is an opaque handle (defined in cb_gfx.cpp).
-struct CbImage;
-extern "C" {
-CbImage* cb_rt_make_image(int32_t w, int32_t h);
-void cb_rt_draw_to_image(CbImage* img);
-void cb_rt_mask_image(CbImage* img, int32_t r, int32_t g, int32_t b);
-void cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame);
-void cb_rt_draw_image_frame_mask(const CbImage* img, double x, double y,
-                                 int32_t frame, int32_t use_mask);
-void cb_rt_delete_image(CbImage* img);
-ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
-}
 
 namespace {
 
@@ -49,7 +37,7 @@ Rgba get_rgba(ALLEGRO_BITMAP* bmp, int x, int y) {
 CbImage* make_two_pixel(unsigned char ar, unsigned char ag, unsigned char ab,
                         unsigned char br, unsigned char bg, unsigned char bb) {
     CbImage* img = cb_rt_make_image(2, 1);
-    ALLEGRO_BITMAP* bmp = cb_gfx_image_bitmap(img);
+    ALLEGRO_BITMAP* bmp = cb::gfx::image_bitmap(img);
     ALLEGRO_BITMAP* prev = al_get_target_bitmap();
     al_set_target_bitmap(bmp);
     al_put_pixel(0, 0, al_map_rgb(ar, ag, ab));
@@ -71,7 +59,7 @@ TEST(Masking, AlphaRespectedAtDraw) {
 
     // Background: 2x1 cleared to green.
     CbImage* bg = cb_rt_make_image(2, 1);
-    ALLEGRO_BITMAP* bb = cb_gfx_image_bitmap(bg);
+    ALLEGRO_BITMAP* bb = cb::gfx::image_bitmap(bg);
     al_set_target_bitmap(bb);
     al_clear_to_color(al_map_rgb(0, 255, 0));
 
@@ -94,15 +82,15 @@ TEST(Masking, AlphaRespectedAtDraw) {
 // "MaskObject/MaskImage does nothing" bug.
 TEST(Masking, MaskImageRekeysFromPristine) {
     CbImage* img = make_two_pixel(0, 0, 0, 255, 255, 255);  // (0,0) black, (1,0) white
-    ALLEGRO_BITMAP* bmp = cb_gfx_image_bitmap(img);
+    ALLEGRO_BITMAP* bmp = cb::gfx::image_bitmap(img);
 
     cb_rt_mask_image(img, 0, 0, 0);  // key black
     EXPECT_EQ(get_rgba(bmp, 0, 0).a, 0);    // black -> transparent
     EXPECT_EQ(get_rgba(bmp, 1, 0).a, 255);  // white stays opaque
 
-    // cb_gfx_image_bitmap returns the live (re-cloned) bitmap; re-read it.
+    // cb::gfx::image_bitmap returns the live (re-cloned) bitmap; re-read it.
     cb_rt_mask_image(img, 255, 255, 255);  // re-key white from pristine
-    bmp = cb_gfx_image_bitmap(img);
+    bmp = cb::gfx::image_bitmap(img);
     EXPECT_EQ(get_rgba(bmp, 0, 0).a, 255);  // black restored to opaque
     EXPECT_EQ(get_rgba(bmp, 1, 0).a, 0);    // white now transparent
 
@@ -116,7 +104,7 @@ TEST(Masking, UseMaskZeroDrawsUnmasked) {
     cb_rt_mask_image(sprite, 255, 0, 0);                     // key red
 
     CbImage* bg = cb_rt_make_image(2, 1);
-    ALLEGRO_BITMAP* bb = cb_gfx_image_bitmap(bg);
+    ALLEGRO_BITMAP* bb = cb::gfx::image_bitmap(bg);
     al_set_target_bitmap(bb);
     al_clear_to_color(al_map_rgb(0, 255, 0));
 

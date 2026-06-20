@@ -1,12 +1,11 @@
 // CoolBasic system / time runtime (FD-013 Batch 3).
 //
-// Timer / Wait / MakeError. Two deliberate departures from the legacy
-// implementation (../CBCompiler/Runtime/cb_system.cpp):
-//   - Timer uses a monotonic WALL clock (std::chrono::steady_clock), not the
-//     legacy clock() (which measures CPU time). Milliseconds-since-start is
-//     what a game loop expects; CPU time drifts from wall time under load.
-//   - Wait uses std::this_thread::sleep_for rather than Allegro's al_rest, so
-//     a pure sleep does not drag in Allegro initialization.
+// Timer / Wait / MakeError. Two design choices worth calling out:
+//   - Timer uses a monotonic WALL clock (std::chrono::steady_clock) rather than
+//     CPU time (clock()): milliseconds-since-start is what a game loop expects,
+//     and CPU time drifts from wall time under load.
+//   - Wait uses std::this_thread::sleep_for rather than Allegro's al_rest, so a
+//     pure sleep does not drag in Allegro initialization.
 //
 // MakeError only writes its message here; program termination is handled by
 // the interpreter/IR (an IR `Halt` terminator follows the call), so nothing
@@ -74,7 +73,7 @@ bool local_now(std::tm& out) {
 } // namespace
 
 // Current date as "D Mon YYYY" (e.g. "31 May 2026"); the day is unpadded, to
-// match cbEnchanted's `day << " " << month << " " << year`.
+// match CoolBasic's `Date$` formatting.
 extern "C" CbString* cb_rt_date(void) {
     std::tm tm{};
     if (!local_now(tm)) return str_from("");
@@ -95,8 +94,8 @@ extern "C" CbString* cb_rt_time(void) {
 }
 
 // The process command line. For the interpreter this is `cb`'s own command
-// line (interpreter + script + any trailing args), since there is no separately
-// compiled program executable as in cbEnchanted.
+// line (interpreter + script + any trailing args): the script runs inside the
+// interpreter, not as a separately compiled program executable.
 extern "C" CbString* cb_rt_command_line(void) {
 #ifdef _WIN32
     const char* cl = GetCommandLineA();
