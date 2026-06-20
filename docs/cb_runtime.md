@@ -663,6 +663,27 @@ File handles are integer ids (0 = failed to open).
 
 (Source names use `MEMBlock`; CoolBasic spelling is `MakeMEMBlock` etc.)
 
+**Implemented (FD-039, `runtime/cb_memblock.cpp`).** `Memblock` is the opaque
+`CbMemblock*` handle (catalog tag 15) — a raw-pointer opaque handle with no
+numeric id space; a declared-but-unassigned `Memblock` is `Null`. The subsystem
+is Allegro-free, so it is present in the SDK-free catalog and runs headless.
+Deliberate divergences from classic CoolBasic:
+
+- **Bounds/handle safety traps.** An out-of-range offset, a null/invalid handle,
+  a negative `MakeMEMBlock`/`ResizeMEMBlock` size, or a bad `MemCopy` range
+  raises a runtime error through the FD-015 trap channel (exit 1) instead of the
+  classic blind-cast that walks off the buffer (undefined behaviour).
+- **Little-endian on the wire.** Multi-byte `Peek`/`Poke` (`Short`/`Int`/`Float`)
+  use little-endian byte order regardless of host architecture, so a memblock's
+  contents are platform-independent.
+- **`PeekByte`/`PeekShort` return unsigned** (`0..255` / `0..65535`); `PeekInt`
+  is a signed 32-bit reinterpret.
+- **`Float` is 32-bit on the wire** — `PokeFloat` narrows the CB `Float` (f64) to
+  IEEE-754 32-bit and `PeekFloat` widens it back.
+- **`ResizeMEMBlock`** preserves existing bytes and zero-fills any growth;
+  `MemCopy` uses `memmove`, so an in-block copy with overlapping ranges is
+  well-defined.
+
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `MakeMEMBlock` | `size: Integer` | `Memblock` | Allocates a zero-filled block of `size` bytes |

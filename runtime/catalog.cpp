@@ -143,6 +143,13 @@ constexpr CbTypeTag CB_TYPE_MAP = 14;
 template<> struct type_tag<      CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
 template<> struct type_tag<const CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
 
+// Memblock — the raw byte-buffer opaque handle (FD-039, tag 15). Allegro-free,
+// unlike Image/Font/Object/Map, so it (and its functions) stay outside the
+// CB_NO_ALLEGRO guard and ship in the SDK-free catalog.
+constexpr CbTypeTag CB_TYPE_MEMBLOCK = 15;
+template<> struct type_tag<      CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
+template<> struct type_tag<const CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -191,6 +198,11 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 
 static constexpr CbTypeDesc catalog_types[] = {
     { "TestHandle", ::cb_catalog::CB_TYPE_TEST_HANDLE },
+    // Memblock (FD-039) is Allegro-free — its Make/Peek/Poke functions are
+    // present in every build, so the type is advertised unconditionally (unlike
+    // the graphics handles below, which would have no functions in the SDK-free
+    // catalog).
+    { "Memblock",   ::cb_catalog::CB_TYPE_MEMBLOCK },
 #ifndef CB_NO_ALLEGRO
     // Image/Font are graphics handles; their operations live behind the
     // Allegro guard below, so they're absent from the SDK-free catalog
@@ -310,6 +322,23 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("strmove",          cb_rt_str_move),
     CB_FN("countwords",       cb_rt_count_words),
     CB_FN("getword",          cb_rt_get_word),
+
+    // Memory blocks (cb_memblock.cpp, FD-039). Allegro-free, so — unlike the
+    // graphics/input block below — these stay outside the CB_NO_ALLEGRO guard
+    // and ship in the SDK-free catalog. `Memblock` is the opaque tag-15 handle.
+    CB_FN("makememblock",     cb_rt_make_memblock),
+    CB_FN("deletememblock",   cb_rt_delete_memblock),
+    CB_FN("resizememblock",   cb_rt_resize_memblock),
+    CB_FN("memblocksize",     cb_rt_memblock_size),
+    CB_FN("memcopy",          cb_rt_mem_copy),
+    CB_FN("peekbyte",         cb_rt_peek_byte),
+    CB_FN("peekshort",        cb_rt_peek_short),
+    CB_FN("peekint",          cb_rt_peek_int),
+    CB_FN("peekfloat",        cb_rt_peek_float),
+    CB_FN("pokebyte",         cb_rt_poke_byte),
+    CB_FN("pokeshort",        cb_rt_poke_short),
+    CB_FN("pokeint",          cb_rt_poke_int),
+    CB_FN("pokefloat",        cb_rt_poke_float),
 
     // Graphics, text, and input (cb_gfx.cpp / cb_font.cpp / cb_input.cpp) pull
     // in Allegro. The SDK-free build (FD-033, -DCB_NO_ALLEGRO) compiles only the

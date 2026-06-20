@@ -1,0 +1,58 @@
+// FD-039: memory blocks. Byte-level buffers with little-endian Peek/Poke,
+// unsigned Byte/Short reads, signed PeekInt, 32-bit Float, resize (preserve +
+// zero-fill), and MemCopy. Allegro-free, so this runs in the SDK-free build
+// (not graphics-gated). Bounds/handle errors trap — the out-of-range trap path
+// is covered by cli.rs (runs to a clean exit 1).
+
+Dim m As Memblock
+m = MakeMEMBlock(8)
+If m <> Null Then Print "make_ok"
+Print Str(MEMBlockSize(m))        // 8
+Print Str(PeekInt(m, 0))          // 0  (fresh block is zero-filled)
+
+// Byte: unsigned 0..255; only the low 8 bits are stored.
+PokeByte(m, 0, 255)
+PokeByte(m, 1, 263)               // 263 = 256 + 7 -> low byte 7
+Print Str(PeekByte(m, 0))         // 255
+Print Str(PeekByte(m, 1))         // 7
+
+// Short: unsigned 0..65535.
+PokeShort(m, 2, 65535)
+Print Str(PeekShort(m, 2))        // 65535
+
+// Int: signed reinterpret.
+PokeInt(m, 4, -1)
+Print Str(PeekInt(m, 4))          // -1
+
+// Little-endian on the wire: PokeInt 0x04030201 lays 01 02 03 04 low->high.
+PokeInt(m, 0, 67305985)
+Print Str(PeekByte(m, 0))         // 1
+Print Str(PeekByte(m, 1))         // 2
+Print Str(PeekByte(m, 2))         // 3
+Print Str(PeekByte(m, 3))         // 4
+
+// Float: 32-bit on the wire (2.5 is exactly representable in f32).
+PokeFloat(m, 0, 2.5)
+Print Str(PeekFloat(m, 0))        // 2.5
+
+// Resize grow: the existing prefix is preserved, the new tail zero-filled.
+PokeInt(m, 0, 305419896)          // 0x12345678
+ResizeMEMBlock(m, 16)
+Print Str(MEMBlockSize(m))        // 16
+Print Str(PeekInt(m, 0))          // 305419896  (preserved)
+Print Str(PeekInt(m, 12))         // 0          (zero-filled growth)
+
+// MemCopy: 4 bytes from m@0 into dst@4; the rest of dst is untouched.
+Dim dst As Memblock
+dst = MakeMEMBlock(8)
+MemCopy(m, 0, dst, 4, 4)
+Print Str(PeekInt(dst, 4))        // 305419896
+Print Str(PeekInt(dst, 0))        // 0
+
+// A declared-but-unassigned Memblock defaults to Null.
+Dim empty As Memblock
+If empty = Null Then Print "null_ok"
+
+DeleteMEMBlock(dst)
+DeleteMEMBlock(m)
+Print "done"

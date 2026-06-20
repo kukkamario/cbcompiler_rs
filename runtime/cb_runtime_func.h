@@ -39,6 +39,11 @@ typedef struct CbMap CbMap;
    MakeObject/MakeObjectFloor/CloneObject, freed by DeleteObject. */
 typedef struct CbObject CbObject;
 
+/* Memblock handle — the CB-visible `Memblock` opaque type (FD-039, tag 15). A
+   raw byte buffer; defined in cb_memblock.cpp. Created by MakeMEMBlock, freed by
+   DeleteMEMBlock. Allegro-free (present in the SDK-free catalog). */
+typedef struct CbMemblock CbMemblock;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -120,6 +125,27 @@ double cb_rt_curve_value(double target, double current, double smoothness);
 double cb_rt_curve_angle(double target, double current, double smoothness);
 int32_t cb_rt_box_overlap(double x1, double y1, double w1, double h1,
                           double x2, double y2, double w2, double h2);
+
+/* Memory blocks (cb_memblock.cpp, FD-039). `Memblock` is the opaque CbMemblock*
+   handle (tag 15). Allegro-free, so these are in the SDK-free catalog. Multi-
+   byte Peek/Poke are little-endian; PeekByte/PeekShort return unsigned, PeekInt
+   signed; Float is 32-bit on the wire. Out-of-range offsets, null handles, and
+   negative sizes/lengths trap via the FD-015 channel (a divergence from classic
+   CB, which blind-casts → UB). */
+CbMemblock* cb_rt_make_memblock(int32_t size);
+void        cb_rt_delete_memblock(CbMemblock* m);
+void        cb_rt_resize_memblock(CbMemblock* m, int32_t size);
+int32_t     cb_rt_memblock_size(const CbMemblock* m);
+void        cb_rt_mem_copy(const CbMemblock* src, int32_t src_off,
+                           CbMemblock* dst, int32_t dst_off, int32_t len);
+int32_t     cb_rt_peek_byte(const CbMemblock* m, int32_t offset);
+int32_t     cb_rt_peek_short(const CbMemblock* m, int32_t offset);
+int32_t     cb_rt_peek_int(const CbMemblock* m, int32_t offset);
+double      cb_rt_peek_float(const CbMemblock* m, int32_t offset);
+void        cb_rt_poke_byte(CbMemblock* m, int32_t offset, int32_t value);
+void        cb_rt_poke_short(CbMemblock* m, int32_t offset, int32_t value);
+void        cb_rt_poke_int(CbMemblock* m, int32_t offset, int32_t value);
+void        cb_rt_poke_float(CbMemblock* m, int32_t offset, double value);
 
 /* Graphics & images (cb_gfx.cpp, FD-013 Batch 4). CB `Float` args arrive as
    `double`, `Int` as `int32_t`. `Image` is the opaque CbImage* handle. Many

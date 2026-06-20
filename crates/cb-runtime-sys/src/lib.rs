@@ -451,12 +451,15 @@ mod tests {
         let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
             catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
         assert_eq!(types_by_name["TestHandle"].tag, 10);
+        // Memblock (FD-039, tag 15) is Allegro-free, so it is advertised in BOTH
+        // the full and SDK-free catalogs (unlike the graphics handles below).
+        assert_eq!(types_by_name["Memblock"].tag, 15);
         // Image/Font (and the graphics/input functions below) exist only in the
         // full Allegro build; the SDK-free catalog (FD-033) advertises just
-        // TestHandle and the language-core functions.
+        // TestHandle, Memblock, and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 5);
+            assert_eq!(catalog.types.len(), 6);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
             // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
@@ -464,7 +467,7 @@ mod tests {
             assert_eq!(types_by_name["Map"].tag, 14);
         }
         #[cfg(cb_no_allegro)]
-        assert_eq!(catalog.types.len(), 1);
+        assert_eq!(catalog.types.len(), 2);
 
         // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
         // makes this a linker-checked invariant.
@@ -500,6 +503,64 @@ mod tests {
         assert_eq!(abs_float.name, "abs");
         assert_eq!(abs_float.params[0].ty, IrType::Float);
         assert_eq!(abs_float.return_ty, IrType::Float);
+
+        // Memory blocks (FD-039). Allegro-free, so present in BOTH builds. The
+        // `Memblock` handle is the tag-15 opaque type; Peek*/Poke* take it +
+        // an Int offset, Float peek/poke use the CB Float (f64) end.
+        let memblock_ty = IrType::RuntimeType("Memblock".to_string());
+
+        let make_mb = by_symbol["cb_rt_make_memblock"];
+        assert_eq!(make_mb.name, "makememblock");
+        assert_eq!(make_mb.params.len(), 1);
+        assert_eq!(make_mb.params[0].ty, IrType::Int);
+        assert_eq!(make_mb.return_ty, memblock_ty);
+
+        let mb_size = by_symbol["cb_rt_memblock_size"];
+        assert_eq!(mb_size.name, "memblocksize");
+        assert_eq!(mb_size.params[0].ty, memblock_ty);
+        assert_eq!(mb_size.return_ty, IrType::Int);
+
+        let mem_copy = by_symbol["cb_rt_mem_copy"];
+        assert_eq!(mem_copy.name, "memcopy");
+        assert_eq!(mem_copy.params.len(), 5);
+        assert_eq!(mem_copy.params[0].ty, memblock_ty);
+        assert_eq!(mem_copy.params[1].ty, IrType::Int);
+        assert_eq!(mem_copy.params[2].ty, memblock_ty);
+        assert_eq!(mem_copy.return_ty, IrType::Void);
+
+        let peek_byte = by_symbol["cb_rt_peek_byte"];
+        assert_eq!(peek_byte.name, "peekbyte");
+        assert_eq!(peek_byte.params[0].ty, memblock_ty);
+        assert_eq!(peek_byte.params[1].ty, IrType::Int);
+        assert_eq!(peek_byte.return_ty, IrType::Int);
+
+        let peek_float = by_symbol["cb_rt_peek_float"];
+        assert_eq!(peek_float.name, "peekfloat");
+        assert_eq!(peek_float.return_ty, IrType::Float);
+
+        let poke_int = by_symbol["cb_rt_poke_int"];
+        assert_eq!(poke_int.name, "pokeint");
+        assert_eq!(poke_int.params.len(), 3);
+        assert_eq!(poke_int.params[2].ty, IrType::Int);
+        assert_eq!(poke_int.return_ty, IrType::Void);
+
+        let poke_float = by_symbol["cb_rt_poke_float"];
+        assert_eq!(poke_float.name, "pokefloat");
+        assert_eq!(poke_float.params[2].ty, IrType::Float);
+        assert_eq!(poke_float.return_ty, IrType::Void);
+
+        // All 13 entry points must be registered (the remaining ones share the
+        // shapes asserted above).
+        for sym in [
+            "cb_rt_delete_memblock",
+            "cb_rt_resize_memblock",
+            "cb_rt_peek_short",
+            "cb_rt_peek_int",
+            "cb_rt_poke_byte",
+            "cb_rt_poke_short",
+        ] {
+            assert!(by_symbol.contains_key(sym), "missing memblock entry {sym}");
+        }
 
         // Graphics + input entries are present only in the full Allegro build.
         #[cfg(not(cb_no_allegro))]
