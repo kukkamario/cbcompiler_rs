@@ -1,6 +1,7 @@
 # FD-039: Memory Block Runtime Functions
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-21
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Brings CoolBasic's **memory block** subsystem online — raw byte-level buffers (`MakeMEMBlock`/`Peek*`/`Poke*`/`MemCopy`/`ResizeMEMBlock`). Self-contained, Allegro-free, and a prerequisite for the memblock forms of `Crc32`, `Encrypt`/`Decrypt`, and `CallDLL`.
