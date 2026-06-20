@@ -6,11 +6,11 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
-The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, and the FD-037 runtime code-cleanup pass closed 2026-06-20. No active features — promote the next item from Backlog to begin.
+The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, and the FD-037 runtime code-cleanup pass closed 2026-06-20. FD-038 (particle system) is the first item promoted from the Backlog's post-FD-036 game-subsystem track.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| _(none)_ | | | | |
+| [FD-038](FD-038_PARTICLE_SYSTEM_RUNTIME_FUNCTIONS.md) | Particle System Runtime Functions | Open | High | Medium |
 
 ## Completed
 
@@ -68,7 +68,6 @@ Low-priority or blocked items. Promote to Active when ready to design.
 |----|-------|-------|
 | - | Sound | Independent runtime subsystem. Do after the FD-036 game cluster. New `Sound`/`Channel` opaque types. Prerequisite for Video. |
 | - | Video Playback | After Sound — video mixes audio through the sound interface. |
-| - | Particle Effects | After the FD-036 game loop — needs multi-frame Images + a per-frame update cadence. New `Emitter` opaque type. |
 | - | File I/O | Independent; trap channel already in place (FD-015). |
 | - | Memory Blocks | Independent runtime subsystem. |
 | - | DATA / `Read` / `Restore` | Compiler-side `DATA` statements + runtime cursor. |
