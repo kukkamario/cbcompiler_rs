@@ -16,9 +16,10 @@
 // Image/Font). The VM is single-threaded (FD-036), so process-global state is safe.
 //
 // Textures are shared & reference-counted: each object holds a
-// shared_ptr<CbTexture> wrapping the ALLEGRO_BITMAP. CloneObject copies the
-// shared_ptr (the bitmap is freed only when the last owner releases it);
-// PaintObject/MaskObject mutate the shared bitmap in place (all clones see it);
+// shared_ptr<CbTexture>, which keeps both the pristine (unmasked) bitmap and the
+// masked bitmap that actually draws. CloneObject copies the shared_ptr (bitmaps
+// freed only when the last owner releases them); PaintObject/MaskObject re-derive
+// the shared holder's masked bitmap from its pristine copy (all clones see it);
 // MirrorObject repoints the one object to a fresh private holder.
 //
 // ABI (see cb_runtime.h / the catalog DSL): CB Float args arrive as `double`, Int
@@ -44,6 +45,16 @@
 // — used by PaintObject(Object, Image). Mirrors cb_input.cpp's forward-declared
 // cb_gfx glue rather than widening a public header.
 extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
+// The image's pristine (pre-mask) bitmap, so PaintObject keys from the unmasked
+// original rather than an already-keyed copy (defined in cb_gfx.cpp).
+extern "C" ALLEGRO_BITMAP* cb_gfx_image_pristine(const CbImage* img);
+// Sets the alpha-capable bitmap format + non-premultiplied flag (defined in
+// cb_gfx.cpp). Called before loading object bitmaps so masking yields real alpha,
+// even when an object loads before any Screen/MakeImage call ran ensure_init.
+extern "C" void cb_apply_bitmap_defaults(void);
+// Restores the runtime's source-over alpha blender (defined in cb_gfx.cpp), used
+// after MirrorObject temporarily swaps in a verbatim copy blender.
+extern "C" void cb_apply_alpha_blender(void);
 
 // ─── Shared texture holder ──────────────────────────────────────────────
 //
@@ -52,9 +63,11 @@ extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
 // cbEnchanted's raw `copied` flag (which dangles if the original is deleted
 // first). Objects render by dereferencing tex->bmp live; never cache the pointer.
 struct CbTexture {
-    ALLEGRO_BITMAP* bmp = nullptr;
+    ALLEGRO_BITMAP* bmp = nullptr;       // masked — what render_object draws
+    ALLEGRO_BITMAP* pristine = nullptr;  // unmasked original — re-key source for MaskObject
     ~CbTexture() {
         if (bmp) al_destroy_bitmap(bmp);
+        if (pristine) al_destroy_bitmap(pristine);
     }
 };
 
@@ -187,6 +200,7 @@ std::string read_cb_string(const CbString* s) {
 // cb_gfx.cpp's MakeImage / cb_map.cpp's load_tileset): without a display, video
 // bitmaps can't be made, so fall back to a memory bitmap.
 ALLEGRO_BITMAP* create_bitmap_headless(int w, int h) {
+    cb_apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -198,6 +212,7 @@ ALLEGRO_BITMAP* create_bitmap_headless(int w, int h) {
 
 ALLEGRO_BITMAP* clone_bitmap_headless(ALLEGRO_BITMAP* src) {
     if (!src) return nullptr;
+    cb_apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -207,20 +222,33 @@ ALLEGRO_BITMAP* clone_bitmap_headless(ALLEGRO_BITMAP* src) {
     return b;
 }
 
-// Loads + masks an object bitmap. Self-inits the subsystems al_load_bitmap needs
-// (idempotent) and mirrors the memory-bitmap fallback so objects load headless.
-ALLEGRO_BITMAP* load_object_bitmap(const std::string& path, ALLEGRO_COLOR mask) {
+// Loads an object's *pristine* (unmasked) bitmap. Self-inits the subsystems
+// al_load_bitmap needs (idempotent) and mirrors the memory-bitmap fallback so
+// objects load headless. Masking is applied later by set_object_texture, which
+// keeps the pristine copy so MaskObject can re-key to any colour.
+ALLEGRO_BITMAP* load_object_bitmap(const std::string& path) {
     if (!al_is_system_installed()) al_init();
     if (!al_is_image_addon_initialized()) al_init_image_addon();
+    cb_apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
     al_set_new_bitmap_flags(flags);
     ALLEGRO_BITMAP* bmp = al_load_bitmap(path.c_str());
     al_set_new_bitmap_flags(prev_flags);
-    if (!bmp) return nullptr;
-    al_convert_mask_to_alpha(bmp, mask);
     return bmp;
+}
+
+// Installs `pristine` as the object's texture: keeps it as the unmasked original
+// and derives the drawn bitmap as a masked clone keyed by o->maskColor. Mirrors
+// cbEnchanted's renderTarget (pristine) + texture (masked) pair. Takes ownership
+// of `pristine`. On clone failure the object still holds the pristine (so it is
+// not leaked and a later MaskObject can recover).
+void set_object_texture(CbObject* o, ALLEGRO_BITMAP* pristine) {
+    o->tex = std::make_shared<CbTexture>();
+    o->tex->pristine = pristine;
+    o->tex->bmp = clone_bitmap_headless(pristine);
+    if (o->tex->bmp) al_convert_mask_to_alpha(o->tex->bmp, o->maskColor);
 }
 
 void register_object(CbObject* o) {
@@ -373,13 +401,12 @@ void render_object(const CbObject* o) {
 // LoadObject(path): a single-frame image as an object (Null on load failure).
 extern "C" CbObject* cb_rt_load_object(const CbString* path) {
     CbObject* o = new CbObject(false);
-    ALLEGRO_BITMAP* bmp = load_object_bitmap(read_cb_string(path), o->maskColor);
+    ALLEGRO_BITMAP* bmp = load_object_bitmap(read_cb_string(path));
     if (!bmp) {
         delete o;
         return nullptr;
     }
-    o->tex = std::make_shared<CbTexture>();
-    o->tex->bmp = bmp;
+    set_object_texture(o, bmp);  // keeps `bmp` as pristine, derives masked copy
     o->sizeX = al_get_bitmap_width(bmp);
     o->sizeY = al_get_bitmap_height(bmp);
     o->range1 = o->sizeX;  // LoadObject seeds the collision range to image size
@@ -401,7 +428,7 @@ extern "C" CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_
                                             int32_t frame_h, int32_t start_frame,
                                             int32_t frame_count) {
     CbObject* o = new CbObject(false);
-    ALLEGRO_BITMAP* bmp = load_object_bitmap(read_cb_string(path), o->maskColor);
+    ALLEGRO_BITMAP* bmp = load_object_bitmap(read_cb_string(path));
     if (!bmp) {
         delete o;
         return nullptr;
@@ -414,8 +441,7 @@ extern "C" CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_
         delete o;
         return nullptr;
     }
-    o->tex = std::make_shared<CbTexture>();
-    o->tex->bmp = bmp;
+    set_object_texture(o, bmp);  // keeps `bmp` as pristine, derives masked copy
     o->frameWidth = frame_w;
     o->frameHeight = frame_h;
     o->sizeX = frame_w;
@@ -599,16 +625,21 @@ extern "C" double cb_rt_distance2(const CbObject* a, const CbObject* b) {
 // the image. Mutates inside the shared holder so existing clones pick it up.
 extern "C" void cb_rt_paint_object_image(CbObject* o, const CbImage* img) {
     if (!o) return;
-    ALLEGRO_BITMAP* src = cb_gfx_image_bitmap(img);
-    if (!src) return;
-    ALLEGRO_BITMAP* clone = clone_bitmap_headless(src);
-    if (!clone) return;
-    al_convert_mask_to_alpha(clone, o->maskColor);
+    // Paint from the image's *pristine* bitmap so the object's own maskColor
+    // governs the key (and MaskObject can later re-key from this pristine).
+    ALLEGRO_BITMAP* srcPristine = cb_gfx_image_pristine(img);
+    if (!srcPristine) return;
+    ALLEGRO_BITMAP* pristine = clone_bitmap_headless(srcPristine);
+    if (!pristine) return;
+    ALLEGRO_BITMAP* masked = clone_bitmap_headless(pristine);
+    if (masked) al_convert_mask_to_alpha(masked, o->maskColor);
     if (!o->tex) o->tex = std::make_shared<CbTexture>();
     if (o->tex->bmp) al_destroy_bitmap(o->tex->bmp);
-    o->tex->bmp = clone;
-    o->sizeX = al_get_bitmap_width(clone);
-    o->sizeY = al_get_bitmap_height(clone);
+    if (o->tex->pristine) al_destroy_bitmap(o->tex->pristine);
+    o->tex->pristine = pristine;
+    o->tex->bmp = masked;
+    o->sizeX = al_get_bitmap_width(pristine);
+    o->sizeY = al_get_bitmap_height(pristine);
     o->painted = true;
 }
 
@@ -617,16 +648,25 @@ extern "C" void cb_rt_paint_object_image(CbObject* o, const CbImage* img) {
 extern "C" void cb_rt_paint_object_object(CbObject* o, const CbObject* src) {
     if (!o || !src) return;
     if (src->tex && src->tex->bmp) {
-        ALLEGRO_BITMAP* clone = clone_bitmap_headless(src->tex->bmp);
-        if (!clone) return;
+        // Clone both bitmaps so the painted object can still re-key (MaskObject).
+        ALLEGRO_BITMAP* masked = clone_bitmap_headless(src->tex->bmp);
+        if (!masked) return;
+        ALLEGRO_BITMAP* pristine = src->tex->pristine
+            ? clone_bitmap_headless(src->tex->pristine) : nullptr;
         if (!o->tex) o->tex = std::make_shared<CbTexture>();
         if (o->tex->bmp) al_destroy_bitmap(o->tex->bmp);
-        o->tex->bmp = clone;
+        if (o->tex->pristine) al_destroy_bitmap(o->tex->pristine);
+        o->tex->bmp = masked;
+        o->tex->pristine = pristine;
         o->painted = true;
     } else {
         if (o->tex && o->tex->bmp) {
             al_destroy_bitmap(o->tex->bmp);
             o->tex->bmp = nullptr;
+        }
+        if (o->tex && o->tex->pristine) {
+            al_destroy_bitmap(o->tex->pristine);
+            o->tex->pristine = nullptr;
         }
         o->painted = false;
     }
@@ -634,12 +674,17 @@ extern "C" void cb_rt_paint_object_object(CbObject* o, const CbObject* src) {
     o->sizeY = src->sizeY;
 }
 
-// MaskObject(obj, r, g, b): sets the transparent colour key in place on the
-// shared bitmap (all clones see it). Destructive/cumulative (no unmasked copy).
+// MaskObject(obj, r, g, b): re-keys the transparent colour. Re-clones the masked
+// bitmap from the pristine copy first, so the new key replaces any prior one
+// (e.g. the black auto-mask applied at load) instead of stacking — without a
+// pristine, re-keying a different colour could never restore previously-keyed
+// pixels. Mutates the shared holder, so all clones see the new mask.
 extern "C" void cb_rt_mask_object(CbObject* o, int32_t r, int32_t g, int32_t b) {
-    if (!o || !o->tex || !o->tex->bmp) return;
+    if (!o || !o->tex || !o->tex->pristine) return;
     o->maskColor = al_map_rgb((unsigned char)r, (unsigned char)g, (unsigned char)b);
-    al_convert_mask_to_alpha(o->tex->bmp, o->maskColor);
+    if (o->tex->bmp) al_destroy_bitmap(o->tex->bmp);
+    o->tex->bmp = clone_bitmap_headless(o->tex->pristine);
+    if (o->tex->bmp) al_convert_mask_to_alpha(o->tex->bmp, o->maskColor);
 }
 
 // GhostObject(obj, alpha): alpha 0–100, scaled to 0–1 and clamped.
@@ -656,24 +701,32 @@ extern "C" void cb_rt_ghost_object(CbObject* o, double alpha) {
 // the old shared bitmap (faithful to cbEnchanted's new render target).
 extern "C" void cb_rt_mirror_object(CbObject* o, int32_t dir) {
     if (!o || dir < 0 || dir > 2 || o->isFloor) return;
-    if (!o->tex || !o->tex->bmp) return;
-    ALLEGRO_BITMAP* srcb = o->tex->bmp;
-    int w = al_get_bitmap_width(srcb);
-    int h = al_get_bitmap_height(srcb);
+    if (!o->tex || !o->tex->pristine) return;
+    ALLEGRO_BITMAP* srcp = o->tex->pristine;
+    int w = al_get_bitmap_width(srcp);
+    int h = al_get_bitmap_height(srcp);
     int flip = ALLEGRO_FLIP_HORIZONTAL;
     if (dir == 1) flip = ALLEGRO_FLIP_VERTICAL;
     else if (dir == 2) flip = ALLEGRO_FLIP_HORIZONTAL | ALLEGRO_FLIP_VERTICAL;
 
+    // Flip the pristine into a new bitmap, then re-derive the masked copy from it,
+    // so a later MaskObject still re-keys correctly. The flip blit uses a verbatim
+    // copy blender (ONE,ZERO) so source alpha is preserved exactly rather than
+    // composited/premultiplied by the global alpha blender; restore it after.
     ALLEGRO_BITMAP* dst = create_bitmap_headless(w, h);
     if (!dst) return;
     ALLEGRO_BITMAP* prev = al_get_target_bitmap();
     al_set_target_bitmap(dst);
     al_clear_to_color(al_map_rgba(0, 0, 0, 0));
-    al_draw_bitmap(srcb, 0, 0, flip);
+    al_set_blender(ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ZERO);
+    al_draw_bitmap(srcp, 0, 0, flip);
+    cb_apply_alpha_blender();
     if (prev) al_set_target_bitmap(prev);
 
     auto holder = std::make_shared<CbTexture>();
-    holder->bmp = dst;
+    holder->pristine = dst;
+    holder->bmp = clone_bitmap_headless(dst);
+    if (holder->bmp) al_convert_mask_to_alpha(holder->bmp, o->maskColor);
     o->tex = holder;  // private; clones retain the old shared holder
     o->painted = true;
 }

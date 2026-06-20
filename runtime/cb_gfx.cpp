@@ -53,6 +53,11 @@ struct CbImage {
     int32_t frame_h = 0;
     int32_t anim_begin = 0;
     int32_t anim_length = 0;
+    // Pristine (pre-mask) copy, kept so MaskImage can re-key to any colour and
+    // DrawImage's useMask=0 can draw the un-keyed original. Null means the image
+    // was never masked, i.e. `bmp` *is* the pristine. Last field so the existing
+    // aggregate initializers (`{bmp}`, `{b, hotspot_x, hotspot_y}`) still work.
+    ALLEGRO_BITMAP* unmasked = nullptr;
 };
 
 // ─── Opaque Font handle ───────────────────────────────────────────────
@@ -126,6 +131,31 @@ struct QueuedText {
 };
 static std::vector<QueuedText> queued_texts;
 
+// Establishes the bitmap pixel format + blend mode masking depends on (mirrors
+// cbEnchanted's gfxinterface.cpp:87-95). al_convert_mask_to_alpha writes alpha=0
+// into keyed pixels; for that alpha to actually show, loaded bitmaps need an alpha
+// channel (ANY_32_WITH_ALPHA) carrying *straight* (non-premultiplied) alpha, and
+// the active blender must respect source alpha. Process-global new-bitmap state,
+// so it must be set before any bitmap is loaded — called from ensure_init *and*
+// from the object/map loaders, which self-init Allegro without ensure_init.
+// Forward-declared at each external call site (mirrors cb_gfx_image_bitmap glue).
+extern "C" void cb_apply_bitmap_defaults(void) {
+    al_set_new_bitmap_format(ALLEGRO_PIXEL_FORMAT_ANY_32_WITH_ALPHA);
+    al_set_new_bitmap_flags(al_get_new_bitmap_flags() | ALLEGRO_NO_PREMULTIPLIED_ALPHA);
+}
+
+// The source-over alpha blender (color = src·srcA + dst·(1-srcA); alpha = src+dst),
+// matching cbEnchanted's al_set_separate_blender. Set on every render target so
+// masked (alpha=0) pixels are skipped instead of overwriting as opaque. The
+// blender is thread-local current-target state, so it is (re)applied wherever a
+// target is established: ensure_init (headless) and cb_rt_screen (windowed).
+// extern "C" so cb_object.cpp can restore it after a temporary copy blender
+// (MirrorObject); forward-declared at that call site.
+extern "C" void cb_apply_alpha_blender(void) {
+    al_set_separate_blender(ALLEGRO_ADD, ALLEGRO_ALPHA, ALLEGRO_INVERSE_ALPHA,
+                            ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ONE);
+}
+
 // Lazily initialize the Allegro subsystems the graphics runtime needs. Safe to
 // call repeatedly. Image functions call this too, so images work (on memory
 // bitmaps) before any window is opened.
@@ -168,6 +198,12 @@ static void ensure_init(void) {
             current_font = default_font;
         }
     }
+
+    // Masking-critical render state (see helpers above). Idempotent; applied here
+    // so images created/drawn before any Screen() call (incl. headless tests) get
+    // an alpha channel and source-over blending.
+    cb_apply_bitmap_defaults();
+    cb_apply_alpha_blender();
 }
 
 // ─── Screen management ─────────────────────────────────────────────────
@@ -203,7 +239,10 @@ extern "C" void cb_rt_screen(int32_t w, int32_t h) {
 
     al_set_target_backbuffer(display);
     current_target = al_get_backbuffer(display);
-    al_set_blender(ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ZERO);
+    // Source-over alpha blending so masked (alpha=0) pixels are transparent. The
+    // previous ONE/ZERO blender copied source verbatim, discarding the alpha that
+    // MaskObject/MaskImage and load-time auto-masking bake in (FD-036 fix).
+    cb_apply_alpha_blender();
 
     draw_color  = al_map_rgb(255, 255, 255);
     clear_color = al_map_rgb(0, 0, 0);
@@ -646,6 +685,45 @@ extern "C" void cb_rt_copy_box(double srcX, double srcY, double w, double h,
 
 // ─── Image handles ─────────────────────────────────────────────────────
 
+// Clones a bitmap honoring the masking format/flags and the headless memory
+// fallback (mirrors cb_object.cpp's clone_bitmap_headless), so pristine/masked
+// copies get an alpha channel and work before any Screen() call.
+static ALLEGRO_BITMAP* clone_bitmap_hl(ALLEGRO_BITMAP* src) {
+    if (!src) return nullptr;
+    cb_apply_bitmap_defaults();
+    int prev_flags = al_get_new_bitmap_flags();
+    int flags = prev_flags;
+    if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
+    al_set_new_bitmap_flags(flags);
+    ALLEGRO_BITMAP* b = al_clone_bitmap(src);
+    al_set_new_bitmap_flags(prev_flags);
+    return b;
+}
+
+// The image's pristine (pre-mask) bitmap: the unmasked copy if it was masked,
+// else bmp itself (still pristine). Never null for a valid image.
+static ALLEGRO_BITMAP* image_pristine(const CbImage* img) {
+    if (!img) return nullptr;
+    return img->unmasked ? img->unmasked : img->bmp;
+}
+
+// Color-keys an image, re-deriving the masked bitmap from the pristine copy so a
+// new key replaces any prior one (mirrors cbEnchanted CBImage::maskImage).
+// Captures the pristine on the first mask. No-op without a bitmap.
+static void apply_image_mask(CbImage* img, ALLEGRO_COLOR color) {
+    if (!img || !img->bmp) return;
+    if (!img->unmasked) {
+        // bmp is still pristine — capture a copy, then key bmp in place.
+        img->unmasked = clone_bitmap_hl(img->bmp);
+        al_convert_mask_to_alpha(img->bmp, color);
+    } else {
+        // Re-key from the pristine original (discards the previous key).
+        al_destroy_bitmap(img->bmp);
+        img->bmp = clone_bitmap_hl(img->unmasked);
+        if (img->bmp) al_convert_mask_to_alpha(img->bmp, color);
+    }
+}
+
 extern "C" CbImage* cb_rt_make_image(int32_t w, int32_t h) {
     ensure_init();
     // Without a display, video bitmaps cannot be created — fall back to a
@@ -673,9 +751,8 @@ extern "C" CbImage* cb_rt_make_image(int32_t w, int32_t h) {
     al_clear_to_color(al_map_rgb(0, 0, 0));
     if (prev_target) al_set_target_bitmap(prev_target);
 
-    if (default_mask_on) al_convert_mask_to_alpha(bmp, default_mask_color);
-
     CbImage* img = new CbImage{bmp};
+    if (default_mask_on) apply_image_mask(img, default_mask_color);
     return img;
 }
 
@@ -691,9 +768,8 @@ extern "C" CbImage* cb_rt_load_image(const CbString* path) {
     ALLEGRO_BITMAP* bmp = al_load_bitmap(p.c_str());
     if (!bmp) return nullptr;
 
-    if (default_mask_on) al_convert_mask_to_alpha(bmp, default_mask_color);
-
     CbImage* img = new CbImage{bmp};
+    if (default_mask_on) apply_image_mask(img, default_mask_color);
     return img;
 }
 
@@ -705,15 +781,13 @@ extern "C" void cb_rt_draw_image(const CbImage* img, double x, double y) {
 }
 
 extern "C" void cb_rt_mask_image(CbImage* img, int32_t r, int32_t g, int32_t b) {
-    if (!img || !img->bmp) return;
-    al_convert_mask_to_alpha(img->bmp, al_map_rgb((unsigned char)r,
-                                                  (unsigned char)g, (unsigned char)b));
+    apply_image_mask(img, al_map_rgb((unsigned char)r, (unsigned char)g,
+                                     (unsigned char)b));
 }
 
 extern "C" void cb_rt_mask_image_a(CbImage* img, int32_t r, int32_t g, int32_t b, int32_t a) {
-    if (!img || !img->bmp) return;
-    al_convert_mask_to_alpha(img->bmp, al_map_rgba((unsigned char)r, (unsigned char)g,
-                                                   (unsigned char)b, (unsigned char)a));
+    apply_image_mask(img, al_map_rgba((unsigned char)r, (unsigned char)g,
+                                      (unsigned char)b, (unsigned char)a));
 }
 
 extern "C" void cb_rt_draw_to_image(CbImage* img) {
@@ -743,6 +817,7 @@ extern "C" void cb_rt_delete_image(CbImage* img) {
         }
         al_destroy_bitmap(img->bmp);
     }
+    if (img->unmasked) al_destroy_bitmap(img->unmasked);
     delete img;
 }
 
@@ -765,13 +840,14 @@ extern "C" void cb_rt_default_mask(int32_t enabled, int32_t r, int32_t g, int32_
 // Copies an image, its hotspot, and its frame metadata (FD-036).
 extern "C" CbImage* cb_rt_clone_image(const CbImage* img) {
     if (!img || !img->bmp) return nullptr;
-    ALLEGRO_BITMAP* b = al_clone_bitmap(img->bmp);
+    ALLEGRO_BITMAP* b = clone_bitmap_hl(img->bmp);
     if (!b) return nullptr;
     CbImage* out = new CbImage{b, img->hotspot_x, img->hotspot_y};
     out->frame_w = img->frame_w;
     out->frame_h = img->frame_h;
     out->anim_begin = img->anim_begin;
     out->anim_length = img->anim_length;
+    if (img->unmasked) out->unmasked = clone_bitmap_hl(img->unmasked);
     return out;
 }
 
@@ -805,6 +881,10 @@ extern "C" void cb_rt_resize_image(CbImage* img, int32_t w, int32_t h) {
     // point it at the replacement instead of a dangling pointer.
     al_set_target_bitmap(prev == old ? dest : prev);
     al_destroy_bitmap(old);
+    // The pristine copy is now the wrong size for re-keying/useMask; drop it so
+    // the scaled bmp (retaining any baked alpha) becomes the new baseline. A later
+    // MaskImage re-captures pristine from it.
+    if (img->unmasked) { al_destroy_bitmap(img->unmasked); img->unmasked = nullptr; }
     img->hotspot_x = 0;
     img->hotspot_y = 0;
 }
@@ -846,6 +926,9 @@ extern "C" void cb_rt_rotate_image(CbImage* img, double angle) {
     if (current_target == old) current_target = dest;
     al_set_target_bitmap(prev == old ? dest : prev);
     al_destroy_bitmap(old);
+    // See cb_rt_resize_image: the rotated bmp is a new geometry, so the old
+    // pristine no longer matches — drop it and let bmp be the new baseline.
+    if (img->unmasked) { al_destroy_bitmap(img->unmasked); img->unmasked = nullptr; }
     img->hotspot_x = niw / 2;
     img->hotspot_y = nih / 2;
 }
@@ -1012,9 +1095,8 @@ extern "C" CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w,
     al_set_new_bitmap_flags(prev_flags);
     if (!bmp) return nullptr;
 
-    if (default_mask_on) al_convert_mask_to_alpha(bmp, default_mask_color);
-
     CbImage* img = new CbImage{bmp};
+    if (default_mask_on) apply_image_mask(img, default_mask_color);
     img->frame_w = frame_w;
     img->frame_h = frame_h;
     img->anim_begin = start_frame;
@@ -1030,30 +1112,36 @@ extern "C" CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_
     return cb_rt_make_image(w, h);
 }
 
-// DrawImage(img, x, y, frame): draws one frame, honoring the hotspot. Falls back
-// to the whole bitmap for a single-frame image.
-extern "C" void cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame) {
-    if (!img || !img->bmp || !current_target) return;
+// Core single-frame draw on an explicit bitmap (the masked bmp or the unmasked
+// pristine, selected by the caller). `bmp` shares img's geometry, so the frame
+// slice math is valid for either.
+static void draw_image_frame_bmp(const CbImage* img, ALLEGRO_BITMAP* bmp,
+                                 double x, double y, int32_t frame) {
+    if (!img || !bmp || !current_target) return;
     bool world = gfx_begin_world(cb_camera_image_to_world());
     float l, t, w, h;
     if (image_frame_src_rect(img, frame, l, t, w, h)) {
-        al_draw_bitmap_region(img->bmp, l, t, w, h,
+        al_draw_bitmap_region(bmp, l, t, w, h,
                               (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
     } else {
-        al_draw_bitmap(img->bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
+        al_draw_bitmap(bmp, (float)x - img->hotspot_x, (float)y - img->hotspot_y, 0);
     }
     gfx_end_world(world);
 }
 
-// DrawImage(img, x, y, frame, useMask): the documented 5-arg form.
-// TODO(FD-036): `useMask` is accepted but ignored — this port's masking is
-// destructive (MaskImage bakes alpha into the single bitmap; there is no unmasked
-// copy to select between). Revisit by storing masked+unmasked bitmaps if a
-// program needs per-draw mask selection.
+// DrawImage(img, x, y, frame): draws one frame, honoring the hotspot. Falls back
+// to the whole bitmap for a single-frame image.
+extern "C" void cb_rt_draw_image_frame(const CbImage* img, double x, double y, int32_t frame) {
+    draw_image_frame_bmp(img, img ? img->bmp : nullptr, x, y, frame);
+}
+
+// DrawImage(img, x, y, frame, useMask): the documented 5-arg form. useMask=0 draws
+// the un-keyed original (the pristine copy); nonzero draws the masked bitmap. For
+// a never-masked image the two are identical (image_pristine returns bmp).
 extern "C" void cb_rt_draw_image_frame_mask(const CbImage* img, double x, double y,
                                             int32_t frame, int32_t use_mask) {
-    (void)use_mask;
-    cb_rt_draw_image_frame(img, x, y, frame);
+    ALLEGRO_BITMAP* bmp = img ? (use_mask ? img->bmp : image_pristine(img)) : nullptr;
+    draw_image_frame_bmp(img, bmp, x, y, frame);
 }
 
 // DrawGhostImage(img, x, y, frame, alpha): alpha-blended single frame.
@@ -1080,10 +1168,11 @@ extern "C" void cb_rt_draw_ghost_image_frame(const CbImage* img, double x, doubl
 // as the 7-arg cb_rt_draw_image_box (source rect (sx,sy,sw,sh) → dest (tx,ty));
 // for a multi-frame image the source origin is shifted to the frame's top-left.
 // Does not apply the hotspot (matches the non-frame box draw).
-extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double sy,
-                                           double sw, double sh, double tx, double ty,
-                                           int32_t frame) {
-    if (!img || !img->bmp || !current_target) return;
+// Core box draw on an explicit bitmap (masked bmp or unmasked pristine).
+static void draw_image_box_frame_bmp(const CbImage* img, ALLEGRO_BITMAP* bmp,
+                                     double sx, double sy, double sw, double sh,
+                                     double tx, double ty, int32_t frame) {
+    if (!img || !bmp || !current_target) return;
     bool world = gfx_begin_world(cb_camera_image_to_world());
     float l, t, w, h;
     double ox = 0.0, oy = 0.0;
@@ -1091,18 +1180,25 @@ extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double
         ox = l;
         oy = t;
     }
-    al_draw_bitmap_region(img->bmp, (float)(ox + sx), (float)(oy + sy),
+    al_draw_bitmap_region(bmp, (float)(ox + sx), (float)(oy + sy),
                           (float)sw, (float)sh, (float)tx, (float)ty, 0);
     gfx_end_world(world);
 }
 
-// DrawImageBox(..., frame, useMask): the documented 9-arg form. useMask ignored
-// (see the TODO on cb_rt_draw_image_frame_mask).
+extern "C" void cb_rt_draw_image_box_frame(const CbImage* img, double sx, double sy,
+                                           double sw, double sh, double tx, double ty,
+                                           int32_t frame) {
+    draw_image_box_frame_bmp(img, img ? img->bmp : nullptr,
+                             sx, sy, sw, sh, tx, ty, frame);
+}
+
+// DrawImageBox(..., frame, useMask): the documented 9-arg form. useMask=0 draws
+// the un-keyed original (pristine); nonzero draws the masked bitmap.
 extern "C" void cb_rt_draw_image_box_frame_mask(const CbImage* img, double sx, double sy,
                                                 double sw, double sh, double tx, double ty,
                                                 int32_t frame, int32_t use_mask) {
-    (void)use_mask;
-    cb_rt_draw_image_box_frame(img, sx, sy, sw, sh, tx, ty, frame);
+    ALLEGRO_BITMAP* bmp = img ? (use_mask ? img->bmp : image_pristine(img)) : nullptr;
+    draw_image_box_frame_bmp(img, bmp, sx, sy, sw, sh, tx, ty, frame);
 }
 
 // ─── Screen queries ────────────────────────────────────────────────────
@@ -1156,6 +1252,14 @@ extern "C" void cb_gfx_window_size(int32_t* w, int32_t* h) {
 // or its bitmap is null.
 extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img) {
     return (img && img->bmp) ? img->bmp : nullptr;
+}
+
+// Internal glue for cb_object.cpp (FD-036): the image's pristine (pre-mask)
+// bitmap, so PaintObject keys from the unmasked original rather than an already-
+// keyed copy. Falls back to bmp for a never-masked image. Null when the image or
+// its bitmap is null.
+extern "C" ALLEGRO_BITMAP* cb_gfx_image_pristine(const CbImage* img) {
+    return image_pristine(img);
 }
 
 // Whether a graphics mode is available. Best-effort: any positive resolution is

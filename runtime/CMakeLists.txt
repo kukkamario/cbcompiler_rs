@@ -170,6 +170,7 @@ if(CB_RUNTIME_TESTS)
         tests/test_object.cpp
         tests/test_collision.cpp
         tests/test_input.cpp
+        tests/test_masking.cpp
     )
     target_link_libraries(cb_runtime_tests PRIVATE
         cb_runtime ${CB_LINK_SEEDS} GTest::gtest GTest::gtest_main)
