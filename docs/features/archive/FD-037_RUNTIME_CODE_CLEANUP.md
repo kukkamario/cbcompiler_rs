@@ -1,6 +1,7 @@
 # FD-037: C++ Runtime Code Cleanup — `extern "C"` Hygiene, Namespaces, Comments
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-20
 **Priority:** Medium
 **Effort:** High (> 4 hours — spans ~24 hand-written runtime files)
 **Impact:** Readable, idiomatic C++ runtime with correct linkage hygiene; lowers the cost of every future runtime FD (Sound, Video, Particles, File I/O…) and makes the code self-documenting instead of requiring a second source tree open to follow.
