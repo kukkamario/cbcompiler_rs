@@ -1,0 +1,74 @@
+// FD-038: particle emitters. A CoolBasic "Effects" emitter IS an Object —
+// MakeEmitter returns the Object handle, so the object commands drive it and it
+// enumerates via NextObject. Real CB excludes emitters from picking AND collision
+// (the Help docs claim otherwise; verified against the real compiler). The
+// particle simulation itself (spawn direction, gravity, animation frame) has no
+// headless pixel readback and is unit-tested in runtime/tests/test_particle.cpp;
+// this fixture pins the emitter's object-ness, the Particle* command wiring, and
+// the pick/collision exclusions, all driven through the UpdateGame tick.
+
+ClearObjects()
+Dim img As Image
+img = MakeImage(8, 8)
+
+// MakeEmitter returns an Object; ordinary object commands drive it.
+Dim e As Object
+e = MakeEmitter(img, 100)
+PositionObject(e, 10.0, 20.0)
+RotateObject(e, 90.0)
+If ObjectX(e) = 10.0 Then Print "emitter_pos_ok"
+If ObjectAngle(e) = 90.0 Then Print "emitter_angle_ok"
+
+// The three Particle* commands configure the emitter (3- and 4-arg movement).
+ParticleMovement(e, 5.0, 0.1)
+ParticleMovement(e, 5.0, 0.1, 0.95)
+ParticleEmission(e, 5, 4, 60)
+ParticleAnimation(e, 4)
+Print "particle_cmds_ok"
+
+// The emitter is a live, enumerable Object (exactly one object so far).
+Dim n As Integer
+n = 0
+InitObjectList()
+Dim it As Object
+it = NextObject()
+While it <> Null
+  n = n + 1
+  it = NextObject()
+Wend
+If n = 1 Then Print "emitter_enumerable_ok"
+
+// Game-loop ticks spawn + step particles internally (no crash; state is sane).
+UpdateGame
+UpdateGame
+Print "emitter_ticked_ok"
+
+// Excluded from collision: an object overlapping the emitter never collides.
+Dim o As Object
+o = MakeObject()
+ObjectRange(o, 100.0, 100.0)
+PositionObject(o, 10.0, 20.0)          // directly on top of the emitter
+If ObjectsOverlap(e, o) = 0 Then Print "emitter_no_overlap_ok"
+SetupCollision(o, e, 1, 1, 0)          // o vs emitter — rejected at registration
+UpdateGame
+If CountCollisions(o) = 0 Then Print "emitter_no_collision_ok"
+
+// Excluded from picking: ObjectPickable on an emitter is inert.
+ObjectPickable(e, 1)
+PositionObject(o, 200.0, 20.0)
+PointObject(o, e)                      // aim o straight at the emitter
+ObjectPick(o)
+If PickedObject() = Null Then Print "emitter_no_pick_ok"
+
+// DeleteObject works on an emitter (no live particles yet → freed immediately).
+DeleteObject(e)
+n = 0
+InitObjectList()
+it = NextObject()
+While it <> Null
+  n = n + 1
+  it = NextObject()
+Wend
+If n = 1 Then Print "emitter_deleted_ok"   // only `o` remains
+
+Print "fd038_emitter_done"

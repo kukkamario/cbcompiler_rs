@@ -1245,6 +1245,13 @@ ALLEGRO_BITMAP* image_bitmap(const CbImage* img) {
     return (img && img->bmp) ? img->bmp : nullptr;
 }
 
+void image_frame_info(const CbImage* img, int32_t* frame_w, int32_t* frame_h,
+                      int32_t* frame_count) {
+    if (frame_w) *frame_w = img ? img->frame_w : 0;
+    if (frame_h) *frame_h = img ? img->frame_h : 0;
+    if (frame_count) *frame_count = img ? img->anim_length : 0;
+}
+
 // Whether a graphics mode is available. Best-effort: any positive resolution is
 // reported as available (we create windowed displays on demand; `depth` is
 // ignored since the backbuffer is always 32-bit).

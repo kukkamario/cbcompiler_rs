@@ -51,6 +51,13 @@ ALLEGRO_BITMAP* image_bitmap(const CbImage* img);
 // a never-masked image; null when the image or its bitmap is null.
 ALLEGRO_BITMAP* image_pristine(const CbImage* img);
 
+// Frame-cell geometry of an `Image`: the LoadAnimImage cell size and the strip's
+// frame count. All zero for a single-frame image (or a null handle). Used by
+// MakeEmitter to size and clamp animated particles. `frame_count` is the number
+// of usable frames (anim_length).
+void image_frame_info(const CbImage* img, int32_t* frame_w, int32_t* frame_h,
+                      int32_t* frame_count);
+
 }  // namespace cb::gfx
 
 #endif  // CB_GFX_H
