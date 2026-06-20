@@ -10,7 +10,7 @@ The post-FD-018 codebase-review bundle is fully landed, and the FD-036 game-obje
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-037](FD-037_RUNTIME_CODE_CLEANUP.md) | C++ Runtime Code Cleanup — `extern "C"` Hygiene, Namespaces, Comments | Open | High | Medium |
+| [FD-037](FD-037_RUNTIME_CODE_CLEANUP.md) | C++ Runtime Code Cleanup — `extern "C"` Hygiene, Namespaces, Comments | Pending Verification | High | Medium |
 
 ## Completed
 

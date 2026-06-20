@@ -1,6 +1,6 @@
 # FD-037: C++ Runtime Code Cleanup — `extern "C"` Hygiene, Namespaces, Comments
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** High (> 4 hours — spans ~24 hand-written runtime files)
 **Impact:** Readable, idiomatic C++ runtime with correct linkage hygiene; lowers the cost of every future runtime FD (Sound, Video, Particles, File I/O…) and makes the code self-documenting instead of requiring a second source tree open to follow.
@@ -118,6 +118,19 @@ Because this is a no-behavior-change refactor, verification is about proving *no
 - **Grep gates:** after the diet, `extern "C"` appears only on catalog `cb_rt_*` / string primitives / handshake; per the Q2 decision, cbEnchanted/external-path references reduced to the agreed residual.
 - **Linux CI** (`.github/workflows/ci.yml`, GCC, SDK-free) green — proves the namespace changes compile cross-compiler.
 - `clippy -D warnings` / `cargo fmt --all --check` clean for any (likely zero) Rust touched.
+
+## Implementation
+
+Implemented on branch `fd-037-runtime-code-cleanup`, one commit per phase (D4):
+
+- **Phase 1 — Allegro-free core** (`7efc0f6`): comments + constants in `cb_string.cpp`, `cb_strfuncs.cpp`, `cb_math.cpp`, `cb_system.cpp`, `catalog.cpp`. `CB_EMPTY_STRING_INSTANCE`/`CB_OOM` → `k_empty_string_instance`/`k_oom`. (`cb_host.cpp` needed nothing.)
+- **Phase 2 — gfx + font** (`ee6db6b`): new `cb_gfx.h` declaring the `cb::gfx` glue (was hand-declared in 3 TUs); `cb_gfx.cpp` body moved into `cb::gfx`; glue de-`extern "C"`'d + de-prefixed (the redundant `cb_gfx_image_pristine` wrapper dropped, the `image_pristine` helper promoted); state vars `display`/`event_queue` → `g_display`/`g_event_queue` to avoid colliding with the accessors; `cb_findfont` → `cb::font::find`.
+- **Phase 3 — camera + map** (`82eb52e`): `cb::camera` / `cb::map` glue; `kPi`/`kMinZoom` → `k_pi`/`k_min_zoom`; DrawToWorld flag vars `g_`-prefixed. The pure, unit-tested header APIs (`cb_camera_math.h`, `cb_map_data.h`) are not `extern "C"` glue and their test consumers are outside the FD's edit set, so they got **comment cleanup only** — their `cb_*`/`CbAffine`/`CbMapData` names stay.
+- **Phase 4 — object + game loop + input** (`7317a6d`): `cb::object` / `cb::input` glue; remaining comment pass (incl. `cb_object_data.h`, `cb_collision_data.h`, the sibling `cb_geom.h`, the light `cb_runtime_func.h`, and the `test_camera`/`test_map`/`test_object` comments).
+
+**Decision refinement during implementation:** modules are namespaced by wrapping the whole TU body in `namespace cb::<subsystem> { … }`; the `cb_rt_*` catalog entry points keep `extern "C"` *inside* the namespace (a C-linkage function declared in a namespace refers to the same symbol as its global prototype — [dcl.link]), so the ABI symbol is unchanged while the internals are namespaced. The opaque type structs (`CbImage`/`CbFont`/`CbMap`/`CbObject`) stay in the global namespace to match their `cb_runtime_func.h` forward declarations.
+
+**Verification (all green):** full Allegro **Release** build with zero warnings; `cargo test --workspace` (Allegro) 696 passed; SDK-free `cargo test --workspace` green (`cb-runtime-sys` catalog asserts 20 passed, unchanged); native `ctest` 57/57. Grep gates: `extern "C"` appears only on catalog `cb_rt_*` / the `CbStringApi` string primitives / the three handshake entry points; zero `cbEnchanted`/`legacy`/`ported`/external-path references remain in the hand-written runtime. `docs/cb_runtime.md` needs no change — its cbEnchanted references are legitimate language-surface citations, not source-comment porting framing.
 
 ## Related
 
