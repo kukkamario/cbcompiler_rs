@@ -535,6 +535,13 @@ extern "C" void cb_rt_move_object_z(CbObject* o, double forward, double side, do
     cb_rt_move_object(o, forward, side);
 }
 
+// MoveObject(obj, forward): 2-arg form — `side` defaults to 0. This is the
+// common CoolBasic idiom (`MoveObject obj, dist`); the original compiler fills
+// the omitted side/z with 0 (cbEnchanted always pops 4: z, side, fwrd, id).
+extern "C" void cb_rt_move_object_fwd(CbObject* o, double forward) {
+    cb_rt_move_object(o, forward, 0.0);
+}
+
 extern "C" void cb_rt_translate_object(CbObject* o, double dx, double dy) {
     if (!o) return;
     o->posX += dx;

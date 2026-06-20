@@ -49,6 +49,11 @@ struct CbMap {
     bool painted = false;
     bool visible = true;
     uint8_t layerShowing[2] = {1, 1};
+    // Per-tile animation rate, set by PlayObject(Map). cbEnchanted's map is a
+    // CBObject whose inherited animSpeed is the tile formula's divisor; it
+    // starts at 0, so tiles do not advance until PlayObject sets a positive
+    // speed. 0 = stopped.
+    float animSpeed = 0.0f;
 };
 
 namespace {
@@ -282,23 +287,55 @@ extern "C" const CbMapData* cb_map_active_data(void) {
     return active_map ? &active_map->data : nullptr;
 }
 
-// FD-036 Phase 5: advance animated tiles one update tick. cbEnchanted scales by a
-// wall-clock timestep (cbmap.cpp:366); this port uses a deterministic frame-step
-// (currentFrame += 1/slowness, wrapping at animLength) so headless runs are
-// reproducible. The render samples `tile + (int)currentFrame[tile]`, stepping
-// through consecutive tileset ids.
+// FD-036 Phase 5: advance animated tiles one update tick. Tiles advance only
+// while the map is "playing" — PlayObject(Map) has set a positive animSpeed
+// (cbEnchanted: animSpeed is the per-tile formula's divisor, 0 before PlayObject
+// so nothing advances). cbEnchanted scales by a wall-clock timestep
+// (cbmap.cpp:373); this port uses a deterministic unit step so headless runs are
+// reproducible: currentFrame += 1/(slowness*animSpeed), wrapping at animLength.
+// The render samples `tile + (int)currentFrame[tile]`, stepping through
+// consecutive tileset ids.
 extern "C" void cb_map_tick_animation(void) {
-    if (!active_map) return;
+    if (!active_map || active_map->animSpeed <= 0.0f) return;
     CbMapData& d = active_map->data;
+    const float spd = active_map->animSpeed;
     for (uint32_t i = 0; i < d.tileCount; ++i) {
         if (i >= d.animLength.size() || d.animLength[i] <= 0) continue;
         int32_t slow = (i < d.animSlowness.size() && d.animSlowness[i] > 0)
                            ? d.animSlowness[i]
                            : 1;
         float& cur = d.currentFrame[i];
-        cur += 1.0f / (float)slow;
-        if (cur >= (float)d.animLength[i]) cur -= (float)d.animLength[i];
+        cur += 1.0f / ((float)slow * spd);
+        while (cur >= (float)d.animLength[i]) cur -= (float)d.animLength[i];
     }
+}
+
+// ─── PlayObject(Map): start/stop tile animation ─────────────────────────────
+//
+// cbEnchanted's map is a CBObject, so PlayObject sets its inherited animSpeed
+// (the per-tile formula's divisor) and marks it playing. The startFrame/
+// continuous args do not apply to tile animation — each tile wraps by its own
+// animLength — so only `speed` is used; endFrame == -1 stops (mirrors the
+// object form). The Map first param disambiguates these from the Object
+// PlayObject overloads (see cb_object.cpp); the same 1/3/4/5 arity family.
+static void map_play(CbMap* m, int32_t end_f, double speed) {
+    if (!m) return;
+    m->animSpeed = (end_f == -1) ? 0.0f : (float)speed;
+}
+extern "C" void cb_rt_play_map(CbMap* m) { map_play(m, 0, 0.1); }
+extern "C" void cb_rt_play_map3(CbMap* m, int32_t start_f, int32_t end_f) {
+    (void)start_f;
+    map_play(m, end_f, 0.1);
+}
+extern "C" void cb_rt_play_map4(CbMap* m, int32_t start_f, int32_t end_f, double speed) {
+    (void)start_f;
+    map_play(m, end_f, speed);
+}
+extern "C" void cb_rt_play_map5(CbMap* m, int32_t start_f, int32_t end_f, double speed,
+                                int32_t continuous) {
+    (void)start_f;
+    (void)continuous;
+    map_play(m, end_f, speed);
 }
 
 // Draws one layer under the world transform the caller (cb_objects_render_all)

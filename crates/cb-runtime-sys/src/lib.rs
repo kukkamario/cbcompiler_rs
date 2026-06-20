@@ -786,6 +786,16 @@ mod tests {
             assert_eq!(paint_map.params[0].ty, map_ty2);
             assert_eq!(paint_map.params[1].ty, image_ty2);
 
+            // MoveObject arity family: 2-arg (forward only), 3-arg (forward,
+            // side), 4-arg (+ ignored z) — all Object-first.
+            let move2 = by_symbol["cb_rt_move_object_fwd"];
+            assert_eq!(move2.name, "moveobject");
+            assert_eq!(move2.params.len(), 2);
+            assert_eq!(move2.params[0].ty, object_ty);
+            assert_eq!(move2.params[1].ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_move_object"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_move_object_z"].params.len(), 4);
+
             // PlayObject arity family 1/3/4/5.
             assert_eq!(by_symbol["cb_rt_play_object"].name, "playobject");
             assert_eq!(by_symbol["cb_rt_play_object"].params.len(), 1);
@@ -796,6 +806,18 @@ mod tests {
             assert_eq!(play5.params.len(), 5);
             assert_eq!(play5.params[3].ty, IrType::Float);
             assert_eq!(play5.params[4].ty, IrType::Int);
+
+            // PlayObject also accepts a Map (start tile animation), the same
+            // 1/3/4/5 arity family, disambiguated by the Map first param.
+            assert_eq!(by_symbol["cb_rt_play_map"].name, "playobject");
+            assert_eq!(by_symbol["cb_rt_play_map"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_play_map"].params[0].ty, map_ty2);
+            let play_map4 = by_symbol["cb_rt_play_map4"];
+            assert_eq!(play_map4.name, "playobject");
+            assert_eq!(play_map4.params.len(), 4);
+            assert_eq!(play_map4.params[0].ty, map_ty2);
+            assert_eq!(play_map4.params[3].ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_play_map5"].params.len(), 5);
 
             // ObjectInteger get(1)/set(2) share one CB name; ObjectString get
             // returns String. ObjectLife set marks usingLife.

@@ -282,6 +282,7 @@ void      cb_rt_clear_objects(void);
 /* Position / movement (z/dz forms ignore the depth arg) */
 void      cb_rt_position_object(CbObject* o, double x, double y);
 void      cb_rt_position_object_z(CbObject* o, double x, double y, double z);
+void      cb_rt_move_object_fwd(CbObject* o, double forward); /* 2-arg: side = 0 */
 void      cb_rt_move_object(CbObject* o, double forward, double side);
 void      cb_rt_move_object_z(CbObject* o, double forward, double side, double z);
 void      cb_rt_translate_object(CbObject* o, double dx, double dy);
@@ -314,6 +315,13 @@ void      cb_rt_play_object(CbObject* o);
 void      cb_rt_play_object3(CbObject* o, int32_t start_f, int32_t end_f);
 void      cb_rt_play_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);
 void      cb_rt_play_object5(CbObject* o, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
+/* PlayObject(Map, ...): Map-handle overloads start the active tilemap's tile
+   animation; the Map first param disambiguates from the Object forms above
+   (defined in cb_map.cpp). Same 1/3/4/5 arity family. */
+void      cb_rt_play_map(CbMap* m);
+void      cb_rt_play_map3(CbMap* m, int32_t start_f, int32_t end_f);
+void      cb_rt_play_map4(CbMap* m, int32_t start_f, int32_t end_f, double speed);
+void      cb_rt_play_map5(CbMap* m, int32_t start_f, int32_t end_f, double speed, int32_t continuous);
 void      cb_rt_loop_object(CbObject* o);
 void      cb_rt_loop_object3(CbObject* o, int32_t start_f, int32_t end_f);
 void      cb_rt_loop_object4(CbObject* o, int32_t start_f, int32_t end_f, double speed);

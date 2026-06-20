@@ -348,7 +348,7 @@ regular objects (background layering). Positions are in world space unless noted
 |----------|-----------|---------|-------------|
 | `PositionObject` | `obj: Object, x: Float, y: Float [, z: Float]` | — | Sets absolute world position (`z` accepted but ignored) |
 | `ScreenPositionObject` | `obj: Object, sx: Float, sy: Float` | — | Sets position from screen coords (converted via camera) |
-| `MoveObject` | `obj: Object, forward: Float, side: Float [, z: Float]` | — | Moves relative to the object's facing angle (`z` accepted but ignored) |
+| `MoveObject` | `obj: Object, forward: Float [, side: Float] [, z: Float]` | — | Moves relative to the object's facing angle. The 2-arg form moves straight forward (`side = 0`, the common idiom); `z` accepted but ignored |
 | `TranslateObject` | `obj: Object, dx: Float, dy: Float [, dz: Float]` | — | Moves by an absolute world delta (`dz` forwarded to the object's depth) |
 | `CloneObjectPosition` | `dst: Object, src: Object` | — | Copies `src`'s position to `dst` |
 | `ObjectX` | `obj: Object` | `Float` | World X of the object center |
@@ -387,6 +387,7 @@ regular objects (background layering). Positions are in world space unless noted
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `PlayObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Plays frames once (optional args; `speed` default 0.1, `continuous` default off); `endFrame = -1` stops and resets |
+| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation. Only `speed` applies (the per-tile `animLength` governs wrapping); tiles do not advance until called. Higher `speed` = slower (it divides the per-tick step, faithful to cbEnchanted); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
 | `LoopObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Loops the frame range continuously (optional args; `speed` default 0.1) |
 | `StopObject` | `obj: Object` | — | Stops animation, keeping the current frame |
 | `ObjectPlaying` | `obj: Object` | `Integer` | 1 if an animation is playing |

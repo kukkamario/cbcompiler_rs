@@ -441,9 +441,10 @@ static const CbFuncDesc catalog_funcs[] = {
     // handle registered above (tag 13). Per-arity overloads share the CB name
     // with distinct C symbols (the settile/drawimage pattern); the lower-arity C
     // function bakes the defaults. Documented-but-ignored z/dz/rotQuality args are
-    // exposed as separate higher-arity overloads. PaintObject is three type-
-    // distinct overloads (Object×Image, Object×Object, Map×Image) — sema's
-    // resolve_overload scores exact type matches; the Map form lives in cb_map.cpp.
+    // exposed as separate higher-arity overloads. PaintObject (Object×Image,
+    // Object×Object, Map×Image) and PlayObject (Object… vs Map…, to start tile
+    // animation) are type-distinct overloads — sema's resolve_overload scores
+    // exact type matches; the Map forms of both live in cb_map.cpp.
     CB_FN("loadobject",            cb_rt_load_object),
     CB_FN("loadobject",            cb_rt_load_object_rq),
     CB_FN("loadanimobject",        cb_rt_load_anim_object),
@@ -455,6 +456,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("clearobjects",          cb_rt_clear_objects),
     CB_FN("positionobject",        cb_rt_position_object),
     CB_FN("positionobject",        cb_rt_position_object_z),
+    CB_FN("moveobject",            cb_rt_move_object_fwd),
     CB_FN("moveobject",            cb_rt_move_object),
     CB_FN("moveobject",            cb_rt_move_object_z),
     CB_FN("translateobject",       cb_rt_translate_object),
@@ -484,6 +486,10 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("playobject",            cb_rt_play_object3),
     CB_FN("playobject",            cb_rt_play_object4),
     CB_FN("playobject",            cb_rt_play_object5),
+    CB_FN("playobject",            cb_rt_play_map),
+    CB_FN("playobject",            cb_rt_play_map3),
+    CB_FN("playobject",            cb_rt_play_map4),
+    CB_FN("playobject",            cb_rt_play_map5),
     CB_FN("loopobject",            cb_rt_loop_object),
     CB_FN("loopobject",            cb_rt_loop_object3),
     CB_FN("loopobject",            cb_rt_loop_object4),
