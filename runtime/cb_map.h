@@ -30,6 +30,12 @@ int cb_map_active(void);
 struct CbMapData;
 const struct CbMapData* cb_map_active_data(void);
 
+// FD-036 Phase 5: advance every animated tile by one game-loop update tick
+// (frame-step, deterministic — unlike cbEnchanted's wall-clock timestep, which
+// would make headless tests non-reproducible). A no-op when no map is active or
+// no tile is animated. Called from cb_objects_update_all.
+void cb_map_tick_animation(void);
+
 #ifdef __cplusplus
 }
 #endif

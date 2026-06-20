@@ -1,6 +1,6 @@
 # FD-036: Game-Object Runtime Cluster — Multi-frame Images, Camera, Tile Maps, Objects & Game Loop
 
-**Status:** In Progress (Phase 4 of 5 complete)
+**Status:** Pending Verification (all 5 phases complete)
 **Priority:** Medium
 **Effort:** High (> 4 hours; multi-PR — landed phase by phase)
 **Impact:** Brings CoolBasic's central game-programming abstractions online — multi-frame sprites, the camera, tile maps, sprite **Objects**, collision, and the `UpdateGame`/`DrawGame` loop — unlocking the bulk of idiomatic CoolBasic game code.
@@ -115,8 +115,26 @@ New `runtime/cb_object.{h,cpp}` + register the `Object` opaque type (tag 13): th
 - **Use-after-`DeleteObject`** is a dangling `CbObject*` (matches `Image`/`Font`); the shared-texture refcount makes the *bitmap* safe but not the handle. Delete-safety stays a cross-cutting opaque-type decision, not Phase 4's.
 - **`ScreenPositionObject`** stays Phase 5 (needs object-aware screen→world).
 
-### Phase 5 — Collision, picking, object-aware Camera, game loop
+### Phase 5 — Collision, picking, object-aware Camera, game loop ✅ DONE (3 sub-commits: 5a/5b/5c)
 Collision (`SetupCollision` — a **persistent** registration re-evaluated every update tick, with report/stop/slide handling, `ObjectRange`, `ResetObjectCollision`, `ClearCollisions`, `CountCollisions`, `GetCollision`, `CollisionX/Y/Angle`, `ObjectsOverlap`); picking & line of sight (`ObjectPickable`, `ObjectPick`, `PixelPick` stub, `PickedObject/X/Y/Angle`, `ObjectSight` — needs Phase 3 map walls); the object-referencing Camera funcs deferred from Phase 2 (`PointCamera`, `CameraFollow`, `CloneCameraPosition/Orientation`, `CameraPick`, `ScreenPositionObject`); and the game loop `UpdateGame`/`DrawGame` (built-in update/render only — **no user callbacks**; `gameUpdated`/`gameDrawn` dedup flags) plus per-update-tick animation + `ObjectLife` advancement. See *Game loop & registry* and *Collision & picking* under Reference-verified behavior for the exact lifecycle, valid type/handling matrix, and angle/contact formulas.
+
+**Landed (3 sub-commits):**
+- **5a — Collision.** New Allegro-free `cb_collision_data.h` (overlap predicates, `((rad+π)/π)*180` contact angle, box-box/circle-circle resolution — headless-tested in `runtime/tests/test_collision.cpp`); `CbObject` gained `range1/range2/checkCollisions` + a per-frame `collisions` list; a global `collision_checks` registry; the Rect/CircleMap tile-grid orchestration; `cb_run_collision_checks`; and the `cb_rt_*` funcs (`SetupCollision` + a `Map`-handle overload, `ObjectRange`±arity, reset/clear/count/`GetCollision`, `CollisionX/Y/Angle`, `ObjectsOverlap`±arity). `cb_map_active_data()` exposes the grid. Graphics-gated `runtime_collision_fd036` fixture.
+- **5b — Picking + object-aware Camera.** Picking raycasts + point tests in `cb_collision_data.h`; a DDA wall walk (`cb_map_ray_cast`) in `cb_map_data.h`; a pickable registry + `ObjectPickable`/`ObjectPick`/`PixelPick`(stub)/`PickedObject/X/Y/Angle`/`ObjectSight`/`ScreenPositionObject`/`cb_object_pick_at`. `cb_camera.cpp` learned `CbObject`: `PointCamera`/`CameraFollow`/`CloneCameraPosition`/`CloneCameraOrientation`/`CameraPick`, plus `cb_camera_screen_to_world`/`cb_camera_update_follow` glue and `cb_gfx_window_size`. Graphics-gated `runtime_pick_fd036` fixture.
+- **5c — Game loop.** `cb_objects_update_all` (anim advance + `ObjectLife` tick/auto-delete + per-object collision wipe → map-tile-anim tick → run all checks → re-arm); `cb_map_tick_animation` (deterministic frame-step); `cb_rt_update_game`/`cb_rt_draw_game` + `gameUpdated`/`gameDrawn` flags in `cb_gfx.cpp`, with `do_draw_screen` gating the implicit update/cam-follow/draw and resetting the flags. Graphics-gated `runtime_gameloop_fd036` fixture drives `UpdateGame` to exercise life/anim/persistent-collision.
+
+**Decisions resolved during impl:**
+- **`SetupCollision` map arg = overload (user decision):** a second catalog row `SetupCollision(Object, Int, Map, Int, Int)` disambiguated by the 3rd param's type (mirrors `PaintObject(Map,Image)`). The `Map` handle is accepted for type-honesty but ignored (single active-map singleton).
+- **Bug-ledger:** #3 `PointCamera` aims with the object's X (cbEnchanted typoed both `atan2` args to `getY()`); #4 `CloneCameraOrientation` sets **both** angle fields; #5 `PickedAngle` = degrees from the picked hit point (cbEnchanted returned stale loop-end coords in radians); #6 box↔circle object pairs are rejected at setup → never collide (cbEnchanted's dead `CircleRect`/`RectCircle` no-ops; replicated + pinned).
+- **`GetCollision`/`PickedObject` return an `Object` handle or `Null`**, never an integer. A **map-wall** `GetCollision` yields `Null` (a `Map` is not an `Object`).
+- **`MakeObjectFloor` leaves `ObjectRange` 0×0** (verified `objectinterface.cpp:544` — only `LoadObject`/`LoadAnimObject`/`CloneObject` seed it to image size). Corrects the FD prose that said `MakeObjectFloor` sets it.
+- **Tile animation = deterministic frame-step** (cbEnchanted scales by a wall-clock timestep; the port steps a fixed amount per tick so headless runs reproduce). Moot for the test assets (`animLength = 0`).
+- **No Rust frontend changes** (Phase 3 key finding): opaque types are catalog-driven by name; only `cb-runtime-sys` catalog-content asserts changed.
+
+**Follow-ups noted (not blocking):**
+- The `UpdateGame`/`DrawGame`/`DrawScreen` **dedup-flag** behavior and floor-object tiling, sprite render/rotation, camera follow/zoom, and tile-map drawing need a real display — deferred visual smokes (the headless fixtures assert deterministic state only).
+- **Pixel collision/picking** (`ObjectsOverlap` type 3, `PixelPick`) stay unimplemented (→ 0 / no-op), matching cbEnchanted.
+- `CircleMap` is ported faithfully (the ~285-line corner/edge disambiguation); its pure predicates are unit-tested and the orchestration is exercised by the headless map-collision fixture path — but full visual parity is a display-dependent smoke.
 
 ### Reference-verified behavior (cbEnchanted, mined & fact-checked 2026-06-19)
 

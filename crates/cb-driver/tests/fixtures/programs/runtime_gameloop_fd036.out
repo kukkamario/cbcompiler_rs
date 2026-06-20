@@ -1,0 +1,17 @@
+life_tick_ok
+life_autodelete_ok
+anim_start_ok
+anim_advance_ok
+anim_advance2_ok
+precollide_ok
+collide_tick_ok
+getcollision_ok
+report_nomove_ok
+collisionangle_ok
+collide_persistent_ok
+collide_cleared_ok
+slide_moved_ok
+boxmap_collide_ok
+boxmap_angle_ok
+circlemap_slide_ok
+fd036_gameloop_done

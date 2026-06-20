@@ -18,6 +18,13 @@ extern "C" {
 
 void cb_objects_render_all(void);
 
+// FD-036 Phase 5: the game-loop update half (cbEnchanted updateObjects). Advances
+// each object's animation, decrements ObjectLife (auto-deleting at 0), wipes each
+// object's per-frame collision list, advances map tile animation, runs every
+// registered collision check, then re-arms collision checking on all survivors.
+// Driven by UpdateGame/DrawGame and the implicit DrawScreen pass (cb_gfx.cpp).
+void cb_objects_update_all(void);
+
 // FD-036 Phase 5: re-test every registered SetupCollision check (one update
 // tick). Called by the game-loop update half (cb_objects_update_all, Phase 5c);
 // declared here so that future caller lives in this TU but the symbol has

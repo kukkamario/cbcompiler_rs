@@ -131,6 +131,11 @@ void    cb_rt_screen_depth_mode(int32_t w, int32_t h, int32_t depth, int32_t mod
 int32_t cb_rt_screen_buffer_id(void);
 void    cb_rt_drawscreen(void);
 void    cb_rt_drawscreen_args(int32_t cls, int32_t vsync);
+/* Game loop (FD-036 Phase 5). UpdateGame runs the built-in object update tick;
+   DrawGame updates-if-needed then draws the object pass. Dedup flags suppress the
+   implicit DrawScreen pass for the frame. No user CB callbacks (out of scope). */
+void    cb_rt_update_game(void);
+void    cb_rt_draw_game(void);
 void    cb_rt_cls(void);
 void    cb_rt_cls_color(int32_t r, int32_t g, int32_t b);
 void    cb_rt_cls_color_a(int32_t r, int32_t g, int32_t b, int32_t a);

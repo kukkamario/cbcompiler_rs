@@ -488,10 +488,11 @@ order 0, 2, 1, 3; two absolute seeks for editor metadata). The format is
 **compatibility-frozen** and was byte-verified against a real asset; the per-tile
 animation block stores `tileCount` entries but only `tileCount-1` are read (the
 trailing 8 bytes are ignored), matching cbEnchanted. `EditMap`'s `map` argument
-is popped but ignored — the single active map is edited. Tile animation is
-time-based and advances on the FD-036 Phase 5 game-loop update tick (`SetTile`
-stores the params; `currentFrame` stays 0 until then). The map renders via a
-`DrawScreen` hook until Phase 5 folds it into the object draw order.
+is popped but ignored — the single active map is edited. `SetTile` stores per-tile
+animation params; tile animation advances on the FD-036 Phase 5 game-loop update
+tick — a deterministic **frame-step** (cbEnchanted's was wall-clock-based; the port
+uses a fixed step per tick so headless runs reproduce). The map renders inside the
+object draw order (background layer 0 before objects, foreground layer 1 after).
 
 ---
 
@@ -827,15 +828,18 @@ intentionally. Known status and divergences as of the latest runtime work
 - **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
   cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
   implementing.
-- **Camera** (FD-036 Phase 2) is implemented: the world↔screen transform core
-  (`PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`,
+- **Camera** (FD-036 Phase 2 + Phase 5) is implemented: the world↔screen transform
+  core (`PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`,
   `TurnCamera`, `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw
   command), and `MouseWX`/`MouseWY`. The object-referencing camera funcs
-  (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`,
-  `CameraPick`) are deferred to Phase 5 (they need Objects). Faithful to
-  cbEnchanted, the camera keeps two independent angle fields — `CameraAngle`
-  (degrees, also driving `MoveCamera`'s heading) and the render-matrix angle —
-  which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
+  (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`, `CameraPick`)
+  landed in **Phase 5** with two cbEnchanted bug fixes: `PointCamera` aims with the
+  object's X (not Y twice), and `CloneCameraOrientation` sets **both** angle fields
+  (cbEnchanted left the render matrix desynced). `CameraFollow`'s style-2 deadzone
+  uses the physical window size; the follow step runs once per `DrawScreen`.
+  Faithful to cbEnchanted, the camera keeps two independent angle fields —
+  `CameraAngle` (degrees, also driving `MoveCamera`'s heading) and the render-matrix
+  angle — which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
 - **Tile maps** (FD-036 Phase 3, `runtime/cb_map.cpp`) are implemented: a single
   active tilemap (`LoadMap`/`MakeMap`, `MapWidth`/`MapHeight`, `GetMap`/`GetMap2`,
   `EditMap`, `SetMap`, `SetTile`) with the four-layer model and the `.til` binary
@@ -843,10 +847,11 @@ intentionally. Known status and divergences as of the latest runtime work
   byte-verified against a real CoolBasic asset (`testmap.til`). Defensive
   divergences from cbEnchanted: all funcs null-guard the active map (cbEnchanted
   null-derefs), layer indices are bounds-checked (0 / no-op out of range), and
-  `SetTile`'s array-grow bug is fixed. The map renders through a `DrawScreen`
-  hook for now; FD-036 Phase 5 relocates it into the object draw order, which
-  also drives time-based tile animation (`SetTile` stores the params; `GetMap`
-  collision/`ObjectSight` use of layer 2 also land in Phase 5).
+  `SetTile`'s array-grow bug is fixed. The map renders inside the object draw order
+  (Phase 4) and, since **Phase 5**, layer 2 backs object map-collision (type 4) and
+  `ObjectSight` (a DDA wall walk). Tile animation advances on the Phase 5 game-loop
+  update tick — a deterministic **frame-step** (cbEnchanted scales by a wall-clock
+  timestep; the port uses a fixed step per tick so headless runs reproduce).
 - **Objects / sprites** (FD-036 Phase 4, `runtime/cb_object.cpp`) are implemented:
   creation/lifecycle (`LoadObject`/`LoadAnimObject`/`MakeObject`/`MakeObjectFloor`/
   `CloneObject`/`DeleteObject`/`ClearObjects`), position/movement, rotation/angle
@@ -863,13 +868,30 @@ intentionally. Known status and divergences as of the latest runtime work
   object to a fresh private bitmap. The render pass now reproduces cbEnchanted's
   `drawObjects` order under one world transform — map background → floor objects →
   regular objects → map foreground — replacing Phase 3's standalone map pass.
-  Animation advancement and `ObjectLife` decrement are pinned (pure helpers,
-  unit-tested) but driven by the Phase 5 game-loop update tick; collision,
-  picking, `ScreenPositionObject`, and the object-aware Camera funcs are Phase 5.
-- **Not yet implemented** in cbcompiler_rs: object collision &
-  picking (FD-036 Phase 5), sound, video playback, particles, file I/O, memblocks,
-  `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System
-  funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
+- **Collision, picking & game loop** (FD-036 Phase 5, `runtime/cb_object.cpp` +
+  `runtime/cb_collision_data.h`) are implemented. **Collision**: `SetupCollision`
+  is a *persistent* registration re-tested every update tick (object-object, plus a
+  `Map`-handle overload for type-4 map walls); box-box, circle-circle, box-map and
+  circle-map geometry with report/stop/slide handling; `ObjectRange`,
+  `ResetObjectCollision`, `ClearCollisions`, `CountCollisions`, the 1-based
+  `GetCollision`/`CollisionX`/`Y`/`Angle`, and `ObjectsOverlap`. Faithful quirks:
+  `Stop` handling is circle-only, box↔circle object pairs never collide
+  (cbEnchanted's dead `CircleRect`/`RectCircle` tests), `MakeObject`/`MakeObjectFloor`
+  leave `ObjectRange` 0×0 (so their collisions are inert until set), and pixel
+  overlap is unimplemented (→ 0). `GetCollision` returns an `Object` handle (or
+  `Null`), never an integer; a map-wall hit yields `Null` (a `Map` is not an
+  `Object`). **Picking**: `ObjectPickable`/`ObjectPick` (nearest raycast hit),
+  `PickedObject`/`X`/`Y`/`Angle` (`PickedAngle` fixed to degrees-from-hit, vs
+  cbEnchanted's stale radians), `PixelPick` (registered no-op stub), `ObjectSight`,
+  and `ScreenPositionObject`/`CameraPick` (screen→world then test). **Game loop**:
+  `UpdateGame`/`DrawGame` run the built-in update/draw with `gameUpdated`/`gameDrawn`
+  dedup against `DrawScreen`'s implicit pass — there are **no user CB callbacks**
+  (cbEnchanted's hooks are defined but never registered). The update tick advances
+  animation and `ObjectLife` (auto-deleting at 0), wipes per-frame collision lists,
+  steps map-tile animation, and re-runs every collision check.
+- **Not yet implemented** in cbcompiler_rs: sound, video playback, particles, file
+  I/O, memblocks, `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the
+  plumbing-heavy System funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)
 

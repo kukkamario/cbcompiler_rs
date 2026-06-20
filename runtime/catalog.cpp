@@ -330,6 +330,9 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("gfxmodeexists",    cb_rt_gfx_mode_exists),
     CB_FN("drawscreen",       cb_rt_drawscreen),
     CB_FN("drawscreen",       cb_rt_drawscreen_args),
+    // Game loop (FD-036 Phase 5): built-in object update/draw, deduped per frame.
+    CB_FN("updategame",       cb_rt_update_game),
+    CB_FN("drawgame",         cb_rt_draw_game),
     CB_FN("screengamma",      cb_rt_screen_gamma),
     CB_FN("screenshot",       cb_rt_screenshot),
     CB_FN("cls",              cb_rt_cls),

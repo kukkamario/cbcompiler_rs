@@ -512,6 +512,16 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
             assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
 
+            // Game loop (FD-036 Phase 5): UpdateGame/DrawGame are 0-arg commands.
+            let update_game = by_symbol["cb_rt_update_game"];
+            assert_eq!(update_game.name, "updategame");
+            assert_eq!(update_game.params.len(), 0);
+            assert_eq!(update_game.return_ty, IrType::Void);
+            let draw_game = by_symbol["cb_rt_draw_game"];
+            assert_eq!(draw_game.name, "drawgame");
+            assert_eq!(draw_game.params.len(), 0);
+            assert_eq!(draw_game.return_ty, IrType::Void);
+
             // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
             let make_image = by_symbol["cb_rt_make_image"];
             assert_eq!(make_image.name, "makeimage");

@@ -1320,6 +1320,47 @@ extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) 
     o->posY = sy;
 }
 
+// ─── Game-loop update (FD-036 Phase 5) ──────────────────────────────────
+
+namespace {
+
+// One animation step for an object (cbEnchanted updateObject's anim block), via
+// the pure cb_object_anim_advance over a CbAnimState view of the object's fields.
+void advance_object_anim(CbObject* o) {
+    CbAnimState s;
+    s.current_frame = o->currentFrame;
+    s.anim_start_frame = o->animStartFrame;
+    s.anim_ending_frame = o->animEndingFrame;
+    s.anim_speed = o->animSpeed;
+    s.anim_looping = o->animLooping;
+    s.playing = o->playing;
+    cb_object_anim_advance(s);
+    o->currentFrame = s.current_frame;
+    o->playing = s.playing;
+}
+
+}  // namespace
+
+// The cbEnchanted updateObjects analogue: per object advance animation, decrement
+// ObjectLife (auto-delete at 0), and wipe last tick's collisions; then advance map
+// tile animation, run every collision check, and re-arm collision checking on all
+// survivors. See cb_object.h.
+extern "C" void cb_objects_update_all(void) {
+    // Snapshot the live set: auto-delete (life) mutates the registries mid-loop.
+    std::vector<CbObject*> snapshot = live_objects;
+    for (CbObject* o : snapshot) {
+        advance_object_anim(o);
+        if (o->usingLife && cb_object_life_tick(o->life)) {
+            cb_rt_delete_object(o);  // life hit 0 → auto-delete (registries + free)
+            continue;
+        }
+        o->collisions.clear();  // eraseCollisions: wipe last tick's contacts
+    }
+    cb_map_tick_animation();    // advance animated map tiles
+    cb_run_collision_checks();  // re-test every registered check
+    for (CbObject* o : live_objects) o->checkCollisions = true;  // re-arm
+}
+
 // ─── Render orchestrator (glue for cb_gfx.cpp; see cb_object.h) ──────────
 //
 // The cbEnchanted drawObjects analogue: one world-transform bracket over map

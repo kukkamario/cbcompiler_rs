@@ -265,19 +265,30 @@ extern "C" void cb_rt_screenshot(const CbString* path) {
 // & fonts section). Called each frame just before the flip.
 static void render_queued_texts(void);
 
+// FD-036 Phase 5 game-loop dedup flags (cbEnchanted gfxinterface gameUpdated/
+// gameDrawn). An explicit UpdateGame/DrawGame sets these so DrawScreen's implicit
+// pass doesn't run the same update/draw twice in a frame; DrawScreen resets them.
+static bool game_updated = false;
+static bool game_drawn   = false;
+
 // Shared DrawScreen body. `clear_after` controls whether the backbuffer is
 // cleared once events are drained (the `cls` flag of the 2-arg form).
 static void do_draw_screen(bool clear_after) {
     if (!display) return;
 
-    // FD-036 Phase 4: composite the full object pass through the camera onto the
-    // backbuffer — on top of this frame's user draws and beneath the AddText
-    // overlay (mirrors cbEnchanted's DrawScreen -> drawObjects ordering: map
-    // background → floor objects → regular objects → map foreground). A no-op when
-    // there is nothing to draw. Ensure the backbuffer is the target first (a stray
+    // FD-036 Phase 5: run the built-in game loop for this frame, deduped against
+    // an explicit UpdateGame/DrawGame (the gameUpdated/gameDrawn flags). Update the
+    // objects if not already, step camera-follow, then composite the full object
+    // pass through the camera (map background → floor → regular → map foreground)
+    // on top of user draws and beneath the AddText overlay — unless DrawGame
+    // already drew this frame. Ensure the backbuffer is the target first (a stray
     // DrawToImage must not redirect the pass).
     al_set_target_backbuffer(display);
-    cb_objects_render_all();
+    if (!game_updated) cb_objects_update_all();
+    cb_camera_update_follow();
+    if (!game_drawn) cb_objects_render_all();
+    game_updated = false;
+    game_drawn   = false;
 
     // Composite queued (Locate/AddText) text onto this frame before presenting.
     render_queued_texts();
@@ -338,6 +349,26 @@ extern "C" void cb_rt_drawscreen(void) {
 extern "C" void cb_rt_drawscreen_args(int32_t cls, int32_t vsync) {
     (void)vsync;
     do_draw_screen(cls != 0);
+}
+
+// UpdateGame: run the built-in object update tick now (cbEnchanted commandUpdate
+// Game). Marks the frame updated so the next DrawScreen won't update again. There
+// are NO user CB callbacks (cbEnchanted's hooks are defined but never registered).
+extern "C" void cb_rt_update_game(void) {
+    cb_objects_update_all();
+    game_updated = true;
+}
+
+// DrawGame: update-if-not-already, then draw the object pass to the backbuffer
+// (cbEnchanted commandDrawGame). Marks the frame drawn AND updated so the next
+// DrawScreen only flips. Requires a display.
+extern "C" void cb_rt_draw_game(void) {
+    if (!display) return;
+    if (!game_updated) cb_objects_update_all();
+    al_set_target_backbuffer(display);
+    cb_objects_render_all();
+    game_drawn   = true;
+    game_updated = true;
 }
 
 extern "C" void cb_rt_cls(void) {

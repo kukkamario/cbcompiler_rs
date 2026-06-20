@@ -314,6 +314,18 @@ fn runtime_pick_fd036() {
 }
 
 #[test]
+fn runtime_gameloop_fd036() {
+    // UpdateGame drives the per-tick advancement: ObjectLife decrement + auto-
+    // delete, animation frame advance, and the persistent SetupCollision checks
+    // (report records-but-doesn't-move; circle slide applies the resolved
+    // position). Builds a sprite sheet via SaveImage, so it needs an isolated cwd.
+    // The UpdateGame/DrawGame/DrawScreen dedup flags need a real display and are a
+    // deferred visual smoke; the per-tick math is unit-tested in test_object.cpp /
+    // test_collision.cpp.
+    run_graphics_isolated("runtime_gameloop_fd036");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run_graphics("runtime_text_fd018");
 }

@@ -282,6 +282,25 @@ extern "C" const CbMapData* cb_map_active_data(void) {
     return active_map ? &active_map->data : nullptr;
 }
 
+// FD-036 Phase 5: advance animated tiles one update tick. cbEnchanted scales by a
+// wall-clock timestep (cbmap.cpp:366); this port uses a deterministic frame-step
+// (currentFrame += 1/slowness, wrapping at animLength) so headless runs are
+// reproducible. The render samples `tile + (int)currentFrame[tile]`, stepping
+// through consecutive tileset ids.
+extern "C" void cb_map_tick_animation(void) {
+    if (!active_map) return;
+    CbMapData& d = active_map->data;
+    for (uint32_t i = 0; i < d.tileCount; ++i) {
+        if (i >= d.animLength.size() || d.animLength[i] <= 0) continue;
+        int32_t slow = (i < d.animSlowness.size() && d.animSlowness[i] > 0)
+                           ? d.animSlowness[i]
+                           : 1;
+        float& cur = d.currentFrame[i];
+        cur += 1.0f / (float)slow;
+        if (cur >= (float)d.animLength[i]) cur -= (float)d.animLength[i];
+    }
+}
+
 // Draws one layer under the world transform the caller (cb_objects_render_all)
 // has already set — no transform bracket here, so the map composites in the
 // object draw order (background before objects, foreground after).
