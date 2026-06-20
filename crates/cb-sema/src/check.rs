@@ -74,6 +74,7 @@ impl<'a> Checker<'a> {
             label_for_nesting: std::collections::HashMap::new(),
         };
 
+        checker.register_runtime_types(runtime_catalog);
         checker.pass1(program);
         checker.register_runtime_catalog(runtime_catalog);
         checker.pass2(program);
@@ -261,13 +262,24 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn register_runtime_catalog(&mut self, catalog: &RuntimeCatalog) {
-        use std::collections::HashMap;
-
+    /// Register the runtime opaque types (e.g. `Object`) into the top scope.
+    ///
+    /// Must run BEFORE pass 1: `Type`/`Struct` field annotations are resolved
+    /// during pass 1, and `refine_type` upgrades a placeholder `TypeRef` to
+    /// `RuntimeType` only if the name is already in scope. If the types were
+    /// registered after pass 1 (as functions and constants are), `Field obj As
+    /// Object` would be frozen as `TypeRef{object}` and never match the runtime
+    /// catalog's `RuntimeType{object}`. (Function param/return annotations need
+    /// this *and* `RuntimeTypeDef` being visible from function scopes — see
+    /// `SymbolTable::lookup`.)
+    ///
+    /// Functions and constants are registered separately, AFTER pass 1, because
+    /// their collision handling depends on user declarations landing first
+    /// (FD-027 user-function shadowing, FD-029 reserved-constant diagnostics).
+    fn register_runtime_types(&mut self, catalog: &RuntimeCatalog) {
         let top = self.current_scope;
         let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
 
-        // Register runtime opaque types.
         for td in &catalog.types {
             let sym = self.interner.intern(&td.name.to_lowercase());
             let decl = Declaration {
@@ -278,6 +290,13 @@ impl<'a> Checker<'a> {
             };
             let _ = self.symbols.declare(top, sym, decl);
         }
+    }
+
+    fn register_runtime_catalog(&mut self, catalog: &RuntimeCatalog) {
+        use std::collections::HashMap;
+
+        let top = self.current_scope;
+        let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
 
         // Group function entries by (lowercased) name.
         let mut groups: HashMap<String, Vec<&FuncDesc>> = HashMap::new();
@@ -3144,6 +3163,68 @@ mod tests {
             IrType::Void,
         )]);
         let result = analyze_with_catalog("print(\"hello\")\n", &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn type_field_of_runtime_type_refined_fd036() {
+        // A user Type field declared with a runtime opaque type (`As Object`)
+        // must refine to `RuntimeType`, not the pass-1 placeholder `TypeRef`, so
+        // it matches runtime functions producing/consuming `Object`. Regression
+        // for the pass-ordering bug that broke examples/bullets.cb. Exercises
+        // both directions: a runtime result assigned INTO the field, and the
+        // field passed INTO a runtime parameter.
+        let mut catalog = catalog_of(vec![
+            rt_func(
+                "LoadObject",
+                "cb_load",
+                &[("f", IrType::String)],
+                IrType::RuntimeType("Object".into()),
+            ),
+            rt_func(
+                "MoveObject",
+                "cb_move",
+                &[
+                    ("o", IrType::RuntimeType("Object".into())),
+                    ("d", IrType::Float),
+                ],
+                IrType::Void,
+            ),
+        ]);
+        catalog.types.push(crate::RuntimeTypeDesc {
+            name: "Object".into(),
+            tag: 1,
+        });
+        let src = "Type Ammus\nField obj As Object\nEndType\n\
+                   Dim a As Ammus = New Ammus\n\
+                   a.obj = LoadObject(\"x\")\n\
+                   MoveObject a.obj, 6.0\n";
+        let result = analyze_with_catalog(src, &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn function_param_and_return_of_runtime_type_refined_fd036() {
+        // The reorder also fixes function signatures: a param/return annotated
+        // with a runtime type is resolved in pass 1 and must refine too.
+        let mut catalog = catalog_of(vec![rt_func(
+            "MoveObject",
+            "cb_move",
+            &[
+                ("o", IrType::RuntimeType("Object".into())),
+                ("d", IrType::Float),
+            ],
+            IrType::Void,
+        )]);
+        catalog.types.push(crate::RuntimeTypeDesc {
+            name: "Object".into(),
+            tag: 1,
+        });
+        let src = "Function advance(o As Object) As Object\n\
+                   MoveObject o, 1.0\n\
+                   Return o\n\
+                   EndFunction\n";
+        let result = analyze_with_catalog(src, &catalog);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
