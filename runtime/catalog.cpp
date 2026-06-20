@@ -133,6 +133,12 @@ constexpr CbTypeTag CB_TYPE_FONT = 12;
 template<> struct type_tag<      CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 template<> struct type_tag<const CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 
+// Map — the tilemap opaque handle (FD-036 Phase 3). Tag 13 is reserved for
+// `Object` (FD-036 Phase 4); the map is tag 14.
+constexpr CbTypeTag CB_TYPE_MAP = 14;
+template<> struct type_tag<      CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
+template<> struct type_tag<const CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -188,6 +194,7 @@ static constexpr CbTypeDesc catalog_types[] = {
     // be inconsistent.
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
+    { "Map",        ::cb_catalog::CB_TYPE_MAP },
 #endif
 };
 
@@ -399,6 +406,20 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawtoworld",      cb_rt_draw_to_world),
     CB_FN("mousewx",          cb_rt_mouse_wx),
     CB_FN("mousewy",          cb_rt_mouse_wy),
+
+    // Tile maps (cb_map.cpp, FD-036 Phase 3). `Map` is the opaque handle
+    // registered above (tag 14). One active map; EditMap's `map` arg is popped
+    // but ignored. SetTile has a 2- and 3-arg form (animSlowness defaults to 1).
+    CB_FN("loadmap",          cb_rt_load_map),
+    CB_FN("makemap",          cb_rt_make_map),
+    CB_FN("mapwidth",         cb_rt_map_width),
+    CB_FN("mapheight",        cb_rt_map_height),
+    CB_FN("getmap",           cb_rt_get_map),
+    CB_FN("getmap2",          cb_rt_get_map2),
+    CB_FN("editmap",          cb_rt_edit_map),
+    CB_FN("setmap",           cb_rt_set_map),
+    CB_FN("settile",          cb_rt_set_tile),
+    CB_FN("settile",          cb_rt_set_tile_slow),
 
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),

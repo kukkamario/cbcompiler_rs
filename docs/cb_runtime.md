@@ -469,7 +469,7 @@ game code (0 = empty). Only one map is active at a time.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `LoadMap` | `mapPath: String, tilesetPath: String` | `Map` | Loads a `.map` file + tileset image; 0 on failure; replaces any existing map |
+| `LoadMap` | `mapPath: String, tilesetPath: String` | `Map` | Loads a `.til` map file + tileset image; `Null` on failure; replaces any existing map |
 | `MakeMap` | `wTiles: Integer, hTiles: Integer, tileW: Integer, tileH: Integer` | `Map` | Creates an empty tilemap; replaces any existing map |
 | `MapWidth` | — | `Integer` | Map width in tiles |
 | `MapHeight` | — | `Integer` | Map height in tiles |
@@ -478,6 +478,16 @@ game code (0 = empty). Only one map is active at a time.
 | `EditMap` | `map: Map, layer: Integer, tx: Integer, ty: Integer, tile: Integer` | — | Sets a tile at a 1-based grid position (out-of-bounds ignored). `map` is popped but ignored — the single active map is edited |
 | `SetMap` | `backLayer: Integer, overLayer: Integer` | — | Toggles visibility of the background (0) and foreground (1) layers |
 | `SetTile` | `tile: Integer, animLength: Integer [, animSlowness: Integer]` | — | Configures per-tile animation (frame count + slowness; `animSlowness` default 1) |
+
+The map is loaded from a CoolBasic `.til` binary (little-endian; on-disk layer
+order 0, 2, 1, 3; two absolute seeks for editor metadata). The format is
+**compatibility-frozen** and was byte-verified against a real asset; the per-tile
+animation block stores `tileCount` entries but only `tileCount-1` are read (the
+trailing 8 bytes are ignored), matching cbEnchanted. `EditMap`'s `map` argument
+is popped but ignored — the single active map is edited. Tile animation is
+time-based and advances on the FD-036 Phase 5 game-loop update tick (`SetTile`
+stores the params; `currentFrame` stays 0 until then). The map renders via a
+`DrawScreen` hook until Phase 5 folds it into the object draw order.
 
 ---
 
@@ -822,8 +832,19 @@ intentionally. Known status and divergences as of the latest runtime work
   cbEnchanted, the camera keeps two independent angle fields — `CameraAngle`
   (degrees, also driving `MoveCamera`'s heading) and the render-matrix angle —
   which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
+- **Tile maps** (FD-036 Phase 3, `runtime/cb_map.cpp`) are implemented: a single
+  active tilemap (`LoadMap`/`MakeMap`, `MapWidth`/`MapHeight`, `GetMap`/`GetMap2`,
+  `EditMap`, `SetMap`, `SetTile`) with the four-layer model and the `.til` binary
+  format, rendered in world space via the Phase 2 camera. The `.til` format was
+  byte-verified against a real CoolBasic asset (`testmap.til`). Defensive
+  divergences from cbEnchanted: all funcs null-guard the active map (cbEnchanted
+  null-derefs), layer indices are bounds-checked (0 / no-op out of range), and
+  `SetTile`'s array-grow bug is fixed. The map renders through a `DrawScreen`
+  hook for now; FD-036 Phase 5 relocates it into the object draw order, which
+  also drives time-based tile animation (`SetTile` stores the params; `GetMap`
+  collision/`ObjectSight` use of layer 2 also land in Phase 5).
 - **Not yet implemented** in cbcompiler_rs: objects/sprites, collision,
-  tile maps, sound, video playback, particles, file I/O, memblocks,
+  sound, video playback, particles, file I/O, memblocks,
   `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System
   funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 

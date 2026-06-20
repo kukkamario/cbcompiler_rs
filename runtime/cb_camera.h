@@ -22,6 +22,13 @@ extern "C" {
 // VM), so use it immediately.
 const ALLEGRO_TRANSFORM* cb_camera_render_transform(void);
 
+// cb_camera.cpp -> cb_map.cpp: the *plain* world transform (no folded Y-flip),
+// matching cbEnchanted's RenderTarget::useWorldCoords. Callers that draw world
+// bitmaps (the tilemap) apply this and flip each anchor's Y themselves (as
+// cbEnchanted's convertCoords does), so bitmaps stay upright. Same static-alias
+// lifetime rule as cb_camera_render_transform — use it immediately.
+const ALLEGRO_TRANSFORM* cb_camera_world_transform(void);
+
 // cb_camera.cpp -> cb_gfx.cpp: the three DrawToWorld flags (nonzero = draw that
 // category in world space). cb_gfx.cpp consults these per draw command.
 int cb_camera_draw_cmd_to_world(void);

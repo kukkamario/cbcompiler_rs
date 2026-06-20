@@ -30,6 +30,10 @@ typedef struct CbImage CbImage;
    font; defined in cb_gfx.cpp. Created by LoadFont, freed by DeleteFont. */
 typedef struct CbFont CbFont;
 
+/* Map handle — the CB-visible `Map` opaque type (FD-036 Phase 3). The single
+   active tilemap; defined in cb_map.cpp. Created by LoadMap/MakeMap. */
+typedef struct CbMap CbMap;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -215,6 +219,23 @@ double  cb_rt_camera_angle(void);
 void    cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images, int32_t draw_text);
 double  cb_rt_mouse_wx(void);
 double  cb_rt_mouse_wy(void);
+
+/* Tile maps (cb_map.cpp, FD-036 Phase 3). One active tilemap; `Map` is the
+   opaque CbMap* handle (LoadMap/MakeMap return it, Null on failure). The query/
+   mutate functions operate on the single active map and return 0 / no-op when
+   none is loaded. GetMap2/EditMap take 1-based grid coordinates; GetMap takes
+   world coordinates. EditMap's `map` arg is popped but ignored. SetTile's
+   animSlowness is an optional arg (defaults to 1) — its own arity overload. */
+CbMap*  cb_rt_load_map(const CbString* map_path, const CbString* tileset_path);
+CbMap*  cb_rt_make_map(int32_t w_tiles, int32_t h_tiles, int32_t tile_w, int32_t tile_h);
+int32_t cb_rt_map_width(void);
+int32_t cb_rt_map_height(void);
+int32_t cb_rt_get_map(int32_t layer, double x, double y);
+int32_t cb_rt_get_map2(int32_t layer, int32_t tx, int32_t ty);
+void    cb_rt_edit_map(CbMap* map_ignored, int32_t layer, int32_t tx, int32_t ty, int32_t tile);
+void    cb_rt_set_map(int32_t back_layer, int32_t over_layer);
+void    cb_rt_set_tile(int32_t tile, int32_t anim_length);
+void    cb_rt_set_tile_slow(int32_t tile, int32_t anim_length, int32_t anim_slowness);
 
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/

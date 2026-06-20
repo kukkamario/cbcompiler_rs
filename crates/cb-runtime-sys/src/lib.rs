@@ -456,9 +456,11 @@ mod tests {
         // TestHandle and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 3);
+            assert_eq!(catalog.types.len(), 4);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
+            // Map is tag 14 (FD-036 Phase 3); tag 13 is reserved for Object.
+            assert_eq!(types_by_name["Map"].tag, 14);
         }
         #[cfg(cb_no_allegro)]
         assert_eq!(catalog.types.len(), 1);
@@ -639,6 +641,61 @@ mod tests {
             assert_eq!(mouse_wx.return_ty, IrType::Float);
             assert_eq!(by_symbol["cb_rt_mouse_wy"].name, "mousewy");
             assert_eq!(by_symbol["cb_rt_mouse_wy"].return_ty, IrType::Float);
+
+            // Tile maps (FD-036 Phase 3). `Map` is the opaque return of
+            // LoadMap/MakeMap (and EditMap's ignored first param). GetMap takes
+            // world Floats; GetMap2/EditMap take 1-based Int grid coords. SetTile
+            // has a 2- and 3-arg arity overload sharing the CB name.
+            let map_ty = IrType::RuntimeType("Map".to_string());
+            let load_map = by_symbol["cb_rt_load_map"];
+            assert_eq!(load_map.name, "loadmap");
+            assert_eq!(load_map.params.len(), 2);
+            assert_eq!(load_map.params[0].ty, IrType::String);
+            assert_eq!(load_map.params[1].ty, IrType::String);
+            assert_eq!(load_map.return_ty, map_ty);
+
+            let make_map = by_symbol["cb_rt_make_map"];
+            assert_eq!(make_map.name, "makemap");
+            assert_eq!(make_map.params.len(), 4);
+            assert_eq!(make_map.params[0].ty, IrType::Int);
+            assert_eq!(make_map.return_ty, map_ty);
+
+            assert_eq!(by_symbol["cb_rt_map_width"].name, "mapwidth");
+            assert_eq!(by_symbol["cb_rt_map_width"].params.len(), 0);
+            assert_eq!(by_symbol["cb_rt_map_width"].return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_map_height"].name, "mapheight");
+            assert_eq!(by_symbol["cb_rt_map_height"].return_ty, IrType::Int);
+
+            let get_map = by_symbol["cb_rt_get_map"];
+            assert_eq!(get_map.name, "getmap");
+            assert_eq!(get_map.params.len(), 3);
+            assert_eq!(get_map.params[0].ty, IrType::Int);
+            assert_eq!(get_map.params[1].ty, IrType::Float);
+            assert_eq!(get_map.params[2].ty, IrType::Float);
+            assert_eq!(get_map.return_ty, IrType::Int);
+
+            let get_map2 = by_symbol["cb_rt_get_map2"];
+            assert_eq!(get_map2.name, "getmap2");
+            assert_eq!(get_map2.params.len(), 3);
+            assert_eq!(get_map2.params[2].ty, IrType::Int);
+            assert_eq!(get_map2.return_ty, IrType::Int);
+
+            let edit_map = by_symbol["cb_rt_edit_map"];
+            assert_eq!(edit_map.name, "editmap");
+            assert_eq!(edit_map.params.len(), 5);
+            assert_eq!(edit_map.params[0].ty, map_ty); // ignored, but typed Map
+            assert_eq!(edit_map.params[1].ty, IrType::Int);
+            assert_eq!(edit_map.return_ty, IrType::Void);
+
+            assert_eq!(by_symbol["cb_rt_set_map"].name, "setmap");
+            assert_eq!(by_symbol["cb_rt_set_map"].params.len(), 2);
+
+            let set_tile = by_symbol["cb_rt_set_tile"];
+            assert_eq!(set_tile.name, "settile");
+            assert_eq!(set_tile.params.len(), 2);
+            let set_tile_slow = by_symbol["cb_rt_set_tile_slow"];
+            assert_eq!(set_tile_slow.name, "settile");
+            assert_eq!(set_tile_slow.params.len(), 3);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

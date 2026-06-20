@@ -157,6 +157,23 @@ extern "C" const ALLEGRO_TRANSFORM* cb_camera_render_transform(void) {
     return &t;
 }
 
+// The plain world transform (cbEnchanted CameraInterface::getWorldTransform),
+// with NO folded Y-flip — used by the tilemap render pass, which flips each
+// tile anchor's Y itself (mirroring RenderTarget::convertCoords) so tiles stay
+// upright.
+extern "C" const ALLEGRO_TRANSFORM* cb_camera_world_transform(void) {
+    int dw = 0, dh = 0;
+    cb_gfx_design_size(&dw, &dh);
+    CbAffine w = cb_build_world_transform(camera_x, camera_y, camera_rad_angle,
+                                          camera_zoom, dw, dh);
+    static ALLEGRO_TRANSFORM t;
+    al_identity_transform(&t);
+    t.m[0][0] = (float)w.a;  t.m[0][1] = (float)w.b;
+    t.m[1][0] = (float)w.c;  t.m[1][1] = (float)w.d;
+    t.m[3][0] = (float)w.tx; t.m[3][1] = (float)w.ty;
+    return &t;
+}
+
 extern "C" int cb_camera_draw_cmd_to_world(void) { return draw_cmd_to_world; }
 extern "C" int cb_camera_image_to_world(void) { return draw_image_to_world; }
 extern "C" int cb_camera_text_to_world(void) { return draw_text_to_world; }

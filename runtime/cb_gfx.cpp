@@ -16,6 +16,7 @@
 #include "cb_runtime.h"
 #include "cb_input.h"
 #include "cb_camera.h"
+#include "cb_map.h"
 #include "cb_font.h"
 #include "cb_geom.h"
 
@@ -268,6 +269,14 @@ static void render_queued_texts(void);
 // cleared once events are drained (the `cls` flag of the 2-arg form).
 static void do_draw_screen(bool clear_after) {
     if (!display) return;
+
+    // FD-036 Phase 3: composite the active tilemap (background then foreground)
+    // through the camera onto the backbuffer — on top of this frame's user draws
+    // and beneath the AddText overlay (mirrors cbEnchanted's DrawScreen ->
+    // drawObjects ordering). A no-op when no map is loaded. Ensure the backbuffer
+    // is the target first (a stray DrawToImage must not redirect the map).
+    al_set_target_backbuffer(display);
+    cb_map_render_active();
 
     // Composite queued (Locate/AddText) text onto this frame before presenting.
     render_queued_texts();
