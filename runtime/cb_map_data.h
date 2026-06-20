@@ -13,6 +13,7 @@
 // format must match. The .til format below was byte-verified against a real
 // CoolBasic asset (D:\CoolBasic\Media\testmap.til).
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -224,6 +225,60 @@ inline void cb_map_tile_anchor(const CbMapData& m, int32_t gx, int32_t gy,
                                double& wx, double& wy) {
     wx = (double)gx * m.tileWidth - m.mapWidth * m.tileWidth * 0.5 + m.posX;
     wy = m.mapHeight * m.tileHeight * 0.5 - (double)gy * m.tileHeight + m.posY;
+}
+
+// ─── Line of sight (FD-036 Phase 5; cbmap.cpp:603-665) ──────────────────
+// World coordinates -> tilemap-relative pixels (origin at the map's top-left,
+// Y growing down). The inverse of mapCoordinatesToWorldCoordinates.
+inline void cb_map_world_to_map(const CbMapData& m, double& x, double& y) {
+    x = x - m.posX + m.mapWidth * m.tileWidth * 0.5;
+    y = -y + m.posY + m.mapHeight * m.tileHeight * 0.5;
+}
+
+// DDA ray walk over the collision layer (layer 2). x1/y1/x2/y2 are tilemap-
+// relative pixels (run cb_map_world_to_map first). Returns true if a wall
+// (nonzero collision tile) lies strictly between the two points — ObjectSight
+// negates this (1 = clear line). Mirrors cbEnchanted's grid traversal exactly,
+// incl. the 1e-5 nudge and the "stop at the end tile or out of bounds" guard.
+inline bool cb_map_ray_cast(const CbMapData& m, double x1, double y1, double x2,
+                            double y2) {
+    if (m.tileWidth <= 0 || m.tileHeight <= 0) return false;
+    x1 += 1e-5;
+    y1 += 1e-5;
+    x2 += 1e-5;
+    y2 += 1e-5;
+    int test_x = (int)(x1 / m.tileWidth);
+    int test_y = (int)(y1 / m.tileHeight);
+    double dir_x = x2 - x1, dir_y = y2 - y1;
+    double dist_sq = dir_x * dir_x + dir_y * dir_y;
+    if (dist_sq < 1e-5) return false;  // same point
+    double nf = 1.0 / std::sqrt(dist_sq);
+    dir_x *= nf;
+    dir_y *= nf;
+    double delta_x = m.tileWidth / std::fabs(dir_x);
+    double delta_y = m.tileHeight / std::fabs(dir_y);
+    double max_x = test_x * m.tileWidth - x1;
+    double max_y = test_y * m.tileHeight - y1;
+    if (dir_x >= 0.0) max_x += m.tileWidth;
+    if (dir_y >= 0.0) max_y += m.tileHeight;
+    max_x /= dir_x;
+    max_y /= dir_y;
+    int step_x = dir_x < 0 ? -1 : 1;
+    int step_y = dir_y < 0 ? -1 : 1;
+    int end_x = (int)(x2 / m.tileWidth);
+    int end_y = (int)(y2 / m.tileHeight);
+    while ((test_x != end_x || test_y != end_y) && test_x >= 0 && test_x < m.mapWidth &&
+           test_y >= 0 && test_y < m.mapHeight) {
+        if (max_x < max_y) {
+            max_x += delta_x;
+            test_x += step_x;
+        } else {
+            max_y += delta_y;
+            test_y += step_y;
+        }
+        if (cb_map_get_hit(m, test_x, test_y)) return true;
+    }
+    return false;
 }
 
 #endif  // CB_MAP_DATA_H

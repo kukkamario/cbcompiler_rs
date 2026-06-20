@@ -118,6 +118,11 @@ struct CbObject {
     bool checkCollisions = true;
     std::vector<CbCollision> collisions;
 
+    // ─── Picking (FD-036 Phase 5) ──────────────────────────────────────
+    // 0 = not pickable; 1 = box, 2 = circle, 3 = pixel (raycast no-op). Set by
+    // ObjectPickable; read by ObjectPick's raycast and CameraPick's point test.
+    int pickStyle = 0;
+
     explicit CbObject(bool floor)
         : visible(g_default_visible), maskColor(al_map_rgb(0, 0, 0)), isFloor(floor) {}
 };
@@ -155,6 +160,17 @@ struct CbCollisionCheck {
 };
 
 std::vector<CbCollisionCheck> collision_checks;
+
+// ─── Pickable registry + last-pick state (FD-036 Phase 5) ───────────────
+//
+// ObjectPickable adds/removes objects here; ObjectPick raycasts the picker's
+// facing ray against each and keeps the nearest hit, recording it for
+// PickedObject/X/Y/Angle. cbEnchanted's single lastPicked* slots — non-reentrant.
+std::vector<CbObject*> pickable_objects;
+CbObject* last_picked = nullptr;
+double last_picked_x = 0.0;
+double last_picked_y = 0.0;
+double last_picked_angle = 0.0;
 
 std::string read_cb_string(const CbString* s) {
     std::string out;
@@ -468,6 +484,8 @@ extern "C" void cb_rt_delete_object(CbObject* o) {
     erase_from(live_objects, o);
     erase_from(floor_objects, o);
     erase_from(regular_objects, o);
+    erase_from(pickable_objects, o);
+    if (last_picked == o) last_picked = nullptr;
     // Drop any collision check that references the deleted object (else the next
     // tick would test a dangling pointer). cbEnchanted does the same.
     collision_checks.erase(
@@ -484,6 +502,8 @@ extern "C" void cb_rt_clear_objects(void) {
     live_objects.clear();
     floor_objects.clear();
     regular_objects.clear();
+    pickable_objects.clear();
+    last_picked = nullptr;
     collision_checks.clear();  // every check referenced a now-deleted object
     enum_index = 0;
 }
@@ -1183,6 +1203,121 @@ extern "C" void cb_run_collision_checks(void) {
             else circle_circle_test(c);  // typeB is Circle
         }
     }
+}
+
+// ─── Picking & line of sight (FD-036 Phase 5) ───────────────────────────
+
+// ObjectPickable(obj, style): 0 = not pickable (removed); 1/2/3 = box/circle/
+// pixel. Adds/removes the object from the pickable set.
+extern "C" void cb_rt_object_pickable(CbObject* o, int32_t style) {
+    if (!o) return;
+    if (style == 0) {
+        o->pickStyle = 0;
+        erase_from(pickable_objects, o);
+        return;
+    }
+    if (style == 1 || style == 2 || style == 3) {
+        o->pickStyle = style;
+        if (std::find(pickable_objects.begin(), pickable_objects.end(), o) ==
+            pickable_objects.end()) {
+            pickable_objects.push_back(o);
+        }
+    }
+}
+
+// ObjectPick(picker): raycast from the picker along its facing angle and keep the
+// nearest pickable hit. Sets PickedObject/X/Y/Angle.
+extern "C" void cb_rt_object_pick(CbObject* picker) {
+    if (!picker) return;
+    last_picked = nullptr;
+    last_picked_x = 0.0;
+    last_picked_y = 0.0;
+    last_picked_angle = 0.0;
+    double best_dsq = -1.0;
+    double best_x = 0.0, best_y = 0.0;
+    for (CbObject* o : pickable_objects) {
+        if (o == picker) continue;
+        double hx = 0.0, hy = 0.0;
+        bool hit = false;
+        if (o->pickStyle == 1) {
+            hit = cb_box_ray_cast(picker->posX, picker->posY, picker->angle, o->posX,
+                                  o->posY, o->range1, o->range2, hx, hy);
+        } else if (o->pickStyle == 2) {
+            hit = cb_circle_ray_cast(picker->posX, picker->posY, picker->angle, o->posX,
+                                     o->posY, o->range1, hx, hy);
+        }
+        // pickStyle 3 (pixel): raycast returns false (cbEnchanted).
+        if (!hit) continue;
+        double dsq = (picker->posX - hx) * (picker->posX - hx) +
+                     (picker->posY - hy) * (picker->posY - hy);
+        if (best_dsq < -0.5 || dsq < best_dsq) {
+            best_dsq = dsq;
+            last_picked = o;
+            last_picked_x = hx;
+            last_picked_y = hy;
+            best_x = hx;
+            best_y = hy;
+        }
+    }
+    // Bug #5 fix: PickedAngle is the angle from the picker to the PICKED hit
+    // point, in degrees (cbEnchanted returned stale loop-end coords in radians).
+    if (last_picked) {
+        last_picked_angle = cb_object_angle2(picker->posX, picker->posY, best_x, best_y);
+    }
+}
+
+// PixelPick(picker[, accuracy]): a registered no-op stub (cbEnchanted's STUB).
+extern "C" void cb_rt_pixel_pick(CbObject* picker) { (void)picker; }
+extern "C" void cb_rt_pixel_pick_acc(CbObject* picker, int32_t accuracy) {
+    (void)picker;
+    (void)accuracy;
+}
+
+extern "C" CbObject* cb_rt_picked_object(void) { return last_picked; }
+extern "C" double cb_rt_picked_x(void) { return last_picked_x; }
+extern "C" double cb_rt_picked_y(void) { return last_picked_y; }
+extern "C" double cb_rt_picked_angle(void) { return last_picked_angle; }
+
+// ObjectSight(a, b): 1 if a clear line (no map walls) runs between the two
+// objects, else 0. With no tilemap loaded there are no walls → 1 (this also
+// guards cbEnchanted's null-deref when no map exists).
+extern "C" int32_t cb_rt_object_sight(const CbObject* a, const CbObject* b) {
+    if (!a || !b) return 0;
+    const CbMapData* m = cb_map_active_data();
+    if (!m) return 1;
+    double x1 = a->posX, y1 = a->posY, x2 = b->posX, y2 = b->posY;
+    cb_map_world_to_map(*m, x1, y1);
+    cb_map_world_to_map(*m, x2, y2);
+    return cb_map_ray_cast(*m, x1, y1, x2, y2) ? 0 : 1;
+}
+
+// CameraPick helper (cbEnchanted ObjectInterface::pickObject): pick the first
+// pickable object whose shape contains the world point. Resets PickedObject
+// first, sets only PickedObject (no X/Y/Angle — faithful). Declared in
+// cb_object.h so cb_camera.cpp's CameraPick can call it after screen→world.
+extern "C" void cb_object_pick_at(double wx, double wy) {
+    last_picked = nullptr;
+    for (CbObject* o : pickable_objects) {
+        bool hit = false;
+        if (o->pickStyle == 1) {
+            hit = cb_can_pick_box(o->posX, o->posY, o->range1, o->range2, wx, wy);
+        } else if (o->pickStyle == 2) {
+            hit = cb_can_pick_circle(o->posX, o->posY, o->range1, wx, wy);
+        }
+        if (hit) {
+            last_picked = o;
+            break;
+        }
+    }
+}
+
+// ScreenPositionObject(obj, sx, sy): move the object to the world point under a
+// screen coordinate (screen→world through the camera, then position).
+extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) {
+    if (!o) return;
+    cb_camera_screen_to_world(&sx, &sy);
+    o->posX = sx;
+    o->posY = sy;
 }
 
 // ─── Render orchestrator (glue for cb_gfx.cpp; see cb_object.h) ──────────

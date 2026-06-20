@@ -24,6 +24,11 @@ void cb_objects_render_all(void);
 // external linkage (no unused-function warning while only collision lands).
 void cb_run_collision_checks(void);
 
+// FD-036 Phase 5: pick the first pickable object containing a world point. Used
+// by CameraPick (cb_camera.cpp) after converting screen → world; sets the
+// PickedObject slot (queryable via cb_rt_picked_object).
+void cb_object_pick_at(double wx, double wy);
+
 #ifdef __cplusplus
 }
 #endif

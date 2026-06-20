@@ -1,0 +1,92 @@
+// FD-036 Phase 5b: object picking, line of sight, and the object-aware camera
+// funcs (deferred from Phase 2). Headless-safe deterministic state — raycasts,
+// the screen<->world transform (pure cb_camera_math on the 400x300 design size),
+// and camera-from-object snapshots use no display. The raycast/pick/DDA geometry
+// is unit-tested in runtime/tests/test_collision.cpp.
+
+// ─── ObjectPick: raycast from a picker hits the nearest pickable ────────
+Dim picker As Object
+Dim target As Object
+picker = MakeObject()
+target = MakeObject()
+ObjectRange(target, 4.0, 4.0)
+PositionObject(picker, 0.0, 0.0)
+RotateObject(picker, 0.0)              // facing +x (0 degrees)
+PositionObject(target, 10.0, 0.0)
+ObjectPickable(target, 1)              // box-pickable
+ObjectPick(picker)
+If PickedObject() = target Then Print "pick_hit_ok"
+If PickedX() = 8.0 Then Print "pickx_ok"             // left edge of the 4-wide box
+If PickedY() = 0.0 Then Print "picky_ok"
+If Abs(PickedAngle() - 0.0) < 0.001 Then Print "pickangle_ok"
+
+// Facing away -> no hit; pixel-style + pickable-off both yield no pick.
+RotateObject(picker, 180.0)
+ObjectPick(picker)
+If PickedObject() = Null Then Print "pick_miss_ok"
+RotateObject(picker, 0.0)
+ObjectPickable(target, 0)              // no longer pickable
+ObjectPick(picker)
+If PickedObject() = Null Then Print "pick_off_ok"
+PixelPick(picker)                      // registered no-op stub
+Print "pixelpick_smoke_ok"
+
+// ─── ObjectSight: clear line, then blocked by a collision-layer wall ────
+Dim m As Map
+m = MakeMap(4, 4, 16, 16)              // 64x64 world centred at origin
+Dim s1 As Object
+Dim s2 As Object
+s1 = MakeObject()
+s2 = MakeObject()
+PositionObject(s1, -20.0, 0.0)
+PositionObject(s2, 20.0, 0.0)
+If ObjectSight(s1, s2) = 1 Then Print "sight_clear_ok"   // no walls yet
+EditMap(m, 2, 3, 3, 1)                 // 1-based grid (3,3) -> internal (2,2), layer 2
+If ObjectSight(s1, s2) = 0 Then Print "sight_blocked_ok"
+
+// ─── Object-aware camera: angle/position snapshots from an object ───────
+PositionCamera(0.0, 0.0, 1.0)
+RotateCamera(0.0, 0.0)
+Dim co As Object
+co = MakeObject()
+PositionObject(co, -100.0, 0.0)        // object to camera's left
+PointCamera(co)                        // (pi - atan2(0, 100))/pi*180 = 180
+If Abs(CameraAngle() - 180.0) < 0.001 Then Print "pointcam_ok"
+
+Dim cp As Object
+cp = MakeObject()
+PositionObject(cp, 33.0, 44.0)
+CloneCameraPosition(cp)
+If CameraX() = 33.0 Then Print "clonecampos_x_ok"
+If CameraY() = 44.0 Then Print "clonecampos_y_ok"
+
+Dim cor As Object
+cor = MakeObject()
+RotateObject(cor, 77.0)
+CloneCameraOrientation(cor)
+If Abs(CameraAngle() - 77.0) < 0.001 Then Print "clonecamorient_ok"
+
+Dim ft As Object
+ft = MakeObject()
+PositionObject(ft, 5.0, 5.0)
+CameraFollow(ft, 1, 10.0)              // registration smoke (movement lands in 5c)
+Print "camerafollow_smoke_ok"
+
+// ─── ScreenPositionObject + CameraPick: screen<->world (camera reset) ───
+PositionCamera(0.0, 0.0, 1.0)
+RotateCamera(0.0, 0.0)
+Dim sp As Object
+sp = MakeObject()
+ScreenPositionObject(sp, 250.0, 100.0)  // design 400x300, centre (200,150)
+If ObjectX(sp) = 50.0 Then Print "screenpos_x_ok"   // 250-200
+If ObjectY(sp) = 50.0 Then Print "screenpos_y_ok"   // 150-100
+
+Dim pk As Object
+pk = MakeObject()
+ObjectRange(pk, 20.0, 20.0)
+PositionObject(pk, 50.0, 50.0)
+ObjectPickable(pk, 1)
+CameraPick(250.0, 100.0)                // screen (250,100) -> world (50,50) -> inside pk
+If PickedObject() = pk Then Print "camerapick_ok"
+
+Print "fd036_pick_done"

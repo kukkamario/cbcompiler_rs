@@ -412,6 +412,13 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawtoworld",      cb_rt_draw_to_world),
     CB_FN("mousewx",          cb_rt_mouse_wx),
     CB_FN("mousewy",          cb_rt_mouse_wy),
+    // Object-aware camera (FD-036 Phase 5, deferred from Phase 2). These take an
+    // `Object`; CameraPick converts a screen point to world then picks.
+    CB_FN("pointcamera",            cb_rt_point_camera),
+    CB_FN("camerafollow",           cb_rt_camera_follow),
+    CB_FN("clonecameraposition",    cb_rt_clone_camera_position),
+    CB_FN("clonecameraorientation", cb_rt_clone_camera_orientation),
+    CB_FN("camerapick",             cb_rt_camera_pick),
 
     // Tile maps (cb_map.cpp, FD-036 Phase 3). `Map` is the opaque handle
     // registered above (tag 14). One active map; EditMap's `map` arg is popped
@@ -508,6 +515,19 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("collisionangle",        cb_rt_collision_angle),
     CB_FN("objectsoverlap",        cb_rt_objects_overlap),
     CB_FN("objectsoverlap",        cb_rt_objects_overlap3),
+
+    // Picking & line of sight (FD-036 Phase 5). PickedObject returns an `Object`
+    // handle; PixelPick is a registered no-op stub (1- and 2-arg forms).
+    CB_FN("objectpickable",        cb_rt_object_pickable),
+    CB_FN("objectpick",            cb_rt_object_pick),
+    CB_FN("pixelpick",             cb_rt_pixel_pick),
+    CB_FN("pixelpick",             cb_rt_pixel_pick_acc),
+    CB_FN("pickedobject",          cb_rt_picked_object),
+    CB_FN("pickedx",               cb_rt_picked_x),
+    CB_FN("pickedy",               cb_rt_picked_y),
+    CB_FN("pickedangle",           cb_rt_picked_angle),
+    CB_FN("objectsight",           cb_rt_object_sight),
+    CB_FN("screenpositionobject",  cb_rt_screen_position_object),
 
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),

@@ -1110,6 +1110,15 @@ extern "C" void cb_gfx_design_size(int32_t* w, int32_t* h) {
     if (h) *h = design_h;
 }
 
+// Internal glue for cb_camera.cpp (FD-036 Phase 5): the PHYSICAL display size
+// (cbEnchanted's screenWidth/Height), used by CameraFollow's deadzone. 0×0 when
+// no window is open (headless), so style-2 follow degrades safely. Declared in
+// cb_camera.h.
+extern "C" void cb_gfx_window_size(int32_t* w, int32_t* h) {
+    if (w) *w = display ? al_get_display_width(display) : 0;
+    if (h) *h = display ? al_get_display_height(display) : 0;
+}
+
 // Internal glue for cb_object.cpp / cb_map.cpp (FD-036 Phase 4): the live bitmap
 // behind an `Image` handle, used by PaintObject(Object/Map, Image). Forward-
 // declared at each call site rather than in a public header. Null when the image

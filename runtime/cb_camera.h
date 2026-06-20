@@ -46,6 +46,23 @@ void cb_camera_draw_area(double* w, double* h);
 // centers its world transform on (w/2, h/2).
 void cb_gfx_design_size(int32_t* w, int32_t* h);
 
+// cb_gfx.cpp -> cb_camera.cpp (FD-036 Phase 5): the PHYSICAL display size
+// (cbEnchanted's screenWidth/Height — the window, distinct from the design size
+// above). CameraFollow's style-2 deadzone is measured against this. 0×0 before a
+// Screen command opens a display.
+void cb_gfx_window_size(int32_t* w, int32_t* h);
+
+// cb_camera.cpp -> cb_object.cpp / cb_gfx.cpp (FD-036 Phase 5): convert a screen
+// coordinate to world space through the live camera (the inverse world transform
+// + Y-flip, matching cbEnchanted's screenCoordToWorld). Used by ScreenPositionObject
+// and the picking funnel.
+void cb_camera_screen_to_world(double* x, double* y);
+
+// cb_camera.cpp -> cb_gfx.cpp (FD-036 Phase 5): if CameraFollow is active, step
+// the camera toward its target once (called per frame from DrawScreen, Phase 5c).
+// A no-op when not following.
+void cb_camera_update_follow(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -17,6 +17,8 @@
 
 #include "cb_camera.h"
 #include "cb_camera_math.h"
+#include "cb_object.h"        // cb_object_pick_at (CameraPick funnel)
+#include "cb_runtime_func.h"  // CbObject + cb_rt_object_x/y/angle accessors
 
 #include <allegro5/allegro.h>
 
@@ -39,6 +41,13 @@ double camera_zoom = 1.0;
 int draw_cmd_to_world = 0;
 int draw_image_to_world = 0;
 int draw_text_to_world = 0;
+
+// CameraFollow state (FD-036 Phase 5). When following, the camera steps toward
+// the target once per frame (cb_camera_update_follow, called from DrawScreen).
+bool is_following = false;
+int follow_style = 0;
+double follow_setting = 0.0;
+const CbObject* follow_target = nullptr;
 
 // Wrap to [0, 360) degrees (cbEnchanted MathInterface::wrapAngle).
 double wrap_deg(double a) {
@@ -130,6 +139,54 @@ extern "C" double cb_rt_mouse_wy(void) {
     return y;
 }
 
+// ─── Object-aware camera (FD-036 Phase 5) ───────────────────────────────
+
+// PointCamera(obj): rotate the logical/reported camera angle to face the object.
+// Bug #3 fix: cbEnchanted passed obj.Y for BOTH atan2 args; we use X then Y. Sets
+// only camera_angle (the logical field), faithful to cbEnchanted — the world
+// matrix angle (camera_rad_angle) stays independent.
+extern "C" void cb_rt_point_camera(const CbObject* obj) {
+    if (!obj) return;
+    double ox = cb_rt_object_x(obj);
+    double oy = cb_rt_object_y(obj);
+    camera_angle = (kPi - std::atan2(camera_y - oy, camera_x - ox)) / kPi * 180.0;
+}
+
+// CameraFollow(obj, style, setting): follow an object. style 1 = smooth lerp,
+// 2 = margin deadzone, 3 = orbit. The step runs once per frame in DrawScreen
+// (cb_camera_update_follow).
+extern "C" void cb_rt_camera_follow(const CbObject* obj, int32_t style, double setting) {
+    is_following = true;
+    follow_setting = setting;
+    follow_style = style;
+    follow_target = obj;
+}
+
+// CloneCameraPosition(obj): snap the camera to the object's position; stop following.
+extern "C" void cb_rt_clone_camera_position(const CbObject* obj) {
+    if (!obj) return;
+    is_following = false;
+    camera_x = cb_rt_object_x(obj);
+    camera_y = cb_rt_object_y(obj);
+}
+
+// CloneCameraOrientation(obj): snap the camera angle to the object's. Bug #4 fix:
+// set BOTH the logical angle and the render (matrix) angle so the view actually
+// rotates (cbEnchanted set only the logical field, leaving the matrix desynced).
+extern "C" void cb_rt_clone_camera_orientation(const CbObject* obj) {
+    if (!obj) return;
+    double a = wrap_deg(cb_rt_object_angle(obj));
+    camera_angle = a;
+    camera_rad_angle = (a / 180.0) * kPi;
+}
+
+// CameraPick(sx, sy): pick the object under a screen coordinate (screen→world,
+// then the point-in-shape test). Sets PickedObject.
+extern "C" void cb_rt_camera_pick(double sx, double sy) {
+    cb_camera_screen_to_world(&sx, &sy);
+    cb_object_pick_at(sx, sy);
+}
+
 // ─── DrawToWorld ───────────────────────────────────────────────────────
 
 // Toggle world-space rendering for the three user-draw categories independently
@@ -191,4 +248,47 @@ extern "C" void cb_camera_draw_area(double* w, double* h) {
     double inv = 1.0 / (camera_zoom > kMinZoom ? camera_zoom : kMinZoom);
     if (w) *w = (c * dw + s * dh) * inv;
     if (h) *h = (c * dh + s * dw) * inv;
+}
+
+// Screen → world through the live camera (cbEnchanted screenCoordToWorld: the
+// inverse world transform, then Y-flip). Same path the MouseWX/WY funcs use;
+// shared by ScreenPositionObject (cb_object.cpp) and CameraPick.
+extern "C" void cb_camera_screen_to_world(double* x, double* y) {
+    if (!x || !y) return;
+    cb_screen_to_world(current_world_affine(), *x, *y);
+}
+
+// Step the camera toward its follow target once (cbEnchanted updateCamFollow).
+// Called per frame from DrawScreen (Phase 5c). No-op when not following.
+extern "C" void cb_camera_update_follow(void) {
+    if (!is_following || !follow_target) return;
+    double tx = cb_rt_object_x(follow_target);
+    double ty = cb_rt_object_y(follow_target);
+    switch (follow_style) {
+        case 1: {  // smooth lerp — larger setting = slower approach
+            camera_x += (tx - camera_x) / follow_setting;
+            camera_y += (ty - camera_y) / follow_setting;
+            break;
+        }
+        case 2: {  // margin deadzone, measured against the PHYSICAL window size
+            int ww = 0, wh = 0;
+            cb_gfx_window_size(&ww, &wh);
+            double half_w = ww / 2.0, half_h = wh / 2.0;
+            if (tx < camera_x - half_w + follow_setting)
+                camera_x += tx - (camera_x - half_w + follow_setting);
+            if (tx > camera_x + half_w - follow_setting)
+                camera_x += tx - (camera_x + half_w - follow_setting);
+            if (ty < camera_y - half_h + follow_setting)
+                camera_y += ty - (camera_y - half_h + follow_setting);
+            if (ty > camera_y + half_h - follow_setting)
+                camera_y += ty - (camera_y + half_h - follow_setting);
+            break;
+        }
+        case 3: {  // orbit at follow_setting distance around the target's angle
+            double rad = cb_rt_object_angle(follow_target) / 180.0 * kPi;
+            camera_x = tx + std::cos(rad) * follow_setting;
+            camera_y = ty + std::sin(rad) * follow_setting;
+            break;
+        }
+    }
 }

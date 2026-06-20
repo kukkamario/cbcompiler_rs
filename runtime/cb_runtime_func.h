@@ -224,6 +224,15 @@ double  cb_rt_camera_angle(void);
 void    cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images, int32_t draw_text);
 double  cb_rt_mouse_wx(void);
 double  cb_rt_mouse_wy(void);
+/* Object-aware camera (FD-036 Phase 5; deferred from Phase 2 to break the
+   Camera<->Object cycle). PointCamera/CameraFollow/CloneCameraPosition/
+   CloneCameraOrientation take an Object; CameraPick converts a screen point to
+   world then picks (sets PickedObject). */
+void    cb_rt_point_camera(const CbObject* obj);
+void    cb_rt_camera_follow(const CbObject* obj, int32_t style, double setting);
+void    cb_rt_clone_camera_position(const CbObject* obj);
+void    cb_rt_clone_camera_orientation(const CbObject* obj);
+void    cb_rt_camera_pick(double sx, double sy);
 
 /* Tile maps (cb_map.cpp, FD-036 Phase 3). One active tilemap; `Map` is the
    opaque CbMap* handle (LoadMap/MakeMap return it, Null on failure). The query/
@@ -339,6 +348,22 @@ double    cb_rt_collision_y(const CbObject* o, int32_t index);
 double    cb_rt_collision_angle(const CbObject* o, int32_t index);
 int32_t   cb_rt_objects_overlap(const CbObject* a, const CbObject* b);
 int32_t   cb_rt_objects_overlap3(const CbObject* a, const CbObject* b, int32_t type);
+/* Picking & line of sight (FD-036 Phase 5). ObjectPick raycasts from the picker
+   along its facing; PickedObject returns the nearest hit (Null if none),
+   PickedX/Y/Angle its contact (PickedAngle in degrees from the picked point —
+   bug-fixed vs cbEnchanted's stale radians). PixelPick is a registered no-op stub
+   (1- and 2-arg forms). ObjectSight returns 1 when no map wall blocks the line.
+   ScreenPositionObject moves an object under a screen coordinate. */
+void      cb_rt_object_pickable(CbObject* o, int32_t style);
+void      cb_rt_object_pick(CbObject* picker);
+void      cb_rt_pixel_pick(CbObject* picker);
+void      cb_rt_pixel_pick_acc(CbObject* picker, int32_t accuracy);
+CbObject* cb_rt_picked_object(void);
+double    cb_rt_picked_x(void);
+double    cb_rt_picked_y(void);
+double    cb_rt_picked_angle(void);
+int32_t   cb_rt_object_sight(const CbObject* a, const CbObject* b);
+void      cb_rt_screen_position_object(CbObject* o, double sx, double sy);
 
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/

@@ -868,6 +868,65 @@ mod tests {
             assert_eq!(overlap.return_ty, IrType::Int);
             assert_eq!(by_symbol["cb_rt_objects_overlap3"].name, "objectsoverlap");
             assert_eq!(by_symbol["cb_rt_objects_overlap3"].params.len(), 3);
+
+            // Picking & line of sight (FD-036 Phase 5). PickedObject returns an
+            // Object handle; PixelPick is a no-op stub (1-/2-arg); ObjectSight
+            // returns Int. ScreenPositionObject is (Object, Float, Float).
+            let pickable = by_symbol["cb_rt_object_pickable"];
+            assert_eq!(pickable.name, "objectpickable");
+            assert_eq!(pickable.params.len(), 2);
+            assert_eq!(pickable.params[0].ty, object_ty);
+            assert_eq!(pickable.params[1].ty, IrType::Int);
+            let pick = by_symbol["cb_rt_object_pick"];
+            assert_eq!(pick.name, "objectpick");
+            assert_eq!(pick.params.len(), 1);
+            assert_eq!(pick.params[0].ty, object_ty);
+            assert_eq!(pick.return_ty, IrType::Void);
+            assert_eq!(by_symbol["cb_rt_pixel_pick"].name, "pixelpick");
+            assert_eq!(by_symbol["cb_rt_pixel_pick"].params.len(), 1);
+            assert_eq!(by_symbol["cb_rt_pixel_pick_acc"].name, "pixelpick");
+            assert_eq!(by_symbol["cb_rt_pixel_pick_acc"].params.len(), 2);
+            let picked = by_symbol["cb_rt_picked_object"];
+            assert_eq!(picked.name, "pickedobject");
+            assert_eq!(picked.params.len(), 0);
+            assert_eq!(picked.return_ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_picked_x"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_picked_angle"].return_ty, IrType::Float);
+            let sight = by_symbol["cb_rt_object_sight"];
+            assert_eq!(sight.name, "objectsight");
+            assert_eq!(sight.params.len(), 2);
+            assert_eq!(sight.params[0].ty, object_ty);
+            assert_eq!(sight.return_ty, IrType::Int);
+            let spo = by_symbol["cb_rt_screen_position_object"];
+            assert_eq!(spo.name, "screenpositionobject");
+            assert_eq!(spo.params.len(), 3);
+            assert_eq!(spo.params[0].ty, object_ty);
+            assert_eq!(spo.params[1].ty, IrType::Float);
+
+            // Object-aware camera (FD-036 Phase 5). PointCamera/CameraFollow/
+            // Clone* take an Object; CameraPick takes two screen Floats.
+            let point_cam = by_symbol["cb_rt_point_camera"];
+            assert_eq!(point_cam.name, "pointcamera");
+            assert_eq!(point_cam.params.len(), 1);
+            assert_eq!(point_cam.params[0].ty, object_ty);
+            let follow = by_symbol["cb_rt_camera_follow"];
+            assert_eq!(follow.name, "camerafollow");
+            assert_eq!(follow.params.len(), 3);
+            assert_eq!(follow.params[0].ty, object_ty);
+            assert_eq!(follow.params[1].ty, IrType::Int);
+            assert_eq!(follow.params[2].ty, IrType::Float);
+            assert_eq!(
+                by_symbol["cb_rt_clone_camera_position"].params[0].ty,
+                object_ty
+            );
+            assert_eq!(
+                by_symbol["cb_rt_clone_camera_orientation"].name,
+                "clonecameraorientation"
+            );
+            let cam_pick = by_symbol["cb_rt_camera_pick"];
+            assert_eq!(cam_pick.name, "camerapick");
+            assert_eq!(cam_pick.params.len(), 2);
+            assert_eq!(cam_pick.params[0].ty, IrType::Float);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

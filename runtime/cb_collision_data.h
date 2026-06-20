@@ -157,4 +157,113 @@ inline CbCircleResolve cb_circle_circle_resolve(double objX, double objY,
     return out;
 }
 
+// ─── Picking raycasts (cbobject.cpp:602-770) ────────────────────────────
+// A ray is cast from (startX, startY) along `angleDeg` and tested against a
+// target shape centred on (objX, objY). On a hit the contact point is written to
+// hitX/hitY and the function returns true. ObjectPick keeps the nearest hit.
+
+// Box target: range1×range2 AABB centred on the object. Tests the facing side
+// pair (top/bottom by angle, then left/right) via the ray's slope-intercept line.
+inline bool cb_box_ray_cast(double startX, double startY, double angleDeg, double objX,
+                            double objY, double range1, double range2, double& hitX,
+                            double& hitY) {
+    double rectW = range1, rectH = range2;
+    double rectX = objX - rectW / 2.0, rectY = objY + rectH / 2.0;
+    double left = rectX, top = rectY, right = rectX + rectW, bottom = rectY - rectH;
+    double k = std::tan((angleDeg / 180.0) * cb_collision_pi);
+    double b = startY - k * startX;
+    double x, y;
+    if (angleDeg > 180) {
+        y = top;
+        x = (y - b) / k;
+        if (startY > y && x > left && x < right) {
+            hitX = x;
+            hitY = y;
+            return true;
+        }
+    } else {
+        y = bottom;
+        x = (y - b) / k;
+        if (startY < y && x > left && x < right) {
+            hitX = x;
+            hitY = y;
+            return true;
+        }
+    }
+    if (angleDeg < 90 || angleDeg > 270) {
+        x = left;
+        y = k * x + b;
+        if (startX < x && y > bottom && y < top) {
+            hitX = x;
+            hitY = y;
+            return true;
+        }
+    } else {
+        x = right;
+        y = k * x + b;
+        if (startX > x && y > bottom && y < top) {
+            hitX = x;
+            hitY = y;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Circle target: radius range1/2. A ray starting inside the circle does NOT pick
+// it (returns false). Solves the ray/circle quadratic with the ray length 1e7
+// (cbobject.cpp:612, http://stackoverflow.com/a/1084899).
+inline bool cb_circle_ray_cast(double startX, double startY, double angleDeg,
+                               double circleX, double circleY, double range1,
+                               double& hitX, double& hitY) {
+    double r = range1 / 2.0;
+    double cvX = startX - circleX, cvY = startY - circleY;
+    if (cvX * cvX + cvY * cvY < r * r) {  // ray origin inside circle → no pick
+        hitX = startX;
+        hitY = startY;
+        return false;
+    }
+    double endX = startX + std::cos((angleDeg / 180.0) * cb_collision_pi) * 1e7;
+    double endY = startY + std::sin((angleDeg / 180.0) * cb_collision_pi) * 1e7;
+    double dirX = endX - startX, dirY = endY - startY;
+    double a = dirX * dirX + dirY * dirY;
+    double b = 2.0 * (dirX * cvX + dirY * cvY);
+    double c = (cvX * cvX + cvY * cvY) - r * r;
+    double disc = b * b - 4.0 * a * c;
+    if (disc < 0) {
+        hitX = endX;
+        hitY = endY;
+        return false;
+    }
+    disc = std::sqrt(disc);
+    double t1 = (-b + disc) / (2.0 * a);
+    double t2 = (-b - disc) / (2.0 * a);
+    if (t2 >= 0 && t2 <= 1) {
+        hitX = startX + t2 * dirX;
+        hitY = startY + t2 * dirY;
+        return true;
+    }
+    if (t1 >= 0 && t1 <= 1) {
+        hitX = startX + t1 * dirX;
+        hitY = startY + t1 * dirY;
+        return true;
+    }
+    hitX = endX;
+    hitY = endY;
+    return false;
+}
+
+// ─── Point-in-shape pick tests (cbobject.cpp:776, CameraPick) ────────────
+// Whether world point (x, y) lies inside the object's pick shape centred on
+// (px, py). Box uses range1×range2; circle uses range1/2 as the radius.
+inline bool cb_can_pick_box(double px, double py, double range1, double range2,
+                            double x, double y) {
+    return std::fabs(px - x) < range1 / 2.0 && std::fabs(py - y) < range2 / 2.0;
+}
+inline bool cb_can_pick_circle(double px, double py, double range1, double x,
+                               double y) {
+    double r = range1 * 0.5, dx = px - x, dy = py - y;
+    return dx * dx + dy * dy < r * r;
+}
+
 #endif  // CB_COLLISION_DATA_H

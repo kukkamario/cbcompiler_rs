@@ -7,6 +7,7 @@
 // the graphics-gated cb-driver fixture; only its pure predicates live here.
 
 #include "cb_collision_data.h"
+#include "cb_map_data.h"  // ObjectSight DDA (cb_map_ray_cast / cb_map_world_to_map)
 
 #include <gtest/gtest.h>
 
@@ -92,4 +93,57 @@ TEST(CollisionResolve, CircleCircleStopDiffersFromSlide) {
     EXPECT_NEAR(slide.objY, 0.0, kEps);
     // Stop uses the safe position → pushes the object off the x-axis.
     EXPECT_GT(stop.objY, 0.5);
+}
+
+// ─── Picking raycasts ───────────────────────────────────────────────────
+
+// Box raycast: picker at (0,0) facing 0° (right) hits the LEFT edge of a 4×4 box
+// centred at (10,0) → contact (8, 0). Facing away (180°) misses entirely.
+TEST(PickRaycast, BoxFrontHitAndMiss) {
+    double hx = 0, hy = 0;
+    EXPECT_TRUE(cb_box_ray_cast(0, 0, 0, 10, 0, 4, 4, hx, hy));
+    EXPECT_NEAR(hx, 8.0, kEps);
+    EXPECT_NEAR(hy, 0.0, kEps);
+    EXPECT_FALSE(cb_box_ray_cast(0, 0, 180, 10, 0, 4, 4, hx, hy));
+}
+
+// Circle raycast: picker at (0,0) facing 0° hits the near edge of a circle
+// (diameter 4 → radius 2) centred at (10,0) → contact (8, 0). A ray starting
+// INSIDE the circle does not pick it.
+TEST(PickRaycast, CircleFrontHitAndInside) {
+    double hx = 0, hy = 0;
+    EXPECT_TRUE(cb_circle_ray_cast(0, 0, 0, 10, 0, 4, hx, hy));
+    EXPECT_NEAR(hx, 8.0, kEps);
+    EXPECT_NEAR(hy, 0.0, kEps);
+    // Start inside → false (returns the start point).
+    EXPECT_FALSE(cb_circle_ray_cast(10, 0, 0, 10, 0, 4, hx, hy));
+}
+
+// Point-in-shape pick tests (CameraPick funnel).
+TEST(PickPoint, BoxAndCircleContainment) {
+    EXPECT_TRUE(cb_can_pick_box(10, 0, 4, 4, 11, 0));    // |1| < 2
+    EXPECT_FALSE(cb_can_pick_box(10, 0, 4, 4, 13, 0));   // |3| > 2
+    EXPECT_TRUE(cb_can_pick_circle(10, 0, 4, 11, 0));    // dist 1 < r 2
+    EXPECT_FALSE(cb_can_pick_circle(10, 0, 4, 13, 0));   // dist 3 > r 2
+}
+
+// ObjectSight DDA: a horizontal ray across a 4×4 tile (16px) map centred on the
+// origin. With no wall the line is clear; a wall on the collision layer in the
+// ray's path blocks it.
+TEST(ObjectSight, RayBlockedByWall) {
+    CbMapData m;
+    cb_map_create(m, 4, 4, 16, 16);
+
+    // Clear line from world (-20,0) to (20,0).
+    double ax = -20, ay = 0, bx = 20, by = 0;
+    cb_map_world_to_map(m, ax, ay);
+    cb_map_world_to_map(m, bx, by);
+    EXPECT_FALSE(cb_map_ray_cast(m, ax, ay, bx, by));
+
+    // Put a wall on the collision layer (2) at grid (2,2), in the ray's row.
+    cb_map_edit(m, 2, 2, 2, 1);
+    double cx = -20, cy = 0, dx = 20, dy = 0;
+    cb_map_world_to_map(m, cx, cy);
+    cb_map_world_to_map(m, dx, dy);
+    EXPECT_TRUE(cb_map_ray_cast(m, cx, cy, dx, dy));
 }

@@ -304,6 +304,16 @@ fn runtime_collision_fd036() {
 }
 
 #[test]
+fn runtime_pick_fd036() {
+    // ObjectPick raycast + PickedObject/X/Y/Angle, ObjectSight (map-wall DDA), and
+    // the object-aware camera funcs (PointCamera/CameraFollow/CloneCamera*/
+    // CameraPick/ScreenPositionObject). Deterministic state, no display: the
+    // screen<->world transform uses the 400x300 design size via cb_camera_math.
+    // CameraFollow's per-frame motion is covered by runtime_gameloop_fd036 (5c).
+    run_graphics("runtime_pick_fd036");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run_graphics("runtime_text_fd018");
 }
