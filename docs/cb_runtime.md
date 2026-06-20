@@ -452,7 +452,7 @@ screen Y.
 | `MoveCamera` | `forward: Float, side: Float, dzoom: Float` | — | Moves relative to the camera angle, adjusting zoom |
 | `TranslateCamera` | `dx: Float, dy: Float, dzoom: Float` | — | Moves in absolute world space, adjusting zoom |
 | `RotateCamera` | `logical: Float, render: Float` | — | Sets absolute rotation. `logical` (degrees) is reported by `CameraAngle` and drives `MoveCamera`'s heading; `render` (degrees) is the world-matrix rotation. The two fields are **independent** (faithful to cbEnchanted) and may diverge |
-| `TurnCamera` | `dLogical: Float, dRender: Float` | — | Rotates relatively: `logical` wraps in degrees (0–360), the render angle accumulates (wraps 0–2π) |
+| `TurnCamera` | `dLogical: Float, dRender: Float` | — | Rotates relatively: `dLogical` (degrees) wraps to 0–360; `dRender` (degrees) accumulates into the world-matrix rotation (stored internally in radians, wrapped to 0–2π) |
 | `PointCamera` | `obj: Object` | — | Rotates the camera to point at an object |
 | `CameraFollow` | `obj: Object, style: Integer, setting: Float` | — | Follows an object. `style` 1=smooth (divide distance by `setting`), 2=margin deadzone (`setting`=px), 3=orbit (`setting`=distance) |
 | `CloneCameraPosition` | `obj: Object` | — | Snaps camera position to an object; stops following |
