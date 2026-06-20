@@ -26,8 +26,10 @@
 
 #include "cb_object.h"
 #include "cb_object_data.h"
+#include "cb_collision_data.h"
 #include "cb_camera.h"
 #include "cb_map.h"
+#include "cb_map_data.h"
 #include "cb_runtime_func.h"
 
 #include <allegro5/allegro.h>
@@ -67,6 +69,18 @@ static bool g_default_visible = true;
 // passed/returned by pointer. Field defaults mirror CBObject's constructor; the
 // alphaBlend `= 255` load write is intentionally NOT replicated (render only
 // blends when < 1.0, so we keep the documented 0–1 scale honest).
+struct CbObject;
+
+// A single recorded collision (FD-036 Phase 5): the other object (Null for a
+// map-wall hit — a Map is not an Object, so GetCollision yields Null there), the
+// contact normal angle (degrees), and the contact point in world coordinates.
+struct CbCollision {
+    CbObject* other;
+    double angle;
+    double x;
+    double y;
+};
+
 struct CbObject {
     double posX = 0.0, posY = 0.0;
     double sizeX = 0.0, sizeY = 0.0;       // set on load
@@ -91,6 +105,19 @@ struct CbObject {
     bool isFloor;                          // ctor arg
     bool painted = false;
 
+    // ─── Collision (FD-036 Phase 5) ────────────────────────────────────
+    // range1/range2 = collision bounds (box: width,height; circle: diameter in
+    // range1). Default 0×0; LoadObject/LoadAnimObject/CloneObject set them to the
+    // image size, MakeObject/MakeObjectFloor leave them 0 (so a made object's
+    // collisions are inert until ObjectRange is called — faithful to cbEnchanted).
+    // checkCollisions gates this object's checks for the current tick
+    // (ResetObjectCollision clears it; the update tick resets it to true).
+    // `collisions` is this frame's recorded contacts (1-based GetCollision/
+    // CollisionX/Y/Angle), wiped each update tick.
+    double range1 = 0.0, range2 = 0.0;
+    bool checkCollisions = true;
+    std::vector<CbCollision> collisions;
+
     explicit CbObject(bool floor)
         : visible(g_default_visible), maskColor(al_map_rgb(0, 0, 0)), isFloor(floor) {}
 };
@@ -108,6 +135,26 @@ std::vector<CbObject*> regular_objects;
 // Shared stateful enumeration cursor (InitObjectList resets it; NextObject
 // advances). Non-reentrant, exactly like cbEnchanted's single iterator.
 std::size_t enum_index = 0;
+
+// ─── Collision-check registry (FD-036 Phase 5) ──────────────────────────
+//
+// SetupCollision is a *persistent* registration (cbEnchanted's collisionChecks
+// vector): each entry is re-tested every update tick, not one-shot. Cleared only
+// by ClearCollisions or when an object is deleted. `a` is the colliding object;
+// `b` is the target object (or null when `bIsMap`, i.e. the active tilemap is the
+// target). typeA/typeB: 1=box, 2=circle, 4=map(B only). handling: 0=report,
+// 1=stop, 2=slide. safeX/safeY is the last collision-free position (seeded to a's
+// position at setup, updated by each test) — the box/circle resolvers push back
+// relative to it.
+struct CbCollisionCheck {
+    CbObject* a;
+    CbObject* b;
+    bool bIsMap;
+    int typeA, typeB, handling;
+    double safeX, safeY;
+};
+
+std::vector<CbCollisionCheck> collision_checks;
 
 std::string read_cb_string(const CbString* s) {
     std::string out;
@@ -319,6 +366,8 @@ extern "C" CbObject* cb_rt_load_object(const CbString* path) {
     o->tex->bmp = bmp;
     o->sizeX = al_get_bitmap_width(bmp);
     o->sizeY = al_get_bitmap_height(bmp);
+    o->range1 = o->sizeX;  // LoadObject seeds the collision range to image size
+    o->range2 = o->sizeY;
     o->painted = true;
     register_object(o);
     return o;
@@ -355,6 +404,8 @@ extern "C" CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_
     o->frameHeight = frame_h;
     o->sizeX = frame_w;
     o->sizeY = frame_h;
+    o->range1 = o->sizeX;  // collision range seeded to a single frame's size
+    o->range2 = o->sizeY;
     o->startFrame = start_frame;
     o->maxFrames = frame_count;
     o->painted = true;
@@ -402,6 +453,8 @@ extern "C" CbObject* cb_rt_clone_object(const CbObject* src) {
     o->painted = src->painted;
     o->sizeX = src->sizeX;
     o->sizeY = src->sizeY;
+    o->range1 = src->sizeX;  // clone range = source IMAGE size (cbobject.cpp:484)
+    o->range2 = src->sizeY;
     o->visible = true;  // cbEnchanted forces visible=true on a clone
     // posX/posY/angle/currentFrame stay at constructor defaults (0) — NOT copied.
     register_object(o);
@@ -415,6 +468,12 @@ extern "C" void cb_rt_delete_object(CbObject* o) {
     erase_from(live_objects, o);
     erase_from(floor_objects, o);
     erase_from(regular_objects, o);
+    // Drop any collision check that references the deleted object (else the next
+    // tick would test a dangling pointer). cbEnchanted does the same.
+    collision_checks.erase(
+        std::remove_if(collision_checks.begin(), collision_checks.end(),
+                       [o](const CbCollisionCheck& c) { return c.a == o || c.b == o; }),
+        collision_checks.end());
     delete o;
 }
 
@@ -425,6 +484,7 @@ extern "C" void cb_rt_clear_objects(void) {
     live_objects.clear();
     floor_objects.clear();
     regular_objects.clear();
+    collision_checks.clear();  // every check referenced a now-deleted object
     enum_index = 0;
 }
 
@@ -718,6 +778,411 @@ extern "C" void cb_rt_init_object_list(void) { enum_index = 0; }
 extern "C" CbObject* cb_rt_next_object(void) {
     if (enum_index >= live_objects.size()) return nullptr;
     return live_objects[enum_index++];
+}
+
+// ─── Collision (FD-036 Phase 5) ─────────────────────────────────────────
+//
+// SetupCollision registers a persistent check; the actual geometry runs once per
+// update tick in cb_run_collision_checks (driven by the Phase-5 game loop). The
+// pure overlap/resolution math lives in cb_collision_data.h; the map-grid tile
+// loops (Rect/CircleMap) are here because they walk the active tilemap. Mode 0
+// (report) records the contact but does NOT move the object; modes 1/2 (stop/
+// slide) apply the resolved position via positionObject (faithful to cbEnchanted).
+
+namespace {
+
+// Validate + register a check. cbEnchanted nulls invalid checks at setup; we
+// simply don't push them. Legal pairings: Box+Box, Circle+Circle, Box+Map,
+// Circle+Map. Stop(1) handling is circle-only. (Box↔Circle object pairs are
+// rejected here — cbEnchanted's CircleRect/RectCircle tests are dead no-ops, so
+// such pairs never collide; bug #6, replicated.)
+void register_collision(CbObject* a, int typeA, CbObject* b, bool bIsMap, int typeB,
+                        int handling) {
+    if (!a) return;
+    if (typeA != 1 && typeA != 2) return;  // colliding type must be Box or Circle
+    if (bIsMap) {
+        if (typeB != 4) return;  // the Map overload is map-collision only
+    } else {
+        if (!b) return;                              // object-object needs a target
+        if (typeB == 1) { if (typeA != 1) return; }  // Box target ⇒ Box collider
+        else if (typeB == 2) { if (typeA != 2) return; }  // Circle ⇒ Circle
+        else return;                                 // Map/Pixel invalid for a pair
+    }
+    if (handling == 1) { if (typeA != 2) return; }   // Stop is circle-only
+    else if (handling != 0 && handling != 2) return;
+    collision_checks.push_back(
+        CbCollisionCheck{a, b, bIsMap, typeA, typeB, handling, a->posX, a->posY});
+}
+
+void set_object_range(CbObject* o, double r1, double r2) {
+    if (!o) return;
+    if (r2 < 0.001) r2 = r1;  // omitted / ~0 second range mirrors the first
+    o->range1 = r1;
+    o->range2 = r2;
+}
+
+// ObjectsOverlap one-shot test (no registration). type 1=box, 2=circle, 3=pixel
+// (pixel not implemented → 0, matching cbEnchanted's error path). Box uses the
+// centred AABB (range1×range2); circle uses range1/2 as the radius.
+int32_t objects_overlap_impl(const CbObject* a, const CbObject* b, int32_t type) {
+    if (!a || !b) return 0;
+    if (type < 1 || type > 3) return 0;
+    if (type == 1) {
+        double w1 = a->range1, h1 = a->range2, w2 = b->range1, h2 = b->range2;
+        return rect_overlap(a->posX - w1 / 2.0, a->posY + h1 / 2.0, w1, h1,
+                            b->posX - w2 / 2.0, b->posY + h2 / 2.0, w2, h2)
+                   ? 1
+                   : 0;
+    }
+    if (type == 2) {
+        return cb_circle_circle_overlap(a->posX, a->posY, a->range1 / 2.0, b->posX,
+                                        b->posY, b->range1 / 2.0)
+                   ? 1
+                   : 0;
+    }
+    return 0;  // type 3 (pixel): not implemented
+}
+
+// ─── Per-pair test helpers (one update tick) ────────────────────────────
+
+void box_box_test(CbCollisionCheck& c) {
+    CbObject* a = c.a;
+    CbObject* b = c.b;
+    CbBoxResolve r = cb_box_box_resolve(a->posX, a->posY, c.safeY, a->range1,
+                                        a->range2, b->posX, b->posY, b->range1,
+                                        b->range2);
+    for (int i = 0; i < r.hitCount; ++i) {
+        a->collisions.push_back({b, r.hits[i].angle, r.hits[i].x, r.hits[i].y});
+    }
+    c.safeX = r.objX;
+    c.safeY = r.objY;
+    if (c.handling != 0) {
+        a->posX = r.objX;
+        a->posY = r.objY;
+    }
+}
+
+void circle_circle_test(CbCollisionCheck& c) {
+    CbObject* a = c.a;
+    CbObject* b = c.b;
+    CbCircleResolve r = cb_circle_circle_resolve(a->posX, a->posY, c.safeX, c.safeY,
+                                                 a->range1 / 2.0, b->posX, b->posY,
+                                                 b->range1 / 2.0, c.handling == 1);
+    if (r.hitCount) a->collisions.push_back({b, r.hit.angle, r.hit.x, r.hit.y});
+    c.safeX = r.objX;
+    c.safeY = r.objY;
+    if (c.handling != 0) {
+        a->posX = r.objX;
+        a->posY = r.objY;
+    }
+}
+
+// Box-vs-tilemap (collisioncheck.cpp:300-408). Two axis passes over the tiles
+// around the object; fixed cardinal contact normals (top 270 / right 180 /
+// bottom 90 / left 0). The map-wall "other" is Null (a Map is not an Object).
+void rect_map_test(CbCollisionCheck& c) {
+    const CbMapData* m = cb_map_active_data();
+    if (!m || m->tileWidth <= 0 || m->tileHeight <= 0) return;
+    CbObject* a = c.a;
+    bool collided[4] = {false, false, false, false};
+    double tileWidth = m->tileWidth, tileHeight = m->tileHeight;
+    double mapSizeX = (double)m->mapWidth * m->tileWidth;
+    double mapSizeY = (double)m->mapHeight * m->tileHeight;
+    double mapX = m->posX, mapY = m->posY;
+    double objX = a->posX, objY = a->posY;
+    double objWidth = a->range1, objHeight = a->range2;
+    int checkTilesX = (int)std::ceil(objWidth / tileWidth);
+    int checkTilesY = (int)std::ceil(objHeight / tileHeight);
+    int32_t startTileX = (int32_t)((objX - mapX + mapSizeX / 2.0) / tileWidth) - checkTilesX;
+    int32_t startTileY = (int32_t)((-objY + mapY + mapSizeY / 2.0) / tileHeight) - checkTilesY;
+    const double eps = 1e-5;
+
+    // X-directional pass (uses the stored safeY).
+    for (int32_t tileX = startTileX; tileX <= startTileX + checkTilesX * 2; ++tileX) {
+        for (int32_t tileY = startTileY; tileY <= startTileY + checkTilesY * 2; ++tileY) {
+            if (!cb_map_get_hit(*m, tileX, tileY)) continue;
+            double x = tileX * tileWidth - mapSizeX / 2.0 + mapX;
+            double y = mapSizeY / 2.0 - tileY * tileHeight + mapY;
+            if (rect_overlap(objX - objWidth / 2.0, c.safeY + objHeight / 2.0, objWidth,
+                             objHeight, x, y, tileWidth, tileHeight)) {
+                objX = c.safeX;
+                if (tileX < startTileX + checkTilesX) {
+                    collided[3] = true;
+                    objX = x + tileWidth + eps + objWidth / 2.0;
+                } else if (tileX > startTileX + checkTilesX) {
+                    collided[1] = true;
+                    objX = x - eps - objWidth / 2.0;
+                }
+            }
+        }
+    }
+
+    // Y-directional pass (uses the freshly-resolved objX).
+    for (int32_t tileX = startTileX; tileX <= startTileX + checkTilesX * 2; ++tileX) {
+        for (int32_t tileY = startTileY; tileY <= startTileY + checkTilesY * 2; ++tileY) {
+            if (!cb_map_get_hit(*m, tileX, tileY)) continue;
+            double x = tileX * tileWidth - mapSizeX / 2.0 + mapX;
+            double y = mapSizeY / 2.0 - tileY * tileHeight + mapY;
+            if (rect_overlap(objX - objWidth / 2.0, objY + objHeight / 2.0, objWidth,
+                             objHeight, x, y, tileWidth, tileHeight)) {
+                objY = c.safeY;
+                if (tileY < startTileY + checkTilesY) {
+                    collided[0] = true;
+                    objY = y - tileHeight - eps - objHeight / 2.0;
+                } else if (tileY > startTileY + checkTilesY) {
+                    collided[2] = true;
+                    objY = y + eps + objHeight / 2.0;
+                }
+            }
+        }
+    }
+
+    c.safeX = objX;
+    c.safeY = objY;
+    if (c.handling != 0) {
+        a->posX = objX;
+        a->posY = objY;
+    }
+    if (collided[0]) a->collisions.push_back({nullptr, 270.0, objX, objY + objHeight / 2.0 + 1.0});
+    if (collided[1]) a->collisions.push_back({nullptr, 180.0, objX + objWidth / 2.0 + 1.0, objY});
+    if (collided[2]) a->collisions.push_back({nullptr, 90.0, objX, objY - objHeight / 2.0 - 1.0});
+    if (collided[3]) a->collisions.push_back({nullptr, 0.0, objX - objWidth / 2.0 - 1.0, objY});
+}
+
+// Circle-vs-tilemap (collisioncheck.cpp:411-696) — the hardest test: per-axis
+// circle-rect tile probing with edge-vs-corner disambiguation (a neighbour-tile
+// lookup decides rect-style flush push-out vs corner push-out). The goto
+// breakouts become a `done` flag that stops each pass at the first resolved tile.
+void circle_map_test(CbCollisionCheck& c) {
+    const CbMapData* m = cb_map_active_data();
+    if (!m || m->tileWidth <= 0 || m->tileHeight <= 0) return;
+    CbObject* a = c.a;
+    bool collided[4] = {false, false, false, false};
+    double colX[4] = {0.0, 0.0, 0.0, 0.0};
+    double colY[4] = {0.0, 0.0, 0.0, 0.0};
+    double tileWidth = m->tileWidth, tileHeight = m->tileHeight;
+    double mapSizeX = (double)m->mapWidth * m->tileWidth;
+    double mapSizeY = (double)m->mapHeight * m->tileHeight;
+    double mapX = m->posX, mapY = m->posY;
+    double objX = a->posX, objY = a->posY;
+    double objR = a->range1 / 2.0;
+    int checkTilesX = (int)std::ceil(objR / tileWidth);
+    int checkTilesY = (int)std::ceil(objR / tileHeight);
+    int32_t startTileX = (int32_t)((objX - mapX + mapSizeX / 2.0) / tileWidth) - checkTilesX;
+    int32_t startTileY = (int32_t)((-objY + mapY + mapSizeY / 2.0) / tileHeight) - checkTilesY;
+    const double eps = 1e-5;
+
+    // X-resolution pass.
+    bool done = false;
+    for (int32_t tileY = startTileY; tileY <= startTileY + checkTilesY * 2 && !done; ++tileY) {
+        for (int32_t tileX = startTileX; tileX <= startTileX + checkTilesX * 2; ++tileX) {
+            if (!cb_map_get_hit(*m, tileX, tileY)) continue;
+            double x = tileX * tileWidth - mapSizeX / 2.0 + mapX;
+            double y = mapSizeY / 2.0 - tileY * tileHeight + mapY;
+            double centerY = y - tileHeight / 2.0;
+            if (!cb_circle_rect_overlap(objX, c.safeY + tileHeight, objR, x, y, tileWidth,
+                                        tileHeight)) {
+                continue;
+            }
+            bool above = centerY > c.safeY;
+            double cornerY = above ? centerY - tileHeight / 2.0 : centerY + tileHeight / 2.0;
+            bool rectStyle = above ? (cb_map_get_hit(*m, tileX, tileY + 1) || cornerY < c.safeY)
+                                   : (cb_map_get_hit(*m, tileX, tileY - 1) || cornerY > c.safeY);
+            if (rectStyle) {
+                if (tileX < startTileX + checkTilesX) {
+                    collided[3] = true;
+                    objX = x + tileWidth + eps + objR;
+                    colX[3] = objX - objR;
+                    colY[3] = objY;
+                } else if (tileX > startTileX + checkTilesX) {
+                    collided[1] = true;
+                    objX = x - eps - objR;
+                    colX[1] = objX + objR;
+                    colY[1] = objY;
+                }
+            } else {
+                double cornerX = 0.0;
+                bool isCornerSet = false;
+                if (tileX < startTileX + checkTilesX) {
+                    cornerX = x + tileWidth;
+                    isCornerSet = true;
+                    collided[3] = true;
+                    colX[3] = cornerX;
+                    colY[3] = cornerY;
+                } else if (tileX > startTileX + checkTilesX) {
+                    cornerX = x;
+                    isCornerSet = true;
+                    collided[1] = true;
+                    colX[1] = cornerX;
+                    colY[1] = cornerY;
+                }
+                if (isCornerSet) {
+                    double rad = std::atan2(cornerY - c.safeY, cornerX - objX);
+                    objX = cornerX - std::cos(rad) * (objR + eps);
+                }
+            }
+            done = true;
+            break;
+        }
+    }
+
+    // Y-resolution pass.
+    done = false;
+    for (int32_t tileY = startTileY; tileY <= startTileY + checkTilesY * 2 && !done; ++tileY) {
+        for (int32_t tileX = startTileX; tileX <= startTileX + checkTilesX * 2; ++tileX) {
+            if (!cb_map_get_hit(*m, tileX, tileY)) continue;
+            double x = tileX * tileWidth - mapSizeX / 2.0 + mapX;
+            double y = mapSizeY / 2.0 - tileY * tileHeight + mapY;
+            double centerX = x + tileWidth / 2.0;
+            if (!cb_circle_rect_overlap(objX, objY + tileHeight, objR, x, y, tileWidth,
+                                        tileHeight)) {
+                continue;
+            }
+            bool rightward = centerX > objX;
+            double cornerX = rightward ? x : x + tileWidth;
+            bool rectStyle = rightward ? (cb_map_get_hit(*m, tileX - 1, tileY) || cornerX < objX)
+                                       : (cb_map_get_hit(*m, tileX + 1, tileY) || cornerX > objX);
+            if (rectStyle) {
+                if (tileY < startTileY + checkTilesY) {
+                    collided[0] = true;
+                    objY = y - tileHeight - eps - objR;
+                    colX[0] = objX;
+                    colY[0] = objY + objR;
+                } else if (tileY > startTileY + checkTilesY) {
+                    collided[2] = true;
+                    objY = y + eps + objR;
+                    colX[2] = objX;
+                    colY[2] = objY - objR;
+                }
+            } else {
+                double cornerY = 0.0;
+                bool isCornerSet = false;
+                if (tileY < startTileY + checkTilesY) {
+                    cornerY = y - tileHeight;
+                    isCornerSet = true;
+                    collided[0] = true;
+                    colX[0] = cornerX;
+                    colY[0] = cornerY;
+                } else if (tileY > startTileY + checkTilesY) {
+                    cornerY = y;
+                    isCornerSet = true;
+                    collided[2] = true;
+                    colX[2] = cornerX;
+                    colY[2] = cornerY;
+                }
+                if (isCornerSet) {
+                    double rad = std::atan2(cornerY - objY, cornerX - objX);
+                    objY = cornerY - std::sin(rad) * (objR + eps);
+                }
+            }
+            done = true;
+            break;
+        }
+    }
+
+    c.safeX = objX;
+    c.safeY = objY;
+    if (c.handling != 0) {
+        a->posX = objX;
+        a->posY = objY;
+    }
+    if (collided[0]) a->collisions.push_back({nullptr, 270.0, colX[0], colY[0]});
+    if (collided[1]) a->collisions.push_back({nullptr, 180.0, colX[1], colY[1]});
+    if (collided[2]) a->collisions.push_back({nullptr, 90.0, colX[2], colY[2]});
+    if (collided[3]) a->collisions.push_back({nullptr, 0.0, colX[3], colY[3]});
+}
+
+}  // namespace
+
+// SetupCollision(objA, typeA, objB, typeB, handling): register a persistent
+// object-object check. Re-tested every update tick until ClearCollisions or an
+// object is deleted.
+extern "C" void cb_rt_setup_collision(CbObject* obj_a, int32_t type_a, CbObject* obj_b,
+                                      int32_t type_b, int32_t handling) {
+    register_collision(obj_a, type_a, obj_b, false, type_b, handling);
+}
+
+// SetupCollision(objA, typeA, map, typeB, handling): the type-4 map-collision
+// overload. The Map handle is accepted for type-honesty but ignored — there is a
+// single active map singleton (like EditMap's popped-but-ignored map arg).
+extern "C" void cb_rt_setup_collision_map(CbObject* obj_a, int32_t type_a, CbMap* map,
+                                          int32_t type_b, int32_t handling) {
+    (void)map;
+    register_collision(obj_a, type_a, nullptr, true, type_b, handling);
+}
+
+// ObjectRange(obj, range1[, range2]): collision bounds. Box uses width=range1,
+// height=range2; circle uses diameter=range1. An omitted/≈0 range2 mirrors range1.
+extern "C" void cb_rt_object_range(CbObject* o, double range1) {
+    set_object_range(o, range1, 0.0);
+}
+extern "C" void cb_rt_object_range3(CbObject* o, double range1, double range2) {
+    set_object_range(o, range1, range2);
+}
+
+// ResetObjectCollision(obj): clear this frame's recorded collisions AND skip the
+// object for the current tick (checkCollisions=false until the next tick resets it).
+extern "C" void cb_rt_reset_object_collision(CbObject* o) {
+    if (!o) return;
+    o->checkCollisions = false;
+    o->collisions.clear();
+}
+
+// ClearCollisions(): remove every registered check.
+extern "C" void cb_rt_clear_collisions(void) { collision_checks.clear(); }
+
+// CountCollisions(obj): number of collisions recorded for the object this frame.
+extern "C" int32_t cb_rt_count_collisions(const CbObject* o) {
+    return o ? (int32_t)o->collisions.size() : 0;
+}
+
+// GetCollision(obj, index): the other object of the 1-based-indexed collision, or
+// Null (out of range, or a map-wall hit — a Map is not an Object).
+extern "C" CbObject* cb_rt_get_collision(const CbObject* o, int32_t index) {
+    if (!o || index < 1 || (std::size_t)index > o->collisions.size()) return nullptr;
+    return o->collisions[(std::size_t)index - 1].other;
+}
+
+extern "C" double cb_rt_collision_x(const CbObject* o, int32_t index) {
+    if (!o || index < 1 || (std::size_t)index > o->collisions.size()) return 0.0;
+    return o->collisions[(std::size_t)index - 1].x;
+}
+extern "C" double cb_rt_collision_y(const CbObject* o, int32_t index) {
+    if (!o || index < 1 || (std::size_t)index > o->collisions.size()) return 0.0;
+    return o->collisions[(std::size_t)index - 1].y;
+}
+extern "C" double cb_rt_collision_angle(const CbObject* o, int32_t index) {
+    if (!o || index < 1 || (std::size_t)index > o->collisions.size()) return 0.0;
+    return o->collisions[(std::size_t)index - 1].angle;
+}
+
+// ObjectsOverlap(a, b[, type]): one-shot overlap test (default box). type 1=box,
+// 2=circle, 3=pixel (not implemented → 0).
+extern "C" int32_t cb_rt_objects_overlap(const CbObject* a, const CbObject* b) {
+    return objects_overlap_impl(a, b, 1);
+}
+extern "C" int32_t cb_rt_objects_overlap3(const CbObject* a, const CbObject* b,
+                                          int32_t type) {
+    return objects_overlap_impl(a, b, type);
+}
+
+// Re-test every registered collision check (one update tick). Object collision
+// lists are wiped per-object by the update tick before this runs; here we only
+// append contacts and apply stop/slide position corrections. Glue for the Phase-5
+// game loop (cb_objects_update_all); see cb_object.h.
+extern "C" void cb_run_collision_checks(void) {
+    for (CbCollisionCheck& c : collision_checks) {
+        CbObject* a = c.a;
+        if (!a || !a->checkCollisions || !a->visible) continue;
+        if (!c.bIsMap && (!c.b || !c.b->visible)) continue;
+        if (c.typeA == 1) {
+            if (c.bIsMap) rect_map_test(c);
+            else box_box_test(c);  // typeB is Box (guaranteed by register_collision)
+        } else if (c.typeA == 2) {
+            if (c.bIsMap) circle_map_test(c);
+            else circle_circle_test(c);  // typeB is Circle
+        }
+    }
 }
 
 // ─── Render orchestrator (glue for cb_gfx.cpp; see cb_object.h) ──────────

@@ -294,6 +294,16 @@ fn runtime_object_fd036() {
 }
 
 #[test]
+fn runtime_collision_fd036() {
+    // ObjectsOverlap (box/circle/pixel-stub/invalid-type), the 1-based collision
+    // query surface, and SetupCollision registration (object-object + the type-4
+    // Map overload). Deterministic state, no display. The persistent per-tick
+    // collision path is covered by runtime_gameloop_fd036 (Phase 5c); the
+    // resolution geometry by runtime/tests/test_collision.cpp.
+    run_graphics("runtime_collision_fd036");
+}
+
+#[test]
 fn runtime_text_fd018() {
     run_graphics("runtime_text_fd018");
 }

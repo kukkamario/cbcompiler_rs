@@ -22,6 +22,14 @@ void cb_map_render_layer(int slot);
 // orchestrator's early-out checks this alongside the object draw chains.
 int cb_map_active(void);
 
+// FD-036 Phase 5: the active map's parsed grid (or null when none), so the
+// object subsystem can run map collision (type 4) and ObjectSight against the
+// collision layer (layer 2). CbMapData is the Allegro-free grid defined in
+// cb_map_data.h; callers include that header for the full definition. The
+// pointer is owned by cb_map.cpp and invalidated by the next LoadMap/MakeMap.
+struct CbMapData;
+const struct CbMapData* cb_map_active_data(void);
+
 #ifdef __cplusplus
 }
 #endif

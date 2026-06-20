@@ -274,6 +274,14 @@ extern "C" void cb_rt_paint_object_map(CbMap* map_ignored, const CbImage* img) {
 
 extern "C" int cb_map_active(void) { return active_map != nullptr ? 1 : 0; }
 
+// FD-036 Phase 5: expose the active map's parsed grid for object map-collision
+// (type 4) and ObjectSight. Null when no map is loaded — callers guard it (the
+// faithful no-op, vs cbEnchanted's null-deref). The CbMapData carries the tile
+// dims, the layer-2 collision grid, and the map's world position/centring.
+extern "C" const CbMapData* cb_map_active_data(void) {
+    return active_map ? &active_map->data : nullptr;
+}
+
 // Draws one layer under the world transform the caller (cb_objects_render_all)
 // has already set — no transform bracket here, so the map composites in the
 // object draw order (background before objects, foreground after).

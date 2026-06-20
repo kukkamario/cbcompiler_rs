@@ -492,6 +492,23 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("initobjectlist",        cb_rt_init_object_list),
     CB_FN("nextobject",            cb_rt_next_object),
 
+    // Collision (FD-036 Phase 5). SetupCollision is two type-distinct overloads
+    // (object-object vs the type-4 Map form); ObjectRange/ObjectsOverlap have an
+    // optional-arg arity overload. GetCollision returns an `Object` handle.
+    CB_FN("setupcollision",        cb_rt_setup_collision),
+    CB_FN("setupcollision",        cb_rt_setup_collision_map),
+    CB_FN("objectrange",           cb_rt_object_range),
+    CB_FN("objectrange",           cb_rt_object_range3),
+    CB_FN("resetobjectcollision",  cb_rt_reset_object_collision),
+    CB_FN("clearcollisions",       cb_rt_clear_collisions),
+    CB_FN("countcollisions",       cb_rt_count_collisions),
+    CB_FN("getcollision",          cb_rt_get_collision),
+    CB_FN("collisionx",            cb_rt_collision_x),
+    CB_FN("collisiony",            cb_rt_collision_y),
+    CB_FN("collisionangle",        cb_rt_collision_angle),
+    CB_FN("objectsoverlap",        cb_rt_objects_overlap),
+    CB_FN("objectsoverlap",        cb_rt_objects_overlap3),
+
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),
     CB_FN("centertext",       cb_rt_center_text),

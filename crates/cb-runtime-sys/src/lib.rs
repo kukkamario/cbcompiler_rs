@@ -815,6 +815,59 @@ mod tests {
             assert_eq!(next_object.params.len(), 0);
             assert_eq!(next_object.return_ty, object_ty);
             assert_eq!(by_symbol["cb_rt_init_object_list"].params.len(), 0);
+
+            // Collision (FD-036 Phase 5). SetupCollision is two type-distinct
+            // overloads — object-object (param[2] Object) and the type-4 Map form
+            // (param[2] Map) — like PaintObject. ObjectRange/ObjectsOverlap have an
+            // optional-arg arity overload. GetCollision returns an Object handle.
+            let setup = by_symbol["cb_rt_setup_collision"];
+            assert_eq!(setup.name, "setupcollision");
+            assert_eq!(setup.params.len(), 5);
+            assert_eq!(setup.params[0].ty, object_ty);
+            assert_eq!(setup.params[1].ty, IrType::Int);
+            assert_eq!(setup.params[2].ty, object_ty);
+            assert_eq!(setup.return_ty, IrType::Void);
+            let setup_map = by_symbol["cb_rt_setup_collision_map"];
+            assert_eq!(setup_map.name, "setupcollision");
+            assert_eq!(setup_map.params[2].ty, map_ty2);
+
+            let range = by_symbol["cb_rt_object_range"];
+            assert_eq!(range.name, "objectrange");
+            assert_eq!(range.params.len(), 2);
+            assert_eq!(range.params[0].ty, object_ty);
+            assert_eq!(by_symbol["cb_rt_object_range3"].name, "objectrange");
+            assert_eq!(by_symbol["cb_rt_object_range3"].params.len(), 3);
+
+            assert_eq!(
+                by_symbol["cb_rt_reset_object_collision"].name,
+                "resetobjectcollision"
+            );
+            assert_eq!(by_symbol["cb_rt_clear_collisions"].params.len(), 0);
+
+            let count = by_symbol["cb_rt_count_collisions"];
+            assert_eq!(count.name, "countcollisions");
+            assert_eq!(count.params[0].ty, object_ty);
+            assert_eq!(count.return_ty, IrType::Int);
+
+            // GetCollision: (Object, Int) -> Object handle (Null at miss).
+            let get_col = by_symbol["cb_rt_get_collision"];
+            assert_eq!(get_col.name, "getcollision");
+            assert_eq!(get_col.params.len(), 2);
+            assert_eq!(get_col.params[0].ty, object_ty);
+            assert_eq!(get_col.params[1].ty, IrType::Int);
+            assert_eq!(get_col.return_ty, object_ty);
+
+            assert_eq!(by_symbol["cb_rt_collision_x"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_collision_y"].return_ty, IrType::Float);
+            assert_eq!(by_symbol["cb_rt_collision_angle"].return_ty, IrType::Float);
+
+            let overlap = by_symbol["cb_rt_objects_overlap"];
+            assert_eq!(overlap.name, "objectsoverlap");
+            assert_eq!(overlap.params.len(), 2);
+            assert_eq!(overlap.params[0].ty, object_ty);
+            assert_eq!(overlap.return_ty, IrType::Int);
+            assert_eq!(by_symbol["cb_rt_objects_overlap3"].name, "objectsoverlap");
+            assert_eq!(by_symbol["cb_rt_objects_overlap3"].params.len(), 3);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

@@ -18,6 +18,12 @@ extern "C" {
 
 void cb_objects_render_all(void);
 
+// FD-036 Phase 5: re-test every registered SetupCollision check (one update
+// tick). Called by the game-loop update half (cb_objects_update_all, Phase 5c);
+// declared here so that future caller lives in this TU but the symbol has
+// external linkage (no unused-function warning while only collision lands).
+void cb_run_collision_checks(void);
+
 #ifdef __cplusplus
 }
 #endif

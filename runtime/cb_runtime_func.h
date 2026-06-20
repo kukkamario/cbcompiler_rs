@@ -319,6 +319,26 @@ void      cb_rt_object_life_set(CbObject* o, int32_t frames);
 /* Enumeration (single shared cursor; NextObject returns Null at end) */
 void      cb_rt_init_object_list(void);
 CbObject* cb_rt_next_object(void);
+/* Collision (FD-036 Phase 5). SetupCollision registers a PERSISTENT check
+   (re-tested every update tick, not one-shot); the type-4 map overload takes a
+   Map handle (ignored — single active map) only to disambiguate from the object-
+   object form. ObjectRange's range2 is optional (its own arity overload).
+   GetCollision returns an Object handle (Null out of range, or for a map-wall
+   hit — a Map is not an Object); indices are 1-based. ObjectsOverlap is a one-
+   shot test with an optional type (default box). */
+void      cb_rt_setup_collision(CbObject* obj_a, int32_t type_a, CbObject* obj_b, int32_t type_b, int32_t handling);
+void      cb_rt_setup_collision_map(CbObject* obj_a, int32_t type_a, CbMap* map, int32_t type_b, int32_t handling);
+void      cb_rt_object_range(CbObject* o, double range1);
+void      cb_rt_object_range3(CbObject* o, double range1, double range2);
+void      cb_rt_reset_object_collision(CbObject* o);
+void      cb_rt_clear_collisions(void);
+int32_t   cb_rt_count_collisions(const CbObject* o);
+CbObject* cb_rt_get_collision(const CbObject* o, int32_t index);
+double    cb_rt_collision_x(const CbObject* o, int32_t index);
+double    cb_rt_collision_y(const CbObject* o, int32_t index);
+double    cb_rt_collision_angle(const CbObject* o, int32_t index);
+int32_t   cb_rt_objects_overlap(const CbObject* a, const CbObject* b);
+int32_t   cb_rt_objects_overlap3(const CbObject* a, const CbObject* b, int32_t type);
 
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/
