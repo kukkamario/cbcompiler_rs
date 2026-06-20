@@ -199,6 +199,10 @@ impl SymbolTable {
                                 | DeclKind::Label
                                 | DeclKind::RuntimeFn { .. }
                                 | DeclKind::OverloadSet { .. }
+                                // Runtime opaque types (e.g. `Object`) are
+                                // global like runtime functions, so a function
+                                // body using `As Object` resolves them too.
+                                | DeclKind::RuntimeTypeDef
                         );
                     if visible {
                         return Some(decl);
