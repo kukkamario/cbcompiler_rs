@@ -5,7 +5,7 @@
 // native C++ unit tests. Header-only (inline) so this Allegro-free logic can be
 // exercised without linking cb_gfx.cpp or Allegro. (FD-022)
 
-// AABB overlap helper (cbEnchanted's RectRectTest: box = left=x, right=x+w,
+// AABB overlap helper (CoolBasic's RectRectTest: box = left=x, right=x+w,
 // top=y-h, bottom=y; epsilon keeps shared edges from counting).
 inline bool rect_overlap(double x1, double y1, double w1, double h1,
                          double x2, double y2, double w2, double h2) {

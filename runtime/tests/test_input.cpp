@@ -1,9 +1,9 @@
 // FD-022: unit tests for the input edge-state machine. Drives the Allegro-free
 // state functions in cb_input.cpp with synthetic ALLEGRO_EVENTs — no display,
-// no al_init. cb_input_frame_begin/handle_event read event fields and mutate
+// no al_init. cb::input::frame_begin/handle_event read event fields and mutate
 // file-static state only, so this runs fully headless.
 
-#include "cb_input.h"  // cb_input_frame_begin, cb_input_handle_event, ALLEGRO_EVENT
+#include "cb_input.h"  // cb::input::frame_begin, cb::input::handle_event, ALLEGRO_EVENT
 
 #include <gtest/gtest.h>
 
@@ -59,61 +59,61 @@ ALLEGRO_EVENT make_mouse_axes_event(int dx, int dy, int dz) {
 // of release. (State is process-global, so reset at the top of every test.)
 TEST(Input, KeyPressHoldRelease) {
     cb_rt_clear_keys();      // zero key state
-    cb_input_frame_begin();  // clears the ignore flag set by clear_keys
+    cb::input::frame_begin();  // clears the ignore flag set by clear_keys
 
     ALLEGRO_EVENT down = make_key_event(ALLEGRO_EVENT_KEY_DOWN, ALLEGRO_KEY_A);
-    cb_input_handle_event(&down);
+    cb::input::handle_event(&down);
     EXPECT_EQ(cb_rt_key_hit(CB_SCAN_A), 1);
     EXPECT_EQ(cb_rt_key_down(CB_SCAN_A), 1);
     EXPECT_EQ(cb_rt_key_up(CB_SCAN_A), 0);
 
     // Next frame, still held: Down stays, Hit clears.
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     EXPECT_EQ(cb_rt_key_hit(CB_SCAN_A), 0);
     EXPECT_EQ(cb_rt_key_down(CB_SCAN_A), 1);
     EXPECT_EQ(cb_rt_key_up(CB_SCAN_A), 0);
 
     // Release this frame: Up fires once, Down clears.
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     ALLEGRO_EVENT up = make_key_event(ALLEGRO_EVENT_KEY_UP, ALLEGRO_KEY_A);
-    cb_input_handle_event(&up);
+    cb::input::handle_event(&up);
     EXPECT_EQ(cb_rt_key_hit(CB_SCAN_A), 0);
     EXPECT_EQ(cb_rt_key_down(CB_SCAN_A), 0);
     EXPECT_EQ(cb_rt_key_up(CB_SCAN_A), 1);
 
     // Following frame: Up clears (lasts exactly one frame).
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     EXPECT_EQ(cb_rt_key_up(CB_SCAN_A), 0);
 }
 
 // Auto-repeat KEY_DOWN while already held must not re-trigger Hit.
 TEST(Input, KeyRepeatDoesNotRetriggerHit) {
     cb_rt_clear_keys();
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     ALLEGRO_EVENT down = make_key_event(ALLEGRO_EVENT_KEY_DOWN, ALLEGRO_KEY_A);
-    cb_input_handle_event(&down);
+    cb::input::handle_event(&down);
     EXPECT_EQ(cb_rt_key_hit(CB_SCAN_A), 1);
 
-    cb_input_frame_begin();
-    cb_input_handle_event(&down);  // repeat: already down, no transition
+    cb::input::frame_begin();
+    cb::input::handle_event(&down);  // repeat: already down, no transition
     EXPECT_EQ(cb_rt_key_hit(CB_SCAN_A), 0);
     EXPECT_EQ(cb_rt_key_down(CB_SCAN_A), 1);
 }
 
 TEST(Input, MouseButtonPressHoldRelease) {
     cb_rt_clear_mouse();
-    cb_input_frame_begin();
+    cb::input::frame_begin();
 
     ALLEGRO_EVENT down =
         make_mouse_button_event(ALLEGRO_EVENT_MOUSE_BUTTON_DOWN, 1);
-    cb_input_handle_event(&down);
+    cb::input::handle_event(&down);
     EXPECT_EQ(cb_rt_mouse_hit(1), 1);
     EXPECT_EQ(cb_rt_mouse_down(1), 1);
     EXPECT_EQ(cb_rt_mouse_up(1), 0);
 
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     ALLEGRO_EVENT up = make_mouse_button_event(ALLEGRO_EVENT_MOUSE_BUTTON_UP, 1);
-    cb_input_handle_event(&up);
+    cb::input::handle_event(&up);
     EXPECT_EQ(cb_rt_mouse_hit(1), 0);
     EXPECT_EQ(cb_rt_mouse_down(1), 0);
     EXPECT_EQ(cb_rt_mouse_up(1), 1);
@@ -121,15 +121,15 @@ TEST(Input, MouseButtonPressHoldRelease) {
 
 // Movement deltas accumulate within a frame and zero at the next frame begin.
 TEST(Input, MouseMoveAccumulatesPerFrame) {
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     ALLEGRO_EVENT a = make_mouse_axes_event(3, -2, 0);
     ALLEGRO_EVENT b = make_mouse_axes_event(4, 1, 0);
-    cb_input_handle_event(&a);
-    cb_input_handle_event(&b);
+    cb::input::handle_event(&a);
+    cb::input::handle_event(&b);
     EXPECT_EQ(cb_rt_mouse_move_x(), 7);
     EXPECT_EQ(cb_rt_mouse_move_y(), -1);
 
-    cb_input_frame_begin();
+    cb::input::frame_begin();
     EXPECT_EQ(cb_rt_mouse_move_x(), 0);
     EXPECT_EQ(cb_rt_mouse_move_y(), 0);
 }

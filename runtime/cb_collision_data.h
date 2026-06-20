@@ -10,23 +10,22 @@
 // entry points around these helpers; everything that does NOT touch a bitmap or
 // the tilemap grid lives here.
 //
-// Ported from cbEnchanted's CollisionCheck (src/collisioncheck.cpp) + the
-// CBObject ray/pick helpers (src/cbobject.cpp). The Rust port may pick its own
-// in-memory layout; only the observable behaviour must match. World coordinates
-// are Y-up (the camera flips Y at draw time); angles are degrees.
+// The Rust port may pick its own in-memory layout; only the observable
+// behaviour must match CoolBasic. World coordinates are Y-up (the camera flips Y
+// at draw time); angles are degrees.
 //
 // Boundary rule: anything touching an ALLEGRO_BITMAP or the active tilemap grid
 // stays out of this header (the Rect/CircleMap tile loops live in cb_object.cpp).
 
-#include "cb_geom.h"  // rect_overlap == cbEnchanted's static RectRectTest
+#include "cb_geom.h"  // rect_overlap == CoolBasic's RectRectTest
 
 #include <cmath>
 #include <cstdint>
 
 inline constexpr double cb_collision_pi = 3.14159265358979323846;
 
-// ─── Contact-angle formula (collisioncheck.cpp:198) ─────────────────────
-// cbEnchanted maps a contact normal's atan2 result (rad in [-π, π]) to degrees
+// ─── Contact-angle formula ──────────────────────────────────────────────
+// CoolBasic maps a contact normal's atan2 result (rad in [-π, π]) to degrees
 // with `((rad + π) / π) * 180` — note the `/π`, NOT `/2π`. Programs read these
 // angles, so reproduce it verbatim. Range: [0, 360].
 inline double cb_collision_angle_deg(double rad) {
@@ -34,7 +33,7 @@ inline double cb_collision_angle_deg(double rad) {
 }
 
 // ─── Overlap predicates ─────────────────────────────────────────────────
-// CircleCircleTest (collisioncheck.cpp:825): squared-distance < squared-sum.
+// CircleCircleTest: squared-distance < squared-sum.
 inline bool cb_circle_circle_overlap(double x1, double y1, double r1, double x2,
                                      double y2, double r2) {
     double dx = x2 - x1;
@@ -43,9 +42,9 @@ inline bool cb_circle_circle_overlap(double x1, double y1, double r1, double x2,
     return dx * dx + dy * dy < min_dist * min_dist;
 }
 
-// CircleRectTest (collisioncheck.cpp:797, http://stackoverflow.com/a/402010).
+// CircleRectTest (algorithm: http://stackoverflow.com/a/402010).
 // The rect is given by its top-left corner (rectX, rectY) + size; the circle by
-// its centre + radius. Epsilon matches cbEnchanted so shared edges agree.
+// its centre + radius. Epsilon matches CoolBasic so shared edges agree.
 inline bool cb_circle_rect_overlap(double circle_x, double circle_y,
                                    double circle_r, double rect_x, double rect_y,
                                    double rect_w, double rect_h) {
@@ -89,11 +88,11 @@ struct CbCircleResolve {
     CbContact hit;
 };
 
-// ─── Box-box resolution (collisioncheck.cpp:173-245) ────────────────────
+// ─── Box-box resolution ─────────────────────────────────────────────────
 // Object 1 (objX/objY, objW=range1, objH=range2) vs collider (cObjX/cObjY,
 // cObjW/cObjH). The X-pass tests against the stored `safeY`, the Y-pass against
-// the freshly-resolved objY — faithful to cbEnchanted's separate-axis pushout.
-// The "hacky fix" averages the half-sums into the overlap-test extents.
+// the freshly-resolved objY — faithful to CoolBasic's separate-axis pushout,
+// which averages the half-sums into the overlap-test extents.
 inline CbBoxResolve cb_box_box_resolve(double objX, double objY, double safeY,
                                        double objW, double objH, double cObjX,
                                        double cObjY, double cObjW, double cObjH) {
@@ -130,7 +129,7 @@ inline CbBoxResolve cb_box_box_resolve(double objX, double objY, double safeY,
     return out;
 }
 
-// ─── Circle-circle resolution (collisioncheck.cpp:248-297) ──────────────
+// ─── Circle-circle resolution ───────────────────────────────────────────
 // Radii `r1`/`r2` are already halved (range1/2). Stop measures the push-back
 // angle from the last safe position (straight push-back); Slide measures it from
 // the current position (tangential slide). Both push obj1 to r1+r2+0.5 from obj2;
@@ -157,7 +156,7 @@ inline CbCircleResolve cb_circle_circle_resolve(double objX, double objY,
     return out;
 }
 
-// ─── Picking raycasts (cbobject.cpp:602-770) ────────────────────────────
+// ─── Picking raycasts ───────────────────────────────────────────────────
 // A ray is cast from (startX, startY) along `angleDeg` and tested against a
 // target shape centred on (objX, objY). On a hit the contact point is written to
 // hitX/hitY and the function returns true. ObjectPick keeps the nearest hit.
@@ -212,7 +211,7 @@ inline bool cb_box_ray_cast(double startX, double startY, double angleDeg, doubl
 
 // Circle target: radius range1/2. A ray starting inside the circle does NOT pick
 // it (returns false). Solves the ray/circle quadratic with the ray length 1e7
-// (cbobject.cpp:612, http://stackoverflow.com/a/1084899).
+// (algorithm: http://stackoverflow.com/a/1084899).
 inline bool cb_circle_ray_cast(double startX, double startY, double angleDeg,
                                double circleX, double circleY, double range1,
                                double& hitX, double& hitY) {
@@ -253,7 +252,7 @@ inline bool cb_circle_ray_cast(double startX, double startY, double angleDeg,
     return false;
 }
 
-// ─── Point-in-shape pick tests (cbobject.cpp:776, CameraPick) ────────────
+// ─── Point-in-shape pick tests (CameraPick) ─────────────────────────────
 // Whether world point (x, y) lies inside the object's pick shape centred on
 // (px, py). Box uses range1×range2; circle uses range1/2 as the radius.
 inline bool cb_can_pick_box(double px, double py, double range1, double range2,

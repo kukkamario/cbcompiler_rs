@@ -323,9 +323,9 @@ static void do_draw_screen(bool clear_after) {
     // already drew this frame. Ensure the backbuffer is the target first (a stray
     // DrawToImage must not redirect the pass).
     al_set_target_backbuffer(g_display);
-    if (!game_updated) cb_objects_update_all();
+    if (!game_updated) cb::object::update_all();
     cb::camera::update_follow();
-    if (!game_drawn) cb_objects_render_all();
+    if (!game_drawn) cb::object::render_all();
     game_updated = false;
     game_drawn   = false;
 
@@ -346,11 +346,11 @@ static void do_draw_screen(bool clear_after) {
     // Advance the input state machine for this frame (FD-013 Batch 5): clear
     // the per-key/button "changed" bits and zero movement deltas, then route
     // every queued event into the input module before processing window events.
-    cb_input_frame_begin();
+    cb::input::frame_begin();
 
     ALLEGRO_EVENT ev;
     while (al_get_next_event(g_event_queue, &ev)) {
-        cb_input_handle_event(&ev);
+        cb::input::handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
             // FD-015: route window-close through the trap channel for a clean
             // Halt/Ok(0) termination instead of exit(0). Tear down our own
@@ -394,7 +394,7 @@ extern "C" void cb_rt_drawscreen_args(int32_t cls, int32_t vsync) {
 // the next DrawScreen won't update again. The game loop is built-in — there are
 // NO user-registered update/draw callbacks.
 extern "C" void cb_rt_update_game(void) {
-    cb_objects_update_all();
+    cb::object::update_all();
     game_updated = true;
 }
 
@@ -403,9 +403,9 @@ extern "C" void cb_rt_update_game(void) {
 // display.
 extern "C" void cb_rt_draw_game(void) {
     if (!g_display) return;
-    if (!game_updated) cb_objects_update_all();
+    if (!game_updated) cb::object::update_all();
     al_set_target_backbuffer(g_display);
-    cb_objects_render_all();
+    cb::object::render_all();
     game_drawn   = true;
     game_updated = true;
 }

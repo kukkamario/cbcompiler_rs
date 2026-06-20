@@ -17,7 +17,7 @@
 #include "cb_camera.h"
 #include "cb_camera_math.h"
 #include "cb_gfx.h"           // cb::gfx::design_size / window_size
-#include "cb_object.h"        // cb_object_pick_at (CameraPick funnel)
+#include "cb_object.h"        // cb::object::pick_at (CameraPick funnel)
 #include "cb_runtime_func.h"  // CbObject + cb_rt_object_x/y/angle accessors
 
 #include <allegro5/allegro.h>
@@ -186,7 +186,7 @@ extern "C" void cb_rt_clone_camera_orientation(const CbObject* obj) {
 // then the point-in-shape test). Sets PickedObject.
 extern "C" void cb_rt_camera_pick(double sx, double sy) {
     screen_to_world(&sx, &sy);
-    cb_object_pick_at(sx, sy);
+    cb::object::pick_at(sx, sy);
 }
 
 // ─── DrawToWorld ───────────────────────────────────────────────────────

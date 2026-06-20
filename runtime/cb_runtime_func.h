@@ -215,7 +215,7 @@ int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
 /* Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
    No new opaque type — camera state is process-global. RotateCamera/TurnCamera
    take two angle args (logical degrees, render degrees) that map to two
-   independent fields (faithful to cbEnchanted's desyncable angles). DrawToWorld
+   independent fields (CoolBasic's desyncable logical/render angles). DrawToWorld
    toggles world-space rendering of user draws; MouseWX/WY convert the mouse to
    world coordinates. */
 void    cb_rt_position_camera(double x, double y, double zoom);
@@ -363,8 +363,8 @@ int32_t   cb_rt_objects_overlap(const CbObject* a, const CbObject* b);
 int32_t   cb_rt_objects_overlap3(const CbObject* a, const CbObject* b, int32_t type);
 /* Picking & line of sight (FD-036 Phase 5). ObjectPick raycasts from the picker
    along its facing; PickedObject returns the nearest hit (Null if none),
-   PickedX/Y/Angle its contact (PickedAngle in degrees from the picked point —
-   bug-fixed vs cbEnchanted's stale radians). PixelPick is a registered no-op stub
+   PickedX/Y/Angle its contact (PickedAngle in degrees from the picked point,
+   fixing a stale-radians bug). PixelPick is a registered no-op stub
    (1- and 2-arg forms). ObjectSight returns 1 when no map wall blocks the line.
    ScreenPositionObject moves an object under a screen coordinate. */
 void      cb_rt_object_pickable(CbObject* o, int32_t style);
@@ -397,12 +397,12 @@ void     cb_rt_delete_font(CbFont* font);
 int32_t  cb_rt_text_width(const CbString* s);
 int32_t  cb_rt_text_height(const CbString* s);
 
-/* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the legacy CB
+/* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the classic CB
    DirectInput-style numbering (1=Esc, 16=Q, 30=A, 200=Up, …). Edge queries
    (KeyHit/KeyUp, MouseHit/MouseUp) and movement deltas are relative to the
    frame boundary, which DrawScreen advances; with no display open every query
    returns 0. Mouse buttons: 1=left, 2=right, 3=middle. EscapeKey is a pure
-   query (no auto-exit). The cb_input_frame_begin/cb_input_handle_event hooks
+   query (no auto-exit). The cb::input::frame_begin/handle_event hooks
    that drive this state are internal (see cb_input.h), not catalog functions. */
 int32_t cb_rt_key_down(int32_t scancode);
 int32_t cb_rt_key_up(int32_t scancode);

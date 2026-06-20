@@ -1,8 +1,7 @@
 // CoolBasic sprite-Object runtime (FD-036 Phase 4).
 //
 // The 2D sprite Object: a world position, an angle, an optional animated sprite
-// sheet, custom data slots, lifetime, and draw-order membership. Ported from
-// cbEnchanted's CBObject + ObjectInterface (src/cbobject.cpp, objectinterface.cpp).
+// sheet, custom data slots, lifetime, and draw-order membership.
 // The pure math — heading, angle/distance, frame slice, rotated bounding box,
 // turn wrap, animation/life ticks — lives in the Allegro-free cb_object_data.h so
 // it unit-tests without a display; this TU adds the live registry, the bitmaps,
@@ -45,9 +44,9 @@
 // ─── Shared texture holder ──────────────────────────────────────────────
 //
 // One ALLEGRO_BITMAP, reference-counted across an object and its clones. The
-// destructor frees the bitmap when the last owner drops it — safer than
-// cbEnchanted's raw `copied` flag (which dangles if the original is deleted
-// first). Objects render by dereferencing tex->bmp live; never cache the pointer.
+// destructor frees the bitmap when the last owner drops it — safer than a raw
+// `copied` flag (which would dangle if the original is deleted first). Objects
+// render by dereferencing tex->bmp live; never cache the pointer.
 struct CbTexture {
     ALLEGRO_BITMAP* bmp = nullptr;       // masked — what render_object draws
     ALLEGRO_BITMAP* pristine = nullptr;  // unmasked original — re-key source for MaskObject
@@ -57,8 +56,8 @@ struct CbTexture {
     }
 };
 
-// Default visibility for newly created objects (cbEnchanted's static
-// defaultVisible; DefaultVisible sets it, the ctor reads it).
+// Default visibility for newly created objects (CoolBasic's DefaultVisible
+// global; DefaultVisible sets it, the ctor reads it).
 static bool g_default_visible = true;
 
 // ─── Opaque Object handle ───────────────────────────────────────────────
@@ -99,7 +98,7 @@ struct CbObject {
     uint32_t life = 0;
     int32_t animStartFrame = 0, animEndingFrame = 0;
     double animSpeed = 0.0;
-    bool animLooping = false;              // cbEnchanted leaves uninit; default false
+    bool animLooping = false;              // default false (CoolBasic leaves it uninit)
     bool playing = false;
     bool isFloor;                          // ctor arg
     bool painted = false;
@@ -108,7 +107,7 @@ struct CbObject {
     // range1/range2 = collision bounds (box: width,height; circle: diameter in
     // range1). Default 0×0; LoadObject/LoadAnimObject/CloneObject set them to the
     // image size, MakeObject/MakeObjectFloor leave them 0 (so a made object's
-    // collisions are inert until ObjectRange is called — faithful to cbEnchanted).
+    // collisions are inert until ObjectRange is called — faithful to CoolBasic).
     // checkCollisions gates this object's checks for the current tick
     // (ResetObjectCollision clears it; the update tick resets it to true).
     // `collisions` is this frame's recorded contacts (1-based GetCollision/
@@ -126,6 +125,8 @@ struct CbObject {
         : visible(g_default_visible), maskColor(al_map_rgb(0, 0, 0)), isFloor(floor) {}
 };
 
+namespace cb::object {
+
 namespace {
 
 // The live registry (FD-036 no-id design). `live_objects` is creation order (the
@@ -137,13 +138,13 @@ std::vector<CbObject*> floor_objects;
 std::vector<CbObject*> regular_objects;
 
 // Shared stateful enumeration cursor (InitObjectList resets it; NextObject
-// advances). Non-reentrant, exactly like cbEnchanted's single iterator.
+// advances). Non-reentrant — a single shared iterator, as in CoolBasic.
 std::size_t enum_index = 0;
 
 // ─── Collision-check registry (FD-036 Phase 5) ──────────────────────────
 //
-// SetupCollision is a *persistent* registration (cbEnchanted's collisionChecks
-// vector): each entry is re-tested every update tick, not one-shot. Cleared only
+// SetupCollision is a *persistent* registration (CoolBasic's collision-check
+// list): each entry is re-tested every update tick, not one-shot. Cleared only
 // by ClearCollisions or when an object is deleted. `a` is the colliding object;
 // `b` is the target object (or null when `bIsMap`, i.e. the active tilemap is the
 // target). typeA/typeB: 1=box, 2=circle, 4=map(B only). handling: 0=report,
@@ -164,7 +165,7 @@ std::vector<CbCollisionCheck> collision_checks;
 //
 // ObjectPickable adds/removes objects here; ObjectPick raycasts the picker's
 // facing ray against each and keeps the nearest hit, recording it for
-// PickedObject/X/Y/Angle. cbEnchanted's single lastPicked* slots — non-reentrant.
+// PickedObject/X/Y/Angle. A single set of last-pick slots — non-reentrant.
 std::vector<CbObject*> pickable_objects;
 CbObject* last_picked = nullptr;
 double last_picked_x = 0.0;
@@ -226,10 +227,10 @@ ALLEGRO_BITMAP* load_object_bitmap(const std::string& path) {
 }
 
 // Installs `pristine` as the object's texture: keeps it as the unmasked original
-// and derives the drawn bitmap as a masked clone keyed by o->maskColor. Mirrors
-// cbEnchanted's renderTarget (pristine) + texture (masked) pair. Takes ownership
-// of `pristine`. On clone failure the object still holds the pristine (so it is
-// not leaked and a later MaskObject can recover).
+// and derives the drawn bitmap as a masked clone keyed by o->maskColor — the
+// pristine + masked bitmap pair. Takes ownership of `pristine`. On clone failure
+// the object still holds the pristine (so it is not leaked and a later
+// MaskObject can recover).
 void set_object_texture(CbObject* o, ALLEGRO_BITMAP* pristine) {
     o->tex = std::make_shared<CbTexture>();
     o->tex->pristine = pristine;
@@ -250,8 +251,8 @@ void erase_from(std::vector<CbObject*>& v, CbObject* o) {
     v.erase(std::remove(v.begin(), v.end(), o), v.end());
 }
 
-// CBObject::startPlaying (cbobject.cpp:219). Resets currentFrame to startf for a
-// fresh one-shot, or when a continuous play falls outside the new range.
+// startPlaying: resets currentFrame to startf for a fresh one-shot, or when a
+// continuous play falls outside the new range.
 void start_playing(CbObject* o, int32_t startf, int32_t endf, double spd,
                    bool continuous) {
     if ((!continuous && !o->playing) ||
@@ -283,7 +284,7 @@ void play_impl(CbObject* o, int32_t startf, int32_t endf, double speed,
     o->animLooping = false;
 }
 
-// LoopObject body: always loops; no -1 stop sentinel (matches cbEnchanted).
+// LoopObject body: always loops; no -1 stop sentinel (matches CoolBasic).
 void loop_impl(CbObject* o, int32_t startf, int32_t endf, double speed,
                bool continuous) {
     if (!o) return;
@@ -297,9 +298,9 @@ void loop_impl(CbObject* o, int32_t startf, int32_t endf, double speed,
 // Rotation is -(angle/180)*π about the bitmap/frame centre; ghost alpha folds in
 // via a white tint with alpha = alphaBlend.
 void render_floor(const CbObject* o, ALLEGRO_BITMAP* bmp) {
-    // Tile the bitmap across the camera's visible draw area (cbobject.cpp:347).
+    // Tile the bitmap across the camera's visible draw area.
     // Visual-only; cannot be golden-asserted. Imageless floor (size 0) would spin
-    // the fill loops forever — guard it (cbEnchanted never reaches here unpainted).
+    // the fill loops forever — guard it (CoolBasic never reaches here unpainted).
     double sizeX = o->sizeX, sizeY = o->sizeY;
     if (sizeX <= 0.0 || sizeY <= 0.0) return;
 
@@ -313,8 +314,8 @@ void render_floor(const CbObject* o, ALLEGRO_BITMAP* bmp) {
     double areaLeft = camX - 0.5 * scrW;
     double areaRight = camX + 0.5 * scrW;
 
-    // cbEnchanted computes the fill in flipped-Y space, then drawBitmap's
-    // convertCoords flips Y again — so the final blit Y is -iterY.
+    // The fill is computed in flipped-Y space, then the draw's convertCoords
+    // flips Y again — so the final blit Y is -iterY.
     double x = o->posX;
     double y = -o->posY;
     if (x > areaLeft) {
@@ -402,14 +403,14 @@ extern "C" CbObject* cb_rt_load_object(const CbString* path) {
     return o;
 }
 
-// LoadObject(path, rotQuality): rotQuality is accepted but ignored (cbEnchanted).
+// LoadObject(path, rotQuality): rotQuality is accepted but ignored (as in CoolBasic).
 extern "C" CbObject* cb_rt_load_object_rq(const CbString* path, int32_t rot_quality) {
     (void)rot_quality;
     return cb_rt_load_object(path);
 }
 
 // LoadAnimObject(path, frameW, frameH, startFrame, frameCount): a sprite-sheet
-// object. Validates frame geometry like cbEnchanted (Null on bad dims / load).
+// object. Validates frame geometry like CoolBasic (Null on bad dims / load).
 extern "C" CbObject* cb_rt_load_anim_object(const CbString* path, int32_t frame_w,
                                             int32_t frame_h, int32_t start_frame,
                                             int32_t frame_count) {
@@ -464,7 +465,7 @@ extern "C" CbObject* cb_rt_make_object_floor(void) {
 }
 
 // CloneObject(obj): shares the texture (refcount++); position and angle reset to
-// 0; visibility forced true (faithful to cbEnchanted). Copies frame/anim metadata.
+// 0; visibility forced true (faithful to CoolBasic). Copies frame/anim metadata.
 extern "C" CbObject* cb_rt_clone_object(const CbObject* src) {
     if (!src) return nullptr;
     CbObject* o = new CbObject(src->isFloor);
@@ -481,9 +482,9 @@ extern "C" CbObject* cb_rt_clone_object(const CbObject* src) {
     o->painted = src->painted;
     o->sizeX = src->sizeX;
     o->sizeY = src->sizeY;
-    o->range1 = src->sizeX;  // clone range = source IMAGE size (cbobject.cpp:484)
+    o->range1 = src->sizeX;  // clone range = source IMAGE size (CoolBasic)
     o->range2 = src->sizeY;
-    o->visible = true;  // cbEnchanted forces visible=true on a clone
+    o->visible = true;  // CoolBasic forces visible=true on a clone
     // posX/posY/angle/currentFrame stay at constructor defaults (0) — NOT copied.
     register_object(o);
     return o;
@@ -499,7 +500,7 @@ extern "C" void cb_rt_delete_object(CbObject* o) {
     erase_from(pickable_objects, o);
     if (last_picked == o) last_picked = nullptr;
     // Drop any collision check that references the deleted object (else the next
-    // tick would test a dangling pointer). cbEnchanted does the same.
+    // tick would test a dangling pointer). CoolBasic does the same.
     collision_checks.erase(
         std::remove_if(collision_checks.begin(), collision_checks.end(),
                        [o](const CbCollisionCheck& c) { return c.a == o || c.b == o; }),
@@ -548,8 +549,8 @@ extern "C" void cb_rt_move_object_z(CbObject* o, double forward, double side, do
 }
 
 // MoveObject(obj, forward): 2-arg form — `side` defaults to 0. This is the
-// common CoolBasic idiom (`MoveObject obj, dist`); the original compiler fills
-// the omitted side/z with 0 (cbEnchanted always pops 4: z, side, fwrd, id).
+// common CoolBasic idiom (`MoveObject obj, dist`); the compiler fills the
+// omitted side/z with 0 (CoolBasic always pops 4: z, side, fwrd, id).
 extern "C" void cb_rt_move_object_fwd(CbObject* o, double forward) {
     cb_rt_move_object(o, forward, 0.0);
 }
@@ -684,7 +685,7 @@ extern "C" void cb_rt_ghost_object(CbObject* o, double alpha) {
 
 // MirrorObject(obj, dir): 0=horizontal, 1=vertical, 2=both. Regular objects only.
 // Allocates a fresh PRIVATE holder and repoints only this object — clones keep
-// the old shared bitmap (faithful to cbEnchanted's new render target).
+// the old shared bitmap (faithful to CoolBasic, which mirrors into a new target).
 extern "C" void cb_rt_mirror_object(CbObject* o, int32_t dir) {
     if (!o || dir < 0 || dir > 2 || o->isFloor) return;
     if (!o->tex || !o->tex->pristine) return;
@@ -849,19 +850,19 @@ extern "C" CbObject* cb_rt_next_object(void) {
 // ─── Collision (FD-036 Phase 5) ─────────────────────────────────────────
 //
 // SetupCollision registers a persistent check; the actual geometry runs once per
-// update tick in cb_run_collision_checks (driven by the Phase-5 game loop). The
+// update tick in run_collision_checks (driven by the Phase-5 game loop). The
 // pure overlap/resolution math lives in cb_collision_data.h; the map-grid tile
 // loops (Rect/CircleMap) are here because they walk the active tilemap. Mode 0
 // (report) records the contact but does NOT move the object; modes 1/2 (stop/
-// slide) apply the resolved position via positionObject (faithful to cbEnchanted).
+// slide) apply the resolved position via positionObject (faithful to CoolBasic).
 
 namespace {
 
-// Validate + register a check. cbEnchanted nulls invalid checks at setup; we
-// simply don't push them. Legal pairings: Box+Box, Circle+Circle, Box+Map,
+// Validate + register a check. Invalid checks are simply not pushed (CoolBasic
+// nulls them at setup). Legal pairings: Box+Box, Circle+Circle, Box+Map,
 // Circle+Map. Stop(1) handling is circle-only. (Box↔Circle object pairs are
-// rejected here — cbEnchanted's CircleRect/RectCircle tests are dead no-ops, so
-// such pairs never collide; bug #6, replicated.)
+// rejected here — CoolBasic's CircleRect/RectCircle tests are dead no-ops, so
+// such pairs never collide; replicated deliberately.)
 void register_collision(CbObject* a, int typeA, CbObject* b, bool bIsMap, int typeB,
                         int handling) {
     if (!a) return;
@@ -888,7 +889,7 @@ void set_object_range(CbObject* o, double r1, double r2) {
 }
 
 // ObjectsOverlap one-shot test (no registration). type 1=box, 2=circle, 3=pixel
-// (pixel not implemented → 0, matching cbEnchanted's error path). Box uses the
+// (pixel not implemented → 0, matching CoolBasic's error path). Box uses the
 // centred AABB (range1×range2); circle uses range1/2 as the radius.
 int32_t objects_overlap_impl(const CbObject* a, const CbObject* b, int32_t type) {
     if (!a || !b) return 0;
@@ -1236,7 +1237,7 @@ extern "C" int32_t cb_rt_objects_overlap3(const CbObject* a, const CbObject* b,
 // lists are wiped per-object by the update tick before this runs; here we only
 // append contacts and apply stop/slide position corrections. Glue for the Phase-5
 // game loop (cb_objects_update_all); see cb_object.h.
-extern "C" void cb_run_collision_checks(void) {
+void run_collision_checks(void) {
     for (CbCollisionCheck& c : collision_checks) {
         CbObject* a = c.a;
         if (!a || !a->checkCollisions || !a->visible) continue;
@@ -1292,7 +1293,7 @@ extern "C" void cb_rt_object_pick(CbObject* picker) {
             hit = cb_circle_ray_cast(picker->posX, picker->posY, picker->angle, o->posX,
                                      o->posY, o->range1, hx, hy);
         }
-        // pickStyle 3 (pixel): raycast returns false (cbEnchanted).
+        // pickStyle 3 (pixel): raycast returns false (as in CoolBasic).
         if (!hit) continue;
         double dsq = (picker->posX - hx) * (picker->posX - hx) +
                      (picker->posY - hy) * (picker->posY - hy);
@@ -1305,14 +1306,14 @@ extern "C" void cb_rt_object_pick(CbObject* picker) {
             best_y = hy;
         }
     }
-    // Bug #5 fix: PickedAngle is the angle from the picker to the PICKED hit
-    // point, in degrees (cbEnchanted returned stale loop-end coords in radians).
+    // Bug fix: PickedAngle is the angle from the picker to the PICKED hit point,
+    // in degrees (the reference returned stale loop-end coords in radians).
     if (last_picked) {
         last_picked_angle = cb_object_angle2(picker->posX, picker->posY, best_x, best_y);
     }
 }
 
-// PixelPick(picker[, accuracy]): a registered no-op stub (cbEnchanted's STUB).
+// PixelPick(picker[, accuracy]): a registered no-op stub (a stub in CoolBasic too).
 extern "C" void cb_rt_pixel_pick(CbObject* picker) { (void)picker; }
 extern "C" void cb_rt_pixel_pick_acc(CbObject* picker, int32_t accuracy) {
     (void)picker;
@@ -1326,7 +1327,7 @@ extern "C" double cb_rt_picked_angle(void) { return last_picked_angle; }
 
 // ObjectSight(a, b): 1 if a clear line (no map walls) runs between the two
 // objects, else 0. With no tilemap loaded there are no walls → 1 (this also
-// guards cbEnchanted's null-deref when no map exists).
+// guards against a null-deref when no map exists).
 extern "C" int32_t cb_rt_object_sight(const CbObject* a, const CbObject* b) {
     if (!a || !b) return 0;
     const CbMapData* m = cb::map::active_data();
@@ -1337,11 +1338,11 @@ extern "C" int32_t cb_rt_object_sight(const CbObject* a, const CbObject* b) {
     return cb_map_ray_cast(*m, x1, y1, x2, y2) ? 0 : 1;
 }
 
-// CameraPick helper (cbEnchanted ObjectInterface::pickObject): pick the first
-// pickable object whose shape contains the world point. Resets PickedObject
-// first, sets only PickedObject (no X/Y/Angle — faithful). Declared in
-// cb_object.h so cb_camera.cpp's CameraPick can call it after screen→world.
-extern "C" void cb_object_pick_at(double wx, double wy) {
+// CameraPick helper: pick the first pickable object whose shape contains the
+// world point. Resets PickedObject first, sets only PickedObject (no X/Y/Angle —
+// faithful to CoolBasic). Declared in cb_object.h so cb_camera.cpp's CameraPick
+// can call it after screen→world.
+void pick_at(double wx, double wy) {
     last_picked = nullptr;
     for (CbObject* o : pickable_objects) {
         bool hit = false;
@@ -1370,8 +1371,8 @@ extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) 
 
 namespace {
 
-// One animation step for an object (cbEnchanted updateObject's anim block), via
-// the pure cb_object_anim_advance over a CbAnimState view of the object's fields.
+// One animation step for an object (the per-object anim update), via the pure
+// cb_object_anim_advance over a CbAnimState view of the object's fields.
 void advance_object_anim(CbObject* o) {
     CbAnimState s;
     s.current_frame = o->currentFrame;
@@ -1387,11 +1388,11 @@ void advance_object_anim(CbObject* o) {
 
 }  // namespace
 
-// The cbEnchanted updateObjects analogue: per object advance animation, decrement
-// ObjectLife (auto-delete at 0), and wipe last tick's collisions; then advance map
-// tile animation, run every collision check, and re-arm collision checking on all
+// The per-frame object update: per object advance animation, decrement ObjectLife
+// (auto-delete at 0), and wipe last tick's collisions; then advance map tile
+// animation, run every collision check, and re-arm collision checking on all
 // survivors. See cb_object.h.
-extern "C" void cb_objects_update_all(void) {
+void update_all(void) {
     // Snapshot the live set: auto-delete (life) mutates the registries mid-loop.
     std::vector<CbObject*> snapshot = live_objects;
     for (CbObject* o : snapshot) {
@@ -1403,17 +1404,17 @@ extern "C" void cb_objects_update_all(void) {
         o->collisions.clear();  // eraseCollisions: wipe last tick's contacts
     }
     cb::map::tick_animation();    // advance animated map tiles
-    cb_run_collision_checks();  // re-test every registered check
+    run_collision_checks();  // re-test every registered check
     for (CbObject* o : live_objects) o->checkCollisions = true;  // re-arm
 }
 
 // ─── Render orchestrator (glue for cb_gfx.cpp; see cb_object.h) ──────────
 //
-// The cbEnchanted drawObjects analogue: one world-transform bracket over map
-// background (layer 0) → floor objects → regular objects → map foreground (layer
-// 1). A no-op when there is nothing to draw. The caller (do_draw_screen) has
-// already set the backbuffer as the target.
-extern "C" void cb_objects_render_all(void) {
+// The object draw pass: one world-transform bracket over map background (layer 0)
+// → floor objects → regular objects → map foreground (layer 1). A no-op when
+// there is nothing to draw. The caller (do_draw_screen) has already set the
+// backbuffer as the target.
+void render_all(void) {
     if (!cb::map::active() && floor_objects.empty() && regular_objects.empty()) return;
     if (!al_get_target_bitmap()) return;
 
@@ -1427,3 +1428,5 @@ extern "C" void cb_objects_render_all(void) {
     al_identity_transform(&id);
     al_use_transform(&id);
 }
+
+}  // namespace cb::object
