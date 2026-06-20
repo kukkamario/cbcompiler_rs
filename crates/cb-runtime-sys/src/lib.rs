@@ -549,7 +549,7 @@ mod tests {
         assert_eq!(poke_float.params[2].ty, IrType::Float);
         assert_eq!(poke_float.return_ty, IrType::Void);
 
-        // All 14 entry points must be registered (the remaining ones share the
+        // All 13 entry points must be registered (the remaining ones share the
         // shapes asserted above).
         for sym in [
             "cb_rt_delete_memblock",

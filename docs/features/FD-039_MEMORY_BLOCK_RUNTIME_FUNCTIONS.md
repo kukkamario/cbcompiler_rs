@@ -11,7 +11,7 @@ CoolBasic exposes raw, manually-managed memory blocks for byte-level data manipu
 
 It is also a dependency for already-deferred work: the **memblock form of `Crc32`** (FD-017 left it blocked — "memblock form is blocked on Memblocks"), and the memblock arguments of `Encrypt`/`Decrypt` and `CallDLL`.
 
-The documented surface (14 functions):
+The documented surface (13 functions):
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
@@ -50,7 +50,7 @@ Authoritative behavior: `D:\projects\cbEnchanted\src\meminterface.{h,cpp}` (mine
 2. **Endianness:** little-endian on the wire, pinned explicitly (platform-independent).
 3. **Out-of-bounds / invalid handle / negative resize / bad `MemCopy` range:** **trap** via the FD-015 channel (not silent clamp, not classic UB).
 4. **`PeekByte`/`PeekShort` return unsigned** (`0..255` / `0..65535`); `PeekInt` 32-bit signed.
-5. **Scope: the 14 core functions only.** The `Crc32(memblock)` / `Encrypt`/`Decrypt`(memblock) / `CallDLL` follow-ons stay in their own FDs.
+5. **Scope: the 13 core functions only.** The `Crc32(memblock)` / `Encrypt`/`Decrypt`(memblock) / `CallDLL` follow-ons stay in their own FDs.
 
 Still to confirm during implementation (not load-bearing): whether the new type warrants a `CB_CATALOG_VERSION` bump (expected: no — adding a type/functions doesn't change struct layout); exact `ResizeMEMBlock`-to-0 and overlapping-`MemCopy` semantics against the cbEnchanted/real-CB reference.
 
@@ -58,8 +58,8 @@ Still to confirm during implementation (not load-bearing): whether the new type 
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `runtime/cb_memblock.cpp` | CREATE | Memblock buffer type + the 14 `cb_rt_*` entry points (Allegro-free; in the `cb_runtime` functionality lib, **not** core). **No separate `.h`** — prototypes go in `cb_runtime_func.h`, matching `cb_system.cpp`/`cb_math.cpp` (no other TU needs the internals; the deferred `Crc32`/`Encrypt`/`CallDLL` follow-ons will add a cross-TU accessor header if/when they need one) |
-| `runtime/catalog.cpp` | MODIFY | `CB_FN` rows for all 14 functions + the `Memblock` type entry (tag 15) |
+| `runtime/cb_memblock.cpp` | CREATE | Memblock buffer type + the 13 `cb_rt_*` entry points (Allegro-free; in the `cb_runtime` functionality lib, **not** core). **No separate `.h`** — prototypes go in `cb_runtime_func.h`, matching `cb_system.cpp`/`cb_math.cpp` (no other TU needs the internals; the deferred `Crc32`/`Encrypt`/`CallDLL` follow-ons will add a cross-TU accessor header if/when they need one) |
+| `runtime/catalog.cpp` | MODIFY | `CB_FN` rows for all 13 functions + the `Memblock` type entry (tag 15) |
 | `runtime/cb_runtime_func.h` | MODIFY | Prototypes for the new `cb_rt_*` functions (functionality header, alongside gfx/object/etc.) |
 | `runtime/CMakeLists.txt` | MODIFY | Add `cb_memblock.cpp` to the `cb_runtime` target's source list (next to `cb_object.cpp`) |
 | `crates/cb-runtime-sys/build.rs` | MODIFY | Add `cb_memblock.cpp` to `SDK_FREE_TUS` + `RERUN_SOURCES` so the headless/CI path builds and tests it |
@@ -72,7 +72,7 @@ Still to confirm during implementation (not load-bearing): whether the new type 
 ## Verification
 
 - `cargo test --workspace` green on the **SDK-free path** (the whole subsystem should run headless via FD-033) — the `runtime_memblock_fd039` driver fixture must *run*, not graphics-skip.
-- `cargo test -p cb-runtime-sys` — catalog-content asserts confirm the `Memblock` type (tag 15) and all 14 signatures decode.
+- `cargo test -p cb-runtime-sys` — catalog-content asserts confirm the `Memblock` type (tag 15) and all 13 signatures decode.
 - Native `ctest` cases pinning: zero-fill on alloc, resize preserve+zero-fill-growth, byte/short/int/float peek-poke round-trips (incl. 32-bit float precision), `MemCopy` semantics, and the **out-of-bounds trap** + invalid-handle trap.
 - `clippy --workspace --all-targets -D warnings` + `fmt --all --check` clean.
 - Cross-check exact resize/offset/endianness behavior against `cbEnchanted/src/meminterface.cpp` and the real CB compiler.
@@ -80,7 +80,7 @@ Still to confirm during implementation (not load-bearing): whether the new type 
 
 ## Implementation Notes (2026-06-20)
 
-Implemented per the resolved decisions; all 14 functions landed in a single
+Implemented per the resolved decisions; all 13 functions landed in a single
 Allegro-free TU.
 
 - **`runtime/cb_memblock.cpp`** — `struct CbMemblock { std::vector<uint8_t> bytes; }`
@@ -93,7 +93,7 @@ Allegro-free TU.
   interp copies synchronously); with no host connected (native gtest) it's a
   no-op and the caller falls through to a safe default, never UB.
 - **No separate header.** Prototypes live in `cb_runtime_func.h`; the `Memblock`
-  type-tag (15), type-table entry, and 14 `CB_FN` rows in `catalog.cpp` all sit
+  type-tag (15), type-table entry, and 13 `CB_FN` rows in `catalog.cpp` all sit
   **outside** the `CB_NO_ALLEGRO` guard, so they ship in the SDK-free catalog.
 - **Build wiring:** `cb_memblock.cpp` added to the `cb_runtime` CMake target, to
   `build.rs::SDK_FREE_TUS` + `RERUN_SOURCES`, and to the `cb_runtime_tests` gtest
@@ -102,7 +102,7 @@ Allegro-free TU.
   any ABI struct layout — confirmed: the existing layout `static_assert`s and
   the `cb-runtime-sys` decode tests pass in both builds.
 - **Tests:** `cb-runtime-sys` asserts Memblock tag 15 (both builds), type counts
-  2 (SDK-free) / 6 (full), and the 14 signatures; `runtime/tests/test_memblock.cpp`
+  2 (SDK-free) / 6 (full), and the 13 signatures; `runtime/tests/test_memblock.cpp`
   (15 cases) pins round-trips, unsigned reads, LE byte order, resize, overlapping
   `MemCopy`, and OOB-returns-safe-default; `crates/cb-driver` adds the
   `runtime_memblock_fd039` golden (not graphics-gated) and a `cli.rs` OOB-trap
