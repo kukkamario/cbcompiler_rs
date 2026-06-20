@@ -22,18 +22,11 @@
 #include "cb_map.h"
 #include "cb_map_data.h"
 #include "cb_camera.h"
+#include "cb_gfx.h"           // cb::gfx::image_bitmap / apply_bitmap_defaults
 #include "cb_runtime_func.h"
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_image.h>
-
-// Internal glue: the live bitmap behind an `Image` handle (defined in cb_gfx.cpp)
-// — used by PaintObject(Map, Image). Forward-declared rather than widening a
-// public header (mirrors cb_object.cpp / cb_input.cpp's cb_gfx glue).
-extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
-// Sets the alpha-capable bitmap format + non-premultiplied flag (defined in
-// cb_gfx.cpp) so tileset masking yields real alpha that the renderer respects.
-extern "C" void cb_apply_bitmap_defaults(void);
 
 #include <fstream>
 #include <string>
@@ -110,7 +103,7 @@ ALLEGRO_BITMAP* load_tileset(const std::string& path, uint8_t r, uint8_t g, uint
     // pass uses only core bitmap drawing, which needs no addon.
     if (!al_is_system_installed()) al_init();
     if (!al_is_image_addon_initialized()) al_init_image_addon();
-    cb_apply_bitmap_defaults();
+    cb::gfx::apply_bitmap_defaults();
 
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
@@ -266,9 +259,9 @@ extern "C" void cb_rt_set_tile_slow(int32_t tile, int32_t anim_length,
 extern "C" void cb_rt_paint_object_map(CbMap* map_ignored, const CbImage* img) {
     (void)map_ignored;
     if (!active_map) return;
-    ALLEGRO_BITMAP* src = cb_gfx_image_bitmap(img);
+    ALLEGRO_BITMAP* src = cb::gfx::image_bitmap(img);
     if (!src) return;
-    cb_apply_bitmap_defaults();
+    cb::gfx::apply_bitmap_defaults();
 
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;

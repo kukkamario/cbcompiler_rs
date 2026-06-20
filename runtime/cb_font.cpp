@@ -1,15 +1,14 @@
 // CoolBasic font resolution (FD-018).
 //
-// Faithful port of cbEnchanted's findfont (../cbEnchanted/src/utilwin.cpp for
-// Windows, utillinux.cpp for fontconfig). Resolves a font *family name*
-// (e.g. "Courier New") to a font file path so LoadFont and the default font can
-// be loaded by name. Font arguments that look like file paths (they contain a
-// '.') are loaded directly by the caller; this maps bare family names only.
+// Resolves a font *family name* (e.g. "Courier New") to a font file path so
+// LoadFont and the default font can be loaded by name. Font arguments that look
+// like file paths (they contain a '.') are loaded directly by the caller; this
+// maps bare family names only.
 //
 // Windows uses a static lowercase family->filename table under %WINDIR%\Fonts,
-// one map per style (normal/bold/italic/bold-italic), matching the legacy
-// CoolBasic font set exactly. Linux/other platforms query fontconfig when it is
-// available; without it (the default vcpkg/Windows build) findfont returns "".
+// one map per style (normal/bold/italic/bold-italic), covering the standard
+// Windows font set. Linux/other platforms query fontconfig when it is available;
+// without it (the default vcpkg/Windows build) resolution returns "".
 
 #include "cb_font.h"
 
@@ -23,8 +22,8 @@
 
 namespace {
 
-// Lowercase family name -> filename within %WINDIR%\Fonts. Ported verbatim from
-// cbEnchanted's getMapOf*Fonts(); keep these in sync with that reference.
+// Lowercase family name -> filename within %WINDIR%\Fonts (the standard Windows
+// font set). normal / bold / italic / bold-italic variants in the maps below.
 const std::unordered_map<std::string, std::string>& normal_fonts() {
     static const std::unordered_map<std::string, std::string> m = {
         {"andalus", "andlso.ttf"},
@@ -179,7 +178,7 @@ const std::unordered_map<std::string, std::string>& bold_italic_fonts() {
     return m;
 }
 
-// %WINDIR%\Fonts\, or "" if WINDIR is unset (guarded; cbEnchanted assumed it).
+// %WINDIR%\Fonts\, or "" if WINDIR is unset (guarded rather than assumed).
 const std::string& windows_font_dir() {
     static const std::string dir = [] {
         const char* windir = std::getenv("WINDIR");
@@ -190,7 +189,7 @@ const std::string& windows_font_dir() {
 
 }  // namespace
 
-std::string cb_findfont(const char* font, bool is_bold, bool is_italic) {
+std::string cb::font::find(const char* font, bool is_bold, bool is_italic) {
     if (!font) return std::string();
 
     std::string name(font);
@@ -218,7 +217,7 @@ std::string cb_findfont(const char* font, bool is_bold, bool is_italic) {
 #ifdef FONTCONFIG_FOUND
 #include <fontconfig/fontconfig.h>
 
-std::string cb_findfont(const char* font, bool is_bold, bool is_italic) {
+std::string cb::font::find(const char* font, bool is_bold, bool is_italic) {
     if (!font) return std::string();
 
     FcPattern* pattern = FcPatternBuild(
@@ -246,8 +245,8 @@ std::string cb_findfont(const char* font, bool is_bold, bool is_italic) {
 
 #else  // !FONTCONFIG_FOUND
 
-std::string cb_findfont(const char* /*font*/, bool /*is_bold*/,
-                        bool /*is_italic*/) {
+std::string cb::font::find(const char* /*font*/, bool /*is_bold*/,
+                           bool /*is_italic*/) {
     return std::string();
 }
 

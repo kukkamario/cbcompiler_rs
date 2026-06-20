@@ -1,11 +1,11 @@
 // CoolBasic graphics & image runtime (FD-013 Batch 4).
 //
-// Ported from the legacy ../CBCompiler/Runtime/cb_gfx.cpp + cb_image.cpp +
-// image.cpp, flattening their RenderTarget/Window/Image class hierarchy down
-// to a small set of file-static state + a C-ABI `CbImage` opaque handle. Kept
-// deliberately simple and observable (CLAUDE.md): one translation unit owns the
-// display, the active render target, the draw/clear colors, and FPS counting,
-// so the screen and image functions share state without a class graph.
+// One translation unit owns the display, the active render target, the
+// draw/clear colors, FPS counting, and the `Image`/`Font` opaque handles, so the
+// screen and image functions share state directly without a class hierarchy —
+// kept deliberately simple and observable (CLAUDE.md). The module lives in the
+// `cb::gfx` namespace (FD-037); its cross-TU glue is declared in cb_gfx.h, and
+// the CB-visible `cb_rt_*` entry points keep C linkage for the catalog/FFI.
 //
 // ABI conventions (see cb_runtime.h / the catalog DSL): CB `Float` parameters
 // arrive as `double` and CB `Int` as `int32_t`, regardless of what Allegro's
@@ -14,6 +14,7 @@
 // it crosses the FFI boundary as `CbImage*` (a bit pattern the runtime owns).
 
 #include "cb_runtime.h"
+#include "cb_gfx.h"
 #include "cb_input.h"
 #include "cb_camera.h"
 #include "cb_object.h"
@@ -44,7 +45,7 @@
 // default) means a single-frame image — every draw uses the whole bitmap and the
 // frame parameter is ignored. LoadAnimImage sets frame_w/frame_h/anim_length so
 // the bitmap is sliced into frame_w×frame_h cells. `anim_begin` (the start frame)
-// is stored for parity but never read in any draw path (matches cbEnchanted).
+// is stored for parity but never read in any draw path.
 struct CbImage {
     ALLEGRO_BITMAP* bmp;
     int32_t hotspot_x = 0;
@@ -70,25 +71,27 @@ struct CbFont {
     ALLEGRO_FONT* font;
 };
 
+namespace cb::gfx {
+
 // ─── Shared graphics state ─────────────────────────────────────────────
 
-static ALLEGRO_DISPLAY*     display       = nullptr;
-static ALLEGRO_EVENT_QUEUE* event_queue   = nullptr;
+static ALLEGRO_DISPLAY*     g_display       = nullptr;
+static ALLEGRO_EVENT_QUEUE* g_event_queue   = nullptr;
 static ALLEGRO_COLOR        draw_color;
 static ALLEGRO_COLOR        clear_color;
 static int32_t              screen_w      = 0;
 static int32_t              screen_h      = 0;
 
-// Logical design resolution (cbEnchanted's defaultWidth/Height). The camera
-// world transform centers on (design_w/2, design_h/2). Defaults to 400x300 (the
-// cbEnchanted default) and is updated to the requested size by `Screen` — kept
-// separate from screen_w/h so the default survives when no window is opened.
+// Logical design resolution. The camera world transform centers on
+// (design_w/2, design_h/2). Defaults to 400x300 (CoolBasic's default) and is
+// updated to the requested size by `Screen` — kept separate from screen_w/h so
+// the default survives when no window is opened.
 static int32_t              design_w      = 400;
 static int32_t              design_h      = 300;
 
 // The active render target — the display backbuffer or an image's bitmap.
-// Drawing primitives and PutPixel/Cls/Lock act on this. Mirrors the legacy
-// RenderTarget::sCurrentTarget without the class machinery.
+// Drawing primitives and PutPixel/Cls/Lock act on this — a single target
+// pointer rather than a RenderTarget class hierarchy.
 static ALLEGRO_BITMAP*      current_target = nullptr;
 
 // FPS bookkeeping: frames counted in DrawScreen, sampled once per second.
@@ -115,8 +118,8 @@ static ALLEGRO_COLOR        default_mask_color;
 // font as a never-fail fallback) and owned for the process lifetime.
 // `current_font` is what Text/AddText/TextWidth use; it points at default_font
 // or at a LoadFont'd font's ALLEGRO_FONT*. The queued-text list holds AddText
-// entries that re-render every DrawScreen until ClearText (mirrors cbEnchanted's
-// TextInterface::texts). `text_loc_x/y` is the AddText cursor (Locate).
+// entries that re-render every DrawScreen until ClearText. `text_loc_x/y` is the
+// AddText cursor (Locate).
 static ALLEGRO_FONT*        default_font  = nullptr;
 static ALLEGRO_FONT*        current_font  = nullptr;
 static int32_t              text_loc_x    = 0;
@@ -131,27 +134,25 @@ struct QueuedText {
 };
 static std::vector<QueuedText> queued_texts;
 
-// Establishes the bitmap pixel format + blend mode masking depends on (mirrors
-// cbEnchanted's gfxinterface.cpp:87-95). al_convert_mask_to_alpha writes alpha=0
+// Establishes the bitmap pixel format + blend mode masking depends on. al_convert_mask_to_alpha writes alpha=0
 // into keyed pixels; for that alpha to actually show, loaded bitmaps need an alpha
 // channel (ANY_32_WITH_ALPHA) carrying *straight* (non-premultiplied) alpha, and
 // the active blender must respect source alpha. Process-global new-bitmap state,
 // so it must be set before any bitmap is loaded — called from ensure_init *and*
 // from the object/map loaders, which self-init Allegro without ensure_init.
-// Forward-declared at each external call site (mirrors cb_gfx_image_bitmap glue).
-extern "C" void cb_apply_bitmap_defaults(void) {
+// Declared in cb_gfx.h for those external callers.
+void apply_bitmap_defaults(void) {
     al_set_new_bitmap_format(ALLEGRO_PIXEL_FORMAT_ANY_32_WITH_ALPHA);
     al_set_new_bitmap_flags(al_get_new_bitmap_flags() | ALLEGRO_NO_PREMULTIPLIED_ALPHA);
 }
 
-// The source-over alpha blender (color = src·srcA + dst·(1-srcA); alpha = src+dst),
-// matching cbEnchanted's al_set_separate_blender. Set on every render target so
-// masked (alpha=0) pixels are skipped instead of overwriting as opaque. The
-// blender is thread-local current-target state, so it is (re)applied wherever a
-// target is established: ensure_init (headless) and cb_rt_screen (windowed).
-// extern "C" so cb_object.cpp can restore it after a temporary copy blender
-// (MirrorObject); forward-declared at that call site.
-extern "C" void cb_apply_alpha_blender(void) {
+// The source-over alpha blender (color = src·srcA + dst·(1-srcA); alpha = src+dst).
+// Set on every render target so masked (alpha=0) pixels are skipped instead of
+// overwriting as opaque. The blender is thread-local current-target state, so it
+// is (re)applied wherever a target is established: ensure_init (headless) and
+// cb_rt_screen (windowed). Declared in cb_gfx.h so cb_object.cpp can restore it
+// after a temporary copy blender (MirrorObject).
+void apply_alpha_blender(void) {
     al_set_separate_blender(ALLEGRO_ADD, ALLEGRO_ALPHA, ALLEGRO_INVERSE_ALPHA,
                             ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ONE);
 }
@@ -182,12 +183,11 @@ static void ensure_init(void) {
         al_init_ttf_addon();
     }
     if (!default_font) {
-        // Default font: Courier New 12pt monochrome (cbEnchanted's default). If
+        // Default font: Courier New 12pt monochrome (CoolBasic's default). If
         // the system font is unavailable, fall back to Allegro's built-in 8x8
         // bitmap font so a current font always exists — Text and the metric
-        // queries never crash and work headless (improving on cbEnchanted,
-        // which warned and risked a crash).
-        std::string path = cb_findfont("Courier New");
+        // queries never crash and work headless.
+        std::string path = cb::font::find("Courier New");
         if (!path.empty()) {
             default_font = al_load_font(path.c_str(), 12, ALLEGRO_TTF_MONOCHROME);
         }
@@ -202,8 +202,8 @@ static void ensure_init(void) {
     // Masking-critical render state (see helpers above). Idempotent; applied here
     // so images created/drawn before any Screen() call (incl. headless tests) get
     // an alpha channel and source-over blending.
-    cb_apply_bitmap_defaults();
-    cb_apply_alpha_blender();
+    apply_bitmap_defaults();
+    apply_alpha_blender();
 }
 
 // ─── Screen management ─────────────────────────────────────────────────
@@ -211,38 +211,38 @@ static void ensure_init(void) {
 extern "C" void cb_rt_screen(int32_t w, int32_t h) {
     ensure_init();
 
-    // The requested size is the logical design resolution (cbEnchanted sets
-    // defaultWidth/Height here). Record it before the display logic so the
-    // camera centers correctly even if the display fails to open (headless).
+    // The requested size is the logical design resolution. Record it before the
+    // display logic so the camera centers correctly even if the display fails to
+    // open (headless).
     design_w = w;
     design_h = h;
 
-    if (display) {
-        al_destroy_display(display);
+    if (g_display) {
+        al_destroy_display(g_display);
     }
     // Request vsync so the present is throttled to the monitor refresh; without
     // it a `Repeat ... DrawScreen ... Forever` loop spins the render thread at
     // max FPS (100% CPU). Best-effort — a driver may ignore the suggestion.
     al_set_new_display_option(ALLEGRO_VSYNC, 1, ALLEGRO_SUGGEST);
-    display = al_create_display(w, h);
-    if (!display) return;
+    g_display = al_create_display(w, h);
+    if (!g_display) return;
     screen_w = w;
     screen_h = h;
 
-    if (event_queue) {
-        al_destroy_event_queue(event_queue);
+    if (g_event_queue) {
+        al_destroy_event_queue(g_event_queue);
     }
-    event_queue = al_create_event_queue();
-    al_register_event_source(event_queue, al_get_display_event_source(display));
-    al_register_event_source(event_queue, al_get_mouse_event_source());
-    al_register_event_source(event_queue, al_get_keyboard_event_source());
+    g_event_queue = al_create_event_queue();
+    al_register_event_source(g_event_queue, al_get_display_event_source(g_display));
+    al_register_event_source(g_event_queue, al_get_mouse_event_source());
+    al_register_event_source(g_event_queue, al_get_keyboard_event_source());
 
-    al_set_target_backbuffer(display);
-    current_target = al_get_backbuffer(display);
-    // Source-over alpha blending so masked (alpha=0) pixels are transparent. The
-    // previous ONE/ZERO blender copied source verbatim, discarding the alpha that
+    al_set_target_backbuffer(g_display);
+    current_target = al_get_backbuffer(g_display);
+    // Source-over alpha blending so masked (alpha=0) pixels are transparent. A
+    // plain ONE/ZERO blender would copy source verbatim, discarding the alpha that
     // MaskObject/MaskImage and load-time auto-masking bake in (FD-036 fix).
-    cb_apply_alpha_blender();
+    apply_alpha_blender();
 
     draw_color  = al_map_rgb(255, 255, 255);
     clear_color = al_map_rgb(0, 0, 0);
@@ -283,7 +283,7 @@ extern "C" int32_t cb_rt_screen_buffer_id(void) {
     return 0;
 }
 
-// Whole-screen gamma. Stored as ratios (cbEnchanted divides by 255); not
+// Whole-screen gamma. Stored as ratios (the 0-255 args divided by 255); not
 // applied (Allegro 5 exposes no portable display-gamma ramp).
 extern "C" void cb_rt_screen_gamma(int32_t r, int32_t g, int32_t b) {
     gamma_r = r / 255.0;
@@ -293,27 +293,27 @@ extern "C" void cb_rt_screen_gamma(int32_t r, int32_t g, int32_t b) {
 
 // Saves the screen backbuffer to an image file. No-op without a display.
 extern "C" void cb_rt_screenshot(const CbString* path) {
-    if (!display || !path) return;
+    if (!g_display || !path) return;
     std::size_t len = cb_rt_string_len(path);
     if (len == 0) return;
     std::string p(reinterpret_cast<const char*>(cb_rt_string_data(path)), len);
-    al_save_bitmap(p.c_str(), al_get_backbuffer(display));
+    al_save_bitmap(p.c_str(), al_get_backbuffer(g_display));
 }
 
 // Renders the persistent AddText queue onto the backbuffer (defined in the Text
 // & fonts section). Called each frame just before the flip.
 static void render_queued_texts(void);
 
-// FD-036 Phase 5 game-loop dedup flags (cbEnchanted gfxinterface gameUpdated/
-// gameDrawn). An explicit UpdateGame/DrawGame sets these so DrawScreen's implicit
-// pass doesn't run the same update/draw twice in a frame; DrawScreen resets them.
+// FD-036 Phase 5 game-loop dedup flags. An explicit UpdateGame/DrawGame sets
+// these so DrawScreen's implicit pass doesn't run the same update/draw twice in a
+// frame; DrawScreen resets them.
 static bool game_updated = false;
 static bool game_drawn   = false;
 
 // Shared DrawScreen body. `clear_after` controls whether the backbuffer is
 // cleared once events are drained (the `cls` flag of the 2-arg form).
 static void do_draw_screen(bool clear_after) {
-    if (!display) return;
+    if (!g_display) return;
 
     // FD-036 Phase 5: run the built-in game loop for this frame, deduped against
     // an explicit UpdateGame/DrawGame (the gameUpdated/gameDrawn flags). Update the
@@ -322,7 +322,7 @@ static void do_draw_screen(bool clear_after) {
     // on top of user draws and beneath the AddText overlay — unless DrawGame
     // already drew this frame. Ensure the backbuffer is the target first (a stray
     // DrawToImage must not redirect the pass).
-    al_set_target_backbuffer(display);
+    al_set_target_backbuffer(g_display);
     if (!game_updated) cb_objects_update_all();
     cb_camera_update_follow();
     if (!game_drawn) cb_objects_render_all();
@@ -349,7 +349,7 @@ static void do_draw_screen(bool clear_after) {
     cb_input_frame_begin();
 
     ALLEGRO_EVENT ev;
-    while (al_get_next_event(event_queue, &ev)) {
+    while (al_get_next_event(g_event_queue, &ev)) {
         cb_input_handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
             // FD-015: route window-close through the trap channel for a clean
@@ -359,8 +359,8 @@ static void do_draw_screen(bool clear_after) {
             // right after this runtime call returns. The `return` is essential:
             // `display` is now null and the code below would deref it. Fall
             // back to exit(0) only if no host is connected.
-            al_destroy_display(display);
-            display = nullptr;
+            al_destroy_display(g_display);
+            g_display = nullptr;
             const CbHostApi* h = cb_host();
             if (h) {
                 h->request_exit(0);
@@ -370,14 +370,14 @@ static void do_draw_screen(bool clear_after) {
         }
     }
 
-    al_set_target_backbuffer(display);
-    current_target = al_get_backbuffer(display);
+    al_set_target_backbuffer(g_display);
+    current_target = al_get_backbuffer(g_display);
     if (clear_after) {
         al_clear_to_color(clear_color);
     }
 }
 
-// 0-arg DrawScreen always clears the backbuffer (legacy default).
+// 0-arg DrawScreen always clears the backbuffer (CoolBasic default).
 extern "C" void cb_rt_drawscreen(void) {
     do_draw_screen(true);
 }
@@ -390,21 +390,21 @@ extern "C" void cb_rt_drawscreen_args(int32_t cls, int32_t vsync) {
     do_draw_screen(cls != 0);
 }
 
-// UpdateGame: run the built-in object update tick now (cbEnchanted commandUpdate
-// Game). Marks the frame updated so the next DrawScreen won't update again. There
-// are NO user CB callbacks (cbEnchanted's hooks are defined but never registered).
+// UpdateGame: run the built-in object update tick now. Marks the frame updated so
+// the next DrawScreen won't update again. The game loop is built-in — there are
+// NO user-registered update/draw callbacks.
 extern "C" void cb_rt_update_game(void) {
     cb_objects_update_all();
     game_updated = true;
 }
 
-// DrawGame: update-if-not-already, then draw the object pass to the backbuffer
-// (cbEnchanted commandDrawGame). Marks the frame drawn AND updated so the next
-// DrawScreen only flips. Requires a display.
+// DrawGame: update-if-not-already, then draw the object pass to the backbuffer.
+// Marks the frame drawn AND updated so the next DrawScreen only flips. Requires a
+// display.
 extern "C" void cb_rt_draw_game(void) {
-    if (!display) return;
+    if (!g_display) return;
     if (!game_updated) cb_objects_update_all();
-    al_set_target_backbuffer(display);
+    al_set_target_backbuffer(g_display);
     cb_objects_render_all();
     game_drawn   = true;
     game_updated = true;
@@ -426,9 +426,9 @@ extern "C" void cb_rt_cls_color_a(int32_t r, int32_t g, int32_t b, int32_t a) {
 }
 
 extern "C" void cb_rt_draw_to_screen(void) {
-    if (!display) return;
-    al_set_target_backbuffer(display);
-    current_target = al_get_backbuffer(display);
+    if (!g_display) return;
+    al_set_target_backbuffer(g_display);
+    current_target = al_get_backbuffer(g_display);
 }
 
 extern "C" int32_t cb_rt_fps(void) {
@@ -437,7 +437,7 @@ extern "C" int32_t cb_rt_fps(void) {
 
 // ─── Lock / Unlock ─────────────────────────────────────────────────────
 //
-// state: 0=read/write, 1=read-only, 2=write-only (legacy mapping).
+// state: 0=read/write, 1=read-only, 2=write-only (CoolBasic's Lock mapping).
 
 static int lock_flags_for(int32_t state) {
     switch (state) {
@@ -500,8 +500,8 @@ extern "C" int32_t cb_rt_get_rgb(int32_t channel) {
 }
 
 // Reads a pixel from the current render target and makes it the draw color.
-// (cbEnchanted reads the window target; we read the current target so the
-// behaviour is well-defined when drawing onto an image too.)
+// (Reading the current target rather than only the window keeps the behaviour
+// well-defined when drawing onto an image too.)
 extern "C" void cb_rt_pick_color(int32_t x, int32_t y) {
     if (!current_target) return;
     draw_color = al_get_pixel(current_target, x, y);
@@ -516,14 +516,14 @@ extern "C" void cb_rt_smooth_2d(int32_t enabled) {
 // ─── DrawToWorld transform (FD-036 Phase 2) ─────────────────────────────
 //
 // When a DrawToWorld category flag is set AND we are drawing to the screen
-// (not an image — cbEnchanted's `!drawingOnImage()`), a user draw command runs
+// (not an image), a user draw command runs
 // under the camera's world transform; otherwise under identity. We set it at the
 // top of each participating command and restore identity after, so a world draw
 // never leaks into a later screen draw or an image-processing copy (which all
 // assume identity). `category` is one of the cb_camera flag getters.
 static bool gfx_begin_world(int category_flag) {
     bool world = category_flag &&
-                 display && current_target == al_get_backbuffer(display);
+                 g_display && current_target == al_get_backbuffer(g_display);
     if (world) {
         al_use_transform(cb_camera_render_transform());
     }
@@ -635,7 +635,7 @@ extern "C" void cb_rt_put_pixel_argb(int32_t x, int32_t y, int32_t argb) {
 
 // Packs an ALLEGRO_COLOR to 32-bit ARGB (the runtime's retained format; see
 // FD-017 Q2 — diverges from the spec's nominal 0xRRGGBB but matches what
-// cbEnchanted's GetPixel actually returns).
+// CoolBasic's GetPixel actually returns).
 static int32_t pack_argb(ALLEGRO_COLOR color) {
     unsigned char r, g, b, a;
     al_unmap_rgba(color, &r, &g, &b, &a);
@@ -690,7 +690,7 @@ extern "C" void cb_rt_copy_box(double srcX, double srcY, double w, double h,
 // copies get an alpha channel and work before any Screen() call.
 static ALLEGRO_BITMAP* clone_bitmap_hl(ALLEGRO_BITMAP* src) {
     if (!src) return nullptr;
-    cb_apply_bitmap_defaults();
+    apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -701,15 +701,16 @@ static ALLEGRO_BITMAP* clone_bitmap_hl(ALLEGRO_BITMAP* src) {
 }
 
 // The image's pristine (pre-mask) bitmap: the unmasked copy if it was masked,
-// else bmp itself (still pristine). Never null for a valid image.
-static ALLEGRO_BITMAP* image_pristine(const CbImage* img) {
+// else bmp itself (still pristine). Never null for a valid image. Declared in
+// cb_gfx.h — also called from cb_object.cpp via cb::gfx::image_pristine.
+ALLEGRO_BITMAP* image_pristine(const CbImage* img) {
     if (!img) return nullptr;
     return img->unmasked ? img->unmasked : img->bmp;
 }
 
 // Color-keys an image, re-deriving the masked bitmap from the pristine copy so a
-// new key replaces any prior one (mirrors cbEnchanted CBImage::maskImage).
-// Captures the pristine on the first mask. No-op without a bitmap.
+// new key replaces any prior one. Captures the pristine on the first mask. No-op
+// without a bitmap.
 static void apply_image_mask(CbImage* img, ALLEGRO_COLOR color) {
     if (!img || !img->bmp) return;
     if (!img->unmasked) {
@@ -743,7 +744,7 @@ extern "C" CbImage* cb_rt_make_image(int32_t w, int32_t h) {
     al_set_new_bitmap_flags(prev_flags);
     if (!bmp) return nullptr;
 
-    // Clear to opaque black (matches cbEnchanted's MakeImage), so the contents
+    // Clear to opaque black (CoolBasic's MakeImage), so the contents
     // are defined — fresh bitmaps are otherwise undefined, which would make
     // pixel reads / ImagesCollide nondeterministic.
     ALLEGRO_BITMAP* prev_target = al_get_target_bitmap();
@@ -812,7 +813,7 @@ extern "C" void cb_rt_delete_image(CbImage* img) {
     if (!img) return;
     if (img->bmp) {
         if (current_target == img->bmp) {
-            current_target = display ? al_get_backbuffer(display) : nullptr;
+            current_target = g_display ? al_get_backbuffer(g_display) : nullptr;
             if (current_target) al_set_target_bitmap(current_target);
         }
         al_destroy_bitmap(img->bmp);
@@ -824,7 +825,7 @@ extern "C" void cb_rt_delete_image(CbImage* img) {
 // ─── FD-017 image additions (single-frame) ─────────────────────────────
 //
 // Multi-frame sprite sheets are deferred (FD-017 Q3), so the `frame` parameters
-// of the cbEnchanted signatures are dropped here; SaveImage keeps a `frame` arg
+// of those signatures are dropped here; SaveImage keeps a `frame` arg
 // for source compatibility but ignores it.
 
 // DefaultMask(enabled, r, g, b): mask color applied to future MakeImage/
@@ -890,7 +891,7 @@ extern "C" void cb_rt_resize_image(CbImage* img, int32_t w, int32_t h) {
 }
 
 // Rotates an image `angle` degrees clockwise into a new bitmap sized to the
-// rotated bounding box, and centers the hotspot (mirrors cbEnchanted).
+// rotated bounding box, and centers the hotspot.
 extern "C" void cb_rt_rotate_image(CbImage* img, double angle) {
     if (!img || !img->bmp) return;
     double rad = angle / 180.0 * 3.14159265358979323846;
@@ -974,14 +975,14 @@ extern "C" void cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
 }
 
 // Per-image hotspot (scale/rotate/draw origin). x<0 || y<0 auto-centers.
-// NOTE: cbEnchanted's HotSpot takes an integer id where 0/1 toggle a global
-// default-hotspot; that overloading has no equivalent here because `Image` is
-// an opaque handle, not an int id — so this is the per-image form only.
+// NOTE: CoolBasic's HotSpot also has a form taking an integer id where 0/1 toggle
+// a global default-hotspot; that overloading has no equivalent here because
+// `Image` is an opaque handle, not an int id — so this is the per-image form only.
 extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
     if (!img || !img->bmp) return;
     if (x < 0 || y < 0) {
         // FD-036: center on a single frame when frame size is set, else on the
-        // whole image (matches cbEnchanted CBImage::setHotspot).
+        // whole image.
         if (img->frame_w > 0 && img->frame_h > 0) {
             img->hotspot_x = img->frame_w / 2;
             img->hotspot_y = img->frame_h / 2;
@@ -999,7 +1000,7 @@ extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
 // without pulling in Allegro.
 
 // Bounding-box overlap between two placed images (Y negated for world space,
-// matching cbEnchanted/BoxOverlap).
+// matching BoxOverlap).
 extern "C" int32_t cb_rt_images_overlap(const CbImage* a, double x1, double y1,
                                         const CbImage* b, double x2, double y2) {
     if (!a || !a->bmp || !b || !b->bmp) return 0;
@@ -1051,9 +1052,9 @@ extern "C" int32_t cb_rt_images_collide(const CbImage* a, double x1, double y1, 
 // Source sub-rect for `frame` of a multi-frame image. Returns false for a
 // single-frame image (anim_length==0 or no frame size) — the caller draws the
 // whole bitmap. `frame` is 0-based and taken modulo framesX (NOT clamped to
-// anim_length), matching cbEnchanted. The row/offset math deliberately fixes
-// cbEnchanted bugs #1/#2 (cbimage.cpp:64,67 used `/framesY` and `*frameWidth`,
-// correct only for square single-row sheets); see FD-036.
+// anim_length). The row/offset math uses /framesX and *frame_h; an earlier
+// reference port used /framesY and *frameWidth, correct only for square
+// single-row sheets (see FD-036, FIX #1/#2 below).
 static bool image_frame_src_rect(const CbImage* img, int32_t frame,
                                  float& left, float& top, float& w, float& h) {
     if (!img || !img->bmp || img->anim_length == 0 ||
@@ -1105,7 +1106,7 @@ extern "C" CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w,
 }
 
 // MakeImage(w, h, frameCount): the 3-arg overload. `frameCount` is popped and
-// ignored — cbEnchanted has no frame size to slice by, so a made image is always
+// ignored — MakeImage has no frame size to slice by, so a made image is always
 // single-frame. Identical to the 2-arg MakeImage otherwise.
 extern "C" CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_count) {
     (void)frame_count;
@@ -1216,50 +1217,32 @@ extern "C" int32_t cb_rt_screen_depth(void) {
     return 32;
 }
 
-// ─── Internal glue for cb_input.cpp (FD-017) ───────────────────────────
+// ─── Internal glue (declared in cb_gfx.h) ──────────────────────────────
 //
-// cb_gfx.cpp owns the display and event queue; the blocking/cursor input
-// functions (WaitKey/WaitMouse/PositionMouse/ShowMouse) need them. Declared in
-// cb_input.h, not the catalog ABI. Both return null when no window is open, so
-// those input functions degrade to a safe no-op/0 headlessly.
-extern "C" ALLEGRO_DISPLAY* cb_gfx_display(void) {
-    return display;
+// Accessors the other Allegro-linked TUs reach through cb::gfx::… — input needs
+// the display/queue; camera needs the design/window size; object and map need
+// an Image's bitmaps. See cb_gfx.h for each function's contract. (image_pristine
+// is defined above, alongside the masking helpers it shares.)
+ALLEGRO_DISPLAY* display(void) {
+    return g_display;
 }
 
-extern "C" ALLEGRO_EVENT_QUEUE* cb_gfx_event_queue(void) {
-    return event_queue;
+ALLEGRO_EVENT_QUEUE* event_queue(void) {
+    return g_event_queue;
 }
 
-// Internal glue for cb_camera.cpp (FD-036): the logical design resolution the
-// camera centers its world transform on. Declared in cb_camera.h.
-extern "C" void cb_gfx_design_size(int32_t* w, int32_t* h) {
+void design_size(int32_t* w, int32_t* h) {
     if (w) *w = design_w;
     if (h) *h = design_h;
 }
 
-// Internal glue for cb_camera.cpp (FD-036 Phase 5): the PHYSICAL display size
-// (cbEnchanted's screenWidth/Height), used by CameraFollow's deadzone. 0×0 when
-// no window is open (headless), so style-2 follow degrades safely. Declared in
-// cb_camera.h.
-extern "C" void cb_gfx_window_size(int32_t* w, int32_t* h) {
-    if (w) *w = display ? al_get_display_width(display) : 0;
-    if (h) *h = display ? al_get_display_height(display) : 0;
+void window_size(int32_t* w, int32_t* h) {
+    if (w) *w = g_display ? al_get_display_width(g_display) : 0;
+    if (h) *h = g_display ? al_get_display_height(g_display) : 0;
 }
 
-// Internal glue for cb_object.cpp / cb_map.cpp (FD-036 Phase 4): the live bitmap
-// behind an `Image` handle, used by PaintObject(Object/Map, Image). Forward-
-// declared at each call site rather than in a public header. Null when the image
-// or its bitmap is null.
-extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img) {
+ALLEGRO_BITMAP* image_bitmap(const CbImage* img) {
     return (img && img->bmp) ? img->bmp : nullptr;
-}
-
-// Internal glue for cb_object.cpp (FD-036): the image's pristine (pre-mask)
-// bitmap, so PaintObject keys from the unmasked original rather than an already-
-// keyed copy. Falls back to bmp for a never-masked image. Null when the image or
-// its bitmap is null.
-extern "C" ALLEGRO_BITMAP* cb_gfx_image_pristine(const CbImage* img) {
-    return image_pristine(img);
 }
 
 // Whether a graphics mode is available. Best-effort: any positive resolution is
@@ -1272,11 +1255,10 @@ extern "C" int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth) {
 
 // ─── Text & fonts (FD-018) ─────────────────────────────────────────────
 //
-// Ported from cbEnchanted's TextInterface (../cbEnchanted/src/textinterface.cpp)
-// onto this file's shared state: text draws in the current `draw_color` onto the
-// active `current_target`, font lookup honours `smooth_2d`, and the persistent
-// AddText queue re-renders every DrawScreen (render_queued_texts, above) until
-// ClearText. `Font` crosses the FFI as the opaque CbFont* handle.
+// Text draws in the current `draw_color` onto the active `current_target`, font
+// lookup honours `smooth_2d`, and the persistent AddText queue re-renders every
+// DrawScreen (render_queued_texts, above) until ClearText. `Font` crosses the FFI
+// as the opaque CbFont* handle.
 
 // Reads a CbString into a UTF-8 std::string (empty when null).
 static std::string cb_text_to_utf8(const CbString* s) {
@@ -1291,8 +1273,8 @@ static std::string cb_text_to_utf8(const CbString* s) {
 }
 
 // Splits a UTF-8 string into its codepoint substrings (1–4 bytes each). Used by
-// VerticalText so it advances one *character* per line, not one byte (cbEnchanted
-// iterated raw bytes — wrong for multibyte text).
+// VerticalText so it advances one *character* per line, not one byte (a raw-byte
+// iteration would corrupt multibyte text).
 static std::vector<std::string> utf8_chars(const std::string& s) {
     std::vector<std::string> out;
     std::size_t i = 0;
@@ -1312,8 +1294,8 @@ static std::vector<std::string> utf8_chars(const std::string& s) {
 // Composites the persistent AddText queue onto the display backbuffer. Forward-
 // declared above do_draw_screen, which calls it once per frame before the flip.
 static void render_queued_texts(void) {
-    if (queued_texts.empty() || !display) return;
-    al_set_target_backbuffer(display);
+    if (queued_texts.empty() || !g_display) return;
+    al_set_target_backbuffer(g_display);
     for (const QueuedText& t : queued_texts) {
         if (t.font) {
             al_draw_text(t.font, t.col, (float)t.x, (float)t.y, 0, t.utf8.c_str());
@@ -1334,7 +1316,7 @@ extern "C" void cb_rt_text(double x, double y, const CbString* s) {
 }
 
 // CenterText(x, y, s, style): style 0=horizontal centering, 1=vertical, 2=both
-// (mirrors cbEnchanted's HCenter/VCenter/Center alignment).
+// (CoolBasic's HCenter/VCenter/Center alignment).
 extern "C" void cb_rt_center_text(int32_t x, int32_t y, const CbString* s,
                                   int32_t style) {
     ensure_init();
@@ -1362,8 +1344,8 @@ extern "C" void cb_rt_center_text(int32_t x, int32_t y, const CbString* s,
 
 // VerticalText(x, y, s): one character per line, top-to-bottom.
 //
-// NOTE: our docs (docs/cb_runtime.md) specify VerticalText(x, y, s); cbEnchanted
-// pops its arguments as (y, x, s), a likely long-standing label swap there. We
+// NOTE: our docs (docs/cb_runtime.md) specify VerticalText(x, y, s); the original
+// runtime pops its arguments as (y, x, s), a likely long-standing label swap. We
 // follow the documented (x, y, s) order.
 extern "C" void cb_rt_vertical_text(int32_t x, int32_t y, const CbString* s) {
     ensure_init();
@@ -1407,9 +1389,9 @@ extern "C" void cb_rt_clear_text(void) {
 }
 
 // LoadFont(name, size, bold, italic, underline) -> Font. `name` with a '.' is a
-// file path; otherwise it is a system font family name resolved via cb_findfont.
-// Smooth2D selects antialiased vs monochrome rendering. `underline` is accepted
-// but not rendered (cbEnchanted TODO). Returns null (CB `0`) on failure.
+// file path; otherwise it is a system font family name resolved via
+// cb::font::find. Smooth2D selects antialiased vs monochrome rendering.
+// `underline` is accepted but not rendered. Returns null (CB `0`) on failure.
 extern "C" CbFont* cb_rt_load_font(const CbString* name, int32_t size,
                                    int32_t bold, int32_t italic,
                                    int32_t underline) {
@@ -1420,7 +1402,7 @@ extern "C" CbFont* cb_rt_load_font(const CbString* name, int32_t size,
     if (fontname.find('.') != std::string::npos) {
         path = fontname;  // looks like a file path → load directly
     } else {
-        path = cb_findfont(fontname.c_str(), bold != 0, italic != 0);
+        path = cb::font::find(fontname.c_str(), bold != 0, italic != 0);
     }
     if (path.empty()) return nullptr;
 
@@ -1475,3 +1457,5 @@ extern "C" int32_t cb_rt_text_height(const CbString* s) {
     al_get_text_dimensions(current_font, txt.c_str(), &bx, &by, &bw, &bh);
     return bh;
 }
+
+}  // namespace cb::gfx

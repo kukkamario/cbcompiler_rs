@@ -29,6 +29,7 @@
 #include "cb_object_data.h"
 #include "cb_collision_data.h"
 #include "cb_camera.h"
+#include "cb_gfx.h"           // cb::gfx::image_bitmap / image_pristine / apply_*
 #include "cb_map.h"
 #include "cb_map_data.h"
 #include "cb_runtime_func.h"
@@ -40,21 +41,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-// Internal glue: the live bitmap behind an `Image` handle (defined in cb_gfx.cpp)
-// — used by PaintObject(Object, Image). Mirrors cb_input.cpp's forward-declared
-// cb_gfx glue rather than widening a public header.
-extern "C" ALLEGRO_BITMAP* cb_gfx_image_bitmap(const CbImage* img);
-// The image's pristine (pre-mask) bitmap, so PaintObject keys from the unmasked
-// original rather than an already-keyed copy (defined in cb_gfx.cpp).
-extern "C" ALLEGRO_BITMAP* cb_gfx_image_pristine(const CbImage* img);
-// Sets the alpha-capable bitmap format + non-premultiplied flag (defined in
-// cb_gfx.cpp). Called before loading object bitmaps so masking yields real alpha,
-// even when an object loads before any Screen/MakeImage call ran ensure_init.
-extern "C" void cb_apply_bitmap_defaults(void);
-// Restores the runtime's source-over alpha blender (defined in cb_gfx.cpp), used
-// after MirrorObject temporarily swaps in a verbatim copy blender.
-extern "C" void cb_apply_alpha_blender(void);
 
 // ─── Shared texture holder ──────────────────────────────────────────────
 //
@@ -200,7 +186,7 @@ std::string read_cb_string(const CbString* s) {
 // cb_gfx.cpp's MakeImage / cb_map.cpp's load_tileset): without a display, video
 // bitmaps can't be made, so fall back to a memory bitmap.
 ALLEGRO_BITMAP* create_bitmap_headless(int w, int h) {
-    cb_apply_bitmap_defaults();
+    cb::gfx::apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -212,7 +198,7 @@ ALLEGRO_BITMAP* create_bitmap_headless(int w, int h) {
 
 ALLEGRO_BITMAP* clone_bitmap_headless(ALLEGRO_BITMAP* src) {
     if (!src) return nullptr;
-    cb_apply_bitmap_defaults();
+    cb::gfx::apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -229,7 +215,7 @@ ALLEGRO_BITMAP* clone_bitmap_headless(ALLEGRO_BITMAP* src) {
 ALLEGRO_BITMAP* load_object_bitmap(const std::string& path) {
     if (!al_is_system_installed()) al_init();
     if (!al_is_image_addon_initialized()) al_init_image_addon();
-    cb_apply_bitmap_defaults();
+    cb::gfx::apply_bitmap_defaults();
     int prev_flags = al_get_new_bitmap_flags();
     int flags = prev_flags;
     if (!al_get_current_display()) flags |= ALLEGRO_MEMORY_BITMAP;
@@ -627,7 +613,7 @@ extern "C" void cb_rt_paint_object_image(CbObject* o, const CbImage* img) {
     if (!o) return;
     // Paint from the image's *pristine* bitmap so the object's own maskColor
     // governs the key (and MaskObject can later re-key from this pristine).
-    ALLEGRO_BITMAP* srcPristine = cb_gfx_image_pristine(img);
+    ALLEGRO_BITMAP* srcPristine = cb::gfx::image_pristine(img);
     if (!srcPristine) return;
     ALLEGRO_BITMAP* pristine = clone_bitmap_headless(srcPristine);
     if (!pristine) return;
@@ -720,7 +706,7 @@ extern "C" void cb_rt_mirror_object(CbObject* o, int32_t dir) {
     al_clear_to_color(al_map_rgba(0, 0, 0, 0));
     al_set_blender(ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ZERO);
     al_draw_bitmap(srcp, 0, 0, flip);
-    cb_apply_alpha_blender();
+    cb::gfx::apply_alpha_blender();
     if (prev) al_set_target_bitmap(prev);
 
     auto holder = std::make_shared<CbTexture>();

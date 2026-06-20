@@ -21,6 +21,7 @@
 
 #include "cb_runtime.h"
 #include "cb_input.h"
+#include "cb_gfx.h"  // cb::gfx::display / event_queue
 
 #include <allegro5/allegro.h>
 
@@ -274,7 +275,7 @@ extern "C" void cb_rt_clear_keys(void) {
 // With no window open there is no event queue to wait on, so it returns 0
 // immediately rather than hang — the headless-safe degenerate behaviour.
 extern "C" int32_t cb_rt_wait_key(void) {
-    ALLEGRO_EVENT_QUEUE* q = cb_gfx_event_queue();
+    ALLEGRO_EVENT_QUEUE* q = cb::gfx::event_queue();
     if (!q) return 0;
     ALLEGRO_EVENT e;
     while (true) {
@@ -304,7 +305,7 @@ extern "C" int32_t cb_rt_get_mouse(void) {
 // Blocks until a mouse button is pressed; returns the button (0 on window
 // close). Headless (no event queue) returns 0 immediately rather than hang.
 extern "C" int32_t cb_rt_wait_mouse(void) {
-    ALLEGRO_EVENT_QUEUE* q = cb_gfx_event_queue();
+    ALLEGRO_EVENT_QUEUE* q = cb::gfx::event_queue();
     if (!q) return 0;
     ALLEGRO_EVENT e;
     while (true) {
@@ -323,7 +324,7 @@ extern "C" int32_t cb_rt_wait_mouse(void) {
 
 // Moves the cursor to screen coordinates. No-op without a window.
 extern "C" void cb_rt_position_mouse(int32_t x, int32_t y) {
-    ALLEGRO_DISPLAY* d = cb_gfx_display();
+    ALLEGRO_DISPLAY* d = cb::gfx::display();
     if (d) al_set_mouse_xy(d, x, y);
 }
 
@@ -331,7 +332,7 @@ extern "C" void cb_rt_position_mouse(int32_t x, int32_t y) {
 // has no equivalent here (images are opaque handles, not integer ids), so any
 // value > 1 falls back to showing the standard cursor. No-op without a window.
 extern "C" void cb_rt_show_mouse(int32_t mode) {
-    ALLEGRO_DISPLAY* d = cb_gfx_display();
+    ALLEGRO_DISPLAY* d = cb::gfx::display();
     if (!d) return;
     if (mode == 0) {
         al_hide_mouse_cursor(d);

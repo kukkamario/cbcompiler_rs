@@ -5,8 +5,8 @@
 // registered as CB-visible functions. These declarations bridge cb_camera.cpp
 // (owns the camera transform + DrawToWorld flags) and cb_gfx.cpp (owns the
 // display + render target). They reference ALLEGRO_TRANSFORM, so they live here
-// rather than in the Allegro-free cb_runtime.h (mirrors cb_input.h's
-// cb_gfx_display glue).
+// rather than in the Allegro-free cb_runtime.h. (The reverse-direction gfx
+// accessors the camera reads live in cb_gfx.h under cb::gfx.)
 
 #include <allegro5/allegro.h>
 #include <cstdint>
@@ -41,16 +41,8 @@ int cb_camera_text_to_world(void);
 double cb_camera_zoom(void);
 void cb_camera_draw_area(double* w, double* h);
 
-// cb_gfx.cpp -> cb_camera.cpp: the logical design resolution (cbEnchanted's
-// defaultWidth/Height; 400x300 until a Screen command sets it). The camera
-// centers its world transform on (w/2, h/2).
-void cb_gfx_design_size(int32_t* w, int32_t* h);
-
-// cb_gfx.cpp -> cb_camera.cpp (FD-036 Phase 5): the PHYSICAL display size
-// (cbEnchanted's screenWidth/Height — the window, distinct from the design size
-// above). CameraFollow's style-2 deadzone is measured against this. 0×0 before a
-// Screen command opens a display.
-void cb_gfx_window_size(int32_t* w, int32_t* h);
+// (The cb_gfx.cpp -> cb_camera.cpp design/window-size accessors the camera reads
+// now live in cb_gfx.h as cb::gfx::design_size / cb::gfx::window_size.)
 
 // cb_camera.cpp -> cb_object.cpp / cb_gfx.cpp (FD-036 Phase 5): convert a screen
 // coordinate to world space through the live camera (the inverse world transform

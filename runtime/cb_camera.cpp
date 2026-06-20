@@ -17,6 +17,7 @@
 
 #include "cb_camera.h"
 #include "cb_camera_math.h"
+#include "cb_gfx.h"           // cb::gfx::design_size / window_size
 #include "cb_object.h"        // cb_object_pick_at (CameraPick funnel)
 #include "cb_runtime_func.h"  // CbObject + cb_rt_object_x/y/angle accessors
 
@@ -58,7 +59,7 @@ double wrap_deg(double a) {
 
 CbAffine current_world_affine() {
     int dw = 0, dh = 0;
-    cb_gfx_design_size(&dw, &dh);
+    cb::gfx::design_size(&dw, &dh);
     return cb_build_world_transform(camera_x, camera_y, camera_rad_angle,
                                     camera_zoom, dw, dh);
 }
@@ -203,7 +204,7 @@ extern "C" void cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images,
 
 extern "C" const ALLEGRO_TRANSFORM* cb_camera_render_transform(void) {
     int dw = 0, dh = 0;
-    cb_gfx_design_size(&dw, &dh);
+    cb::gfx::design_size(&dw, &dh);
     CbAffine r = cb_build_render_transform(camera_x, camera_y, camera_rad_angle,
                                            camera_zoom, dw, dh);
     static ALLEGRO_TRANSFORM t;
@@ -220,7 +221,7 @@ extern "C" const ALLEGRO_TRANSFORM* cb_camera_render_transform(void) {
 // upright.
 extern "C" const ALLEGRO_TRANSFORM* cb_camera_world_transform(void) {
     int dw = 0, dh = 0;
-    cb_gfx_design_size(&dw, &dh);
+    cb::gfx::design_size(&dw, &dh);
     CbAffine w = cb_build_world_transform(camera_x, camera_y, camera_rad_angle,
                                           camera_zoom, dw, dh);
     static ALLEGRO_TRANSFORM t;
@@ -244,7 +245,7 @@ extern "C" double cb_camera_zoom(void) { return camera_zoom; }
 // (cb_object.cpp). Visual-only — not golden-tested.
 extern "C" void cb_camera_draw_area(double* w, double* h) {
     int ww = 0, wh = 0;
-    cb_gfx_window_size(&ww, &wh);
+    cb::gfx::window_size(&ww, &wh);
     double c = std::fabs(std::cos(camera_rad_angle));
     double s = std::fabs(std::sin(camera_rad_angle));
     double inv = 1.0 / (camera_zoom > kMinZoom ? camera_zoom : kMinZoom);
@@ -274,7 +275,7 @@ extern "C" void cb_camera_update_follow(void) {
         }
         case 2: {  // margin deadzone, measured against the PHYSICAL window size
             int ww = 0, wh = 0;
-            cb_gfx_window_size(&ww, &wh);
+            cb::gfx::window_size(&ww, &wh);
             double half_w = ww / 2.0, half_h = wh / 2.0;
             if (tx < camera_x - half_w + follow_setting)
                 camera_x += tx - (camera_x - half_w + follow_setting);
