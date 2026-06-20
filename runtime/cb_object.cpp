@@ -1174,18 +1174,18 @@ void circle_map_test(CbCollisionCheck& c) {
 
 }  // namespace
 
-// SetupCollision(objA, typeA, objB, typeB, handling): register a persistent
+// SetupCollision(objA, objB, typeA, typeB, handling): register a persistent
 // object-object check. Re-tested every update tick until ClearCollisions or an
 // object is deleted.
-extern "C" void cb_rt_setup_collision(CbObject* obj_a, int32_t type_a, CbObject* obj_b,
+extern "C" void cb_rt_setup_collision(CbObject* obj_a, CbObject* obj_b, int32_t type_a,
                                       int32_t type_b, int32_t handling) {
     register_collision(obj_a, type_a, obj_b, false, type_b, handling);
 }
 
-// SetupCollision(objA, typeA, map, typeB, handling): the type-4 map-collision
+// SetupCollision(objA, map, typeA, typeB, handling): the type-4 map-collision
 // overload. The Map handle is accepted for type-honesty but ignored — there is a
 // single active map singleton (like EditMap's popped-but-ignored map arg).
-extern "C" void cb_rt_setup_collision_map(CbObject* obj_a, int32_t type_a, CbMap* map,
+extern "C" void cb_rt_setup_collision_map(CbObject* obj_a, CbMap* map, int32_t type_a,
                                           int32_t type_b, int32_t handling) {
     (void)map;
     register_collision(obj_a, type_a, nullptr, true, type_b, handling);

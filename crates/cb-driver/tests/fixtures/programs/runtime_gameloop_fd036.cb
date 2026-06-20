@@ -52,7 +52,7 @@ ObjectRange(a, 10.0, 10.0)
 ObjectRange(b, 10.0, 10.0)
 PositionObject(a, 0.0, 0.0)
 PositionObject(b, 5.0, 0.0)         // overlapping boxes
-SetupCollision(a, 1, b, 1, 0)       // box-box, report (mode 0)
+SetupCollision(a, b, 1, 1, 0)       // box-box, report (mode 0)
 If CountCollisions(a) = 0 Then Print "precollide_ok"   // no tick has run yet
 UpdateGame
 If CountCollisions(a) > 0 Then Print "collide_tick_ok"
@@ -75,7 +75,7 @@ ObjectRange(p, 10.0)                 // circle diameter 10 (radius 5)
 ObjectRange(q, 10.0)
 PositionObject(p, 0.0, 0.0)
 PositionObject(q, 6.0, 0.0)          // overlapping circles (dist 6 < 10)
-SetupCollision(p, 2, q, 2, 2)        // circle-circle, slide (mode 2 moves p)
+SetupCollision(p, q, 2, 2, 2)        // circle-circle, slide (mode 2 moves p)
 UpdateGame
 // slide pushes p to q - (r1+r2+0.5) = 6 - 10.5 = -4.5
 If Abs(ObjectX(p) + 4.5) < 0.001 Then Print "slide_moved_ok"
@@ -93,7 +93,7 @@ Dim bw As Object
 bw = MakeObject()
 ObjectRange(bw, 10.0, 10.0)
 PositionObject(bw, -4.0, -8.0)      // box overlapping the wall's left edge
-SetupCollision(bw, 1, mp, 4, 0)     // box-map, report
+SetupCollision(bw, mp, 1, 4, 0)     // box-map, report
 UpdateGame
 If CountCollisions(bw) > 0 Then Print "boxmap_collide_ok"
 If Abs(CollisionAngle(bw, 1) - 180.0) < 0.001 Then Print "boxmap_angle_ok"  // wall is to the right
@@ -104,7 +104,7 @@ Dim cw As Object
 cw = MakeObject()
 ObjectRange(cw, 12.0)               // circle radius 6
 PositionObject(cw, -5.0, -8.0)      // overlapping the wall (within radius)
-SetupCollision(cw, 2, mp, 4, 2)     // circle-map, slide -> pushed out to the wall edge
+SetupCollision(cw, mp, 2, 4, 2)     // circle-map, slide -> pushed out to the wall edge
 UpdateGame
 If Abs(ObjectX(cw) + 6.0) < 0.01 Then Print "circlemap_slide_ok"   // edge 0 - radius 6
 

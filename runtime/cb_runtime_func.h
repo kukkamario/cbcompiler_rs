@@ -348,8 +348,8 @@ CbObject* cb_rt_next_object(void);
    GetCollision returns an Object handle (Null out of range, or for a map-wall
    hit — a Map is not an Object); indices are 1-based. ObjectsOverlap is a one-
    shot test with an optional type (default box). */
-void      cb_rt_setup_collision(CbObject* obj_a, int32_t type_a, CbObject* obj_b, int32_t type_b, int32_t handling);
-void      cb_rt_setup_collision_map(CbObject* obj_a, int32_t type_a, CbMap* map, int32_t type_b, int32_t handling);
+void      cb_rt_setup_collision(CbObject* obj_a, CbObject* obj_b, int32_t type_a, int32_t type_b, int32_t handling);
+void      cb_rt_setup_collision_map(CbObject* obj_a, CbMap* map, int32_t type_a, int32_t type_b, int32_t handling);
 void      cb_rt_object_range(CbObject* o, double range1);
 void      cb_rt_object_range3(CbObject* o, double range1, double range2);
 void      cb_rt_reset_object_collision(CbObject* o);

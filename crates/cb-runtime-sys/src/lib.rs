@@ -849,19 +849,19 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_init_object_list"].params.len(), 0);
 
             // Collision (FD-036 Phase 5). SetupCollision is two type-distinct
-            // overloads — object-object (param[2] Object) and the type-4 Map form
-            // (param[2] Map) — like PaintObject. ObjectRange/ObjectsOverlap have an
+            // overloads — object-object (param[1] Object) and the type-4 Map form
+            // (param[1] Map) — like PaintObject. ObjectRange/ObjectsOverlap have an
             // optional-arg arity overload. GetCollision returns an Object handle.
             let setup = by_symbol["cb_rt_setup_collision"];
             assert_eq!(setup.name, "setupcollision");
             assert_eq!(setup.params.len(), 5);
             assert_eq!(setup.params[0].ty, object_ty);
-            assert_eq!(setup.params[1].ty, IrType::Int);
-            assert_eq!(setup.params[2].ty, object_ty);
+            assert_eq!(setup.params[1].ty, object_ty);
+            assert_eq!(setup.params[2].ty, IrType::Int);
             assert_eq!(setup.return_ty, IrType::Void);
             let setup_map = by_symbol["cb_rt_setup_collision_map"];
             assert_eq!(setup_map.name, "setupcollision");
-            assert_eq!(setup_map.params[2].ty, map_ty2);
+            assert_eq!(setup_map.params[1].ty, map_ty2);
 
             let range = by_symbol["cb_rt_object_range"];
             assert_eq!(range.name, "objectrange");

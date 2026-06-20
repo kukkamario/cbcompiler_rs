@@ -408,7 +408,7 @@ See the [collision model](#collision-model) note for types and handling modes.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `SetupCollision` | `objA: Object, typeA: Integer, objB: Object, typeB: Integer, handling: Integer` | — | Registers a collision check. Types: 1=box, 2=circle, 4=map (B only). `handling`: 0=report, 1=stop (circle), 2=slide |
+| `SetupCollision` | `objA: Object, objB: Object, typeA: Integer, typeB: Integer, handling: Integer` | — | Registers a collision check. Types: 1=box, 2=circle, 4=map (B only). `handling`: 0=report, 1=stop (circle), 2=slide |
 | `ObjectRange` | `obj: Object, range1: Float [, range2: Float]` | — | Collision bounds: box = width,height; circle = diameter |
 | `ResetObjectCollision` | `obj: Object` | — | Clears recorded collisions for the object this frame |
 | `ClearCollisions` | — | — | Removes all collision checks |

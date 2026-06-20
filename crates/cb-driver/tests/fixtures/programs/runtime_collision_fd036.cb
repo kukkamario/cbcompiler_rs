@@ -42,13 +42,13 @@ If GetCollision(a, 1) = Null Then Print "getcol_null_ok"    // 1-based, none -> 
 If CollisionX(a, 1) = 0.0 Then Print "colx_zero_ok"
 
 // ─── SetupCollision registration smoke (object-object + Map overload) ────
-SetupCollision(a, 1, b, 1, 0)          // box-box, report
+SetupCollision(a, b, 1, 1, 0)          // box-box, report
 ClearCollisions()
 Print "setup_smoke_ok"
 
 Dim m As Map
 m = MakeMap(4, 4, 16, 16)
-SetupCollision(a, 2, m, 4, 2)          // circle-vs-map, slide -> the Map overload
+SetupCollision(a, m, 2, 4, 2)          // circle-vs-map, slide -> the Map overload
 ClearCollisions()
 Print "setup_map_smoke_ok"
 

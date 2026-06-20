@@ -1,6 +1,7 @@
 # FD-036: Game-Object Runtime Cluster — Multi-frame Images, Camera, Tile Maps, Objects & Game Loop
 
-**Status:** Pending Verification (all 5 phases complete)
+**Status:** Complete
+**Completed:** 2026-06-20
 **Priority:** Medium
 **Effort:** High (> 4 hours; multi-PR — landed phase by phase)
 **Impact:** Brings CoolBasic's central game-programming abstractions online — multi-frame sprites, the camera, tile maps, sprite **Objects**, collision, and the `UpdateGame`/`DrawGame` loop — unlocking the bulk of idiomatic CoolBasic game code.
@@ -124,7 +125,7 @@ Collision (`SetupCollision` — a **persistent** registration re-evaluated every
 - **5c — Game loop.** `cb_objects_update_all` (anim advance + `ObjectLife` tick/auto-delete + per-object collision wipe → map-tile-anim tick → run all checks → re-arm); `cb_map_tick_animation` (wall-clock time-step, see Phase 5 notes); `cb_rt_update_game`/`cb_rt_draw_game` + `gameUpdated`/`gameDrawn` flags in `cb_gfx.cpp`, with `do_draw_screen` gating the implicit update/cam-follow/draw and resetting the flags. Graphics-gated `runtime_gameloop_fd036` fixture drives `UpdateGame` to exercise life/anim/persistent-collision.
 
 **Decisions resolved during impl:**
-- **`SetupCollision` map arg = overload (user decision):** a second catalog row `SetupCollision(Object, Int, Map, Int, Int)` disambiguated by the 3rd param's type (mirrors `PaintObject(Map,Image)`). The `Map` handle is accepted for type-honesty but ignored (single active-map singleton).
+- **`SetupCollision` map arg = overload (user decision):** a second catalog row `SetupCollision(Object, Map, Int, Int, Int)` disambiguated by the 2nd param's type (mirrors `PaintObject(Map,Image)`). The `Map` handle is accepted for type-honesty but ignored (single active-map singleton). *(Arg order corrected post-verification: the canonical CoolBasic signature is `objA, objB, typeA, typeB, handling` — Phase 5a had typeA/objB swapped.)*
 - **Bug-ledger:** #3 `PointCamera` aims with the object's X (cbEnchanted typoed both `atan2` args to `getY()`); #4 `CloneCameraOrientation` sets **both** angle fields; #5 `PickedAngle` = degrees from the picked hit point (cbEnchanted returned stale loop-end coords in radians); #6 box↔circle object pairs are rejected at setup → never collide (cbEnchanted's dead `CircleRect`/`RectCircle` no-ops; replicated + pinned).
 - **`GetCollision`/`PickedObject` return an `Object` handle or `Null`**, never an integer. A **map-wall** `GetCollision` yields `Null` (a `Map` is not an `Object`).
 - **`MakeObjectFloor` leaves `ObjectRange` 0×0** (verified `objectinterface.cpp:544` — only `LoadObject`/`LoadAnimObject`/`CloneObject` seed it to image size). Corrects the FD prose that said `MakeObjectFloor` sets it.
