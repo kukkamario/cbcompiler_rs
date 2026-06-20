@@ -1,25 +1,22 @@
-// CoolBasic math runtime — ported from ../CBCompiler/Runtime/cb_math.cpp
-// and mathinterface.cpp, modernized for C++20.
+// CoolBasic math runtime (FD-013), C++20.
 //
-// Semantics preserved from the legacy implementation:
-//   - Trigonometric functions work in DEGREES, not radians (a CoolBasic
-//     quirk). Sin/Cos/Tan convert their argument deg->rad; ASin/ACos/ATan
-//     convert their result rad->deg.
-//   - Rnd/Rand/Randomize expose a seedable PRNG. Rnd is [0,max) / [min,max);
-//     Rand is [0,max) / [min,max). Without a Randomize call the sequence is
-//     reproducible (fixed default seed), matching legacy determinism.
+// CoolBasic semantics honored here:
+//   - Trigonometric functions work in DEGREES, not radians. Sin/Cos/Tan
+//     convert their argument deg->rad; ASin/ACos/ATan convert their result
+//     rad->deg.
+//   - Rnd/Rand/Randomize expose a seedable PRNG. Rnd is [0,max) / [low,high);
+//     Rand is inclusive [0,max] / [low,high]. Without a Randomize call the
+//     sequence is reproducible (fixed default seed).
 //   - GetAngle/WrapAngle return degrees in [0,360).
 //
-// Improvements over the legacy port:
+// Implementation choices:
 //   - PI comes from std::numbers::pi rather than a hand-written literal.
 //   - Randomness uses a Mersenne Twister (std::mt19937_64) with
 //     std::uniform_*_distribution, avoiding the modulo bias and short period
-//     of the legacy `rand() % n` approach.
-//
-// The catalog maps both `float` and `double` to CB_TYPE_FLOAT; CB's Float
-// is an f64 at the interpreter boundary, so every function here uses
-// `double` (the legacy code used 32-bit float, which would needlessly lose
-// precision against our wider ABI).
+//     of a `rand() % n` approach.
+//   - Everything computes in `double`: the catalog maps both `float` and
+//     `double` to CB_TYPE_FLOAT and CB's Float is an f64 at the interpreter
+//     boundary, so narrowing to 32-bit float would needlessly lose precision.
 
 #include "cb_runtime.h"
 
@@ -36,8 +33,8 @@ inline double to_deg(double rad) { return rad * 180.0 / std::numbers::pi; }
 inline double square(double a) { return a * a; }
 
 // Process-wide PRNG. Seeded with a fixed constant so that, absent a
-// Randomize() call, programs are reproducible run-to-run (matching the
-// legacy default-seed behaviour). Randomize() reseeds it.
+// Randomize() call, programs are reproducible run-to-run (CoolBasic's
+// default-seed behaviour). Randomize() reseeds it.
 std::mt19937_64& rng() {
     static std::mt19937_64 engine{0x9E3779B97F4A7C15ULL};
     return engine;
@@ -93,8 +90,8 @@ extern "C" double cb_rt_wrap_angle(double a) {
 //
 // CurveValue/CurveAngle ease `current` toward `target` by `1/smoothness` of
 // the gap each call. CurveAngle takes the shortest path around the 360° wrap.
-// BoxOverlap is an AABB intersection test; cbEnchanted negates Y so the test
-// runs in world space (Y up), which is observable only at the rectangle edges.
+// BoxOverlap is an AABB intersection test run in world space (Y up), so Y is
+// negated before the rect test — observable only at the rectangle edges.
 
 extern "C" double cb_rt_curve_value(double target, double current, double smoothness) {
     return current + (target - current) / smoothness;
@@ -108,9 +105,8 @@ extern "C" double cb_rt_curve_angle(double target, double current, double smooth
 }
 
 namespace {
-// AABB overlap, mirroring cbEnchanted's CollisionCheck::RectRectTest. Each box
-// is (left=x, right=x+w, bottom=y, top=y-h); the 1e-5 epsilon keeps shared
-// edges from registering as overlaps.
+// AABB overlap. Each box is (left=x, right=x+w, bottom=y, top=y-h); the 1e-5
+// epsilon keeps shared edges from registering as overlaps.
 bool rect_rect_test(double x1, double y1, double w1, double h1,
                     double x2, double y2, double w2, double h2) {
     constexpr double eps = 1e-5;
@@ -126,23 +122,25 @@ bool rect_rect_test(double x1, double y1, double w1, double h1,
 
 extern "C" int32_t cb_rt_box_overlap(double x1, double y1, double w1, double h1,
                                      double x2, double y2, double w2, double h2) {
-    // Y negated to match cbEnchanted's world-space (Y up) collision test.
+    // Negate Y so the test runs in world space (Y up); see rect_rect_test.
     return rect_rect_test(x1, -y1, w1, h1, x2, -y2, w2, h2) ? 1 : 0;
 }
 
 // ─── Random ───────────────────────────────────────────────────────────
 //
-// Semantics match cbEnchanted exactly (FD-017): `randf()` is [0,1); `rand(n)`
-// is uniform_int over the INCLUSIVE [0,n]. Hence Rand(low,high) is inclusive
-// [low,high] and Rnd(low,high) is [low,high). The `high < low` branch is the
-// documented special case (NOT a swap): Rnd -> randf()*low, Rand -> rand(low).
-// Non-deterministic across seeds by design, so fixtures assert ranges only.
+// Random semantics follow CoolBasic exactly (FD-017): `randf()` is [0,1);
+// `rand(n)` is uniform_int over the INCLUSIVE [0,n]. Hence Rand(low,high) is
+// inclusive [low,high] and Rnd(low,high) is [low,high). The `high < low` branch
+// is the documented special case (NOT a swap): Rnd -> randf()*low,
+// Rand -> rand(low). Non-deterministic across seeds by design, so fixtures
+// assert ranges only.
 
 namespace {
 double randf() { return std::uniform_real_distribution<double>(0.0, 1.0)(rng()); }
 
-// uniform_int over inclusive [0, n]; n <= 0 -> 0 (n==0 is trivially 0, and the
-// guard avoids the UB cbEnchanted's rand() hits when handed a negative bound).
+// uniform_int over inclusive [0, n]; n <= 0 -> 0 (n==0 is trivially 0; the
+// guard also keeps a negative bound out of the distribution, which would
+// otherwise be undefined).
 int32_t rand_n(int32_t n) {
     if (n <= 0) return 0;
     return std::uniform_int_distribution<int32_t>(0, n)(rng());

@@ -1,16 +1,18 @@
 // CoolBasic runtime — refcounted opaque string implementation.
 //
-// Port of legacy LString / LStringData (G:\projects\CBCompiler\Runtime\
-// lstring.{h,cpp}), modulo:
-//   - UTF-32 internal representation dropped. CB §3.1 mandates UTF-8 and
-//     §5.3 forbids `[]` indexing on strings, so codepoint-indexed access
-//     never needs to be O(1) — string library functions pay the walk cost.
-//   - Cached `mUtf8String` pointer dropped — inline data is already UTF-8.
-//   - `LString` smart-pointer wrapper dropped. RAII lives Rust-side
-//     (`CbStringHandle` in cb-backend-interp).
-//   - Static-data sentinel encoding switched from
-//     `mOffset != sizeof(LStringData)` to signed `refcount < 0`. Cleaner
-//     match for LLVM constant initializers.
+// CbString is a single heap block: a small header followed by inline UTF-8
+// bytes. The design choices, and why:
+//   - UTF-8 internally (not UTF-32). CB §3.1 mandates UTF-8 and §5.3 forbids
+//     `[]` indexing on strings, so codepoint-indexed access never needs to be
+//     O(1) — the string library pays the walk cost on demand.
+//   - No separate decoded buffer — the inline bytes are already UTF-8, so
+//     there is nothing to cache or keep in sync.
+//   - No C++ smart-pointer wrapper on this side. Ownership/RAII lives
+//     Rust-side (`CbStringHandle` in cb-backend-interp); across the FFI
+//     boundary a string is a bare `CbString*`.
+//   - The static-data sentinel is a signed `refcount < 0`, which a backend can
+//     emit directly as a constant initializer rather than having to encode it
+//     in the data offset.
 //
 // All consumers (Rust, future LLVM IR emission) see CbString only through
 // the primitives below, exposed via CbStringApi on the catalog. The struct
@@ -44,7 +46,7 @@ static_assert(sizeof(CbString) % alignof(std::size_t) == 0,
 // lives in .rodata; refcount = -1 means retain/release short-circuit.
 // Exposed through cb_runtime_string_api.empty rather than as a public
 // symbol — callers compare via that field, not by symbol name.
-static const CbString CB_EMPTY_STRING_INSTANCE = {
+static const CbString k_empty_string_instance = {
     /* refcount */ -1,
     /* pad      */ 0,
     /* byte_len */ 0,
@@ -85,7 +87,7 @@ struct OomMsg {
     CbString hdr;
     char     bytes[33];
 };
-const OomMsg CB_OOM = {
+const OomMsg k_oom = {
     {/*refcount*/ -1, /*pad*/ 0, /*byte_len*/ 32, /*capacity*/ 32,
      /*offset*/ offsetof(OomMsg, bytes)},
     "CoolBasic runtime: out of memory",  // 32 bytes (NUL not counted)
@@ -102,7 +104,7 @@ static CbString* alloc_with_data(std::size_t len) {
     CbString* s = static_cast<CbString*>(std::malloc(sizeof(CbString) + len));
     if (!s) {
         const CbHostApi* h = cb_host();
-        if (h && h->raise_error) h->raise_error(&CB_OOM.hdr);
+        if (h && h->raise_error) h->raise_error(&k_oom.hdr);
         std::abort();
     }
     s->refcount = 1;
@@ -144,12 +146,13 @@ extern "C" const uint8_t* cb_rt_string_data(const CbString* s) {
 }
 
 extern "C" CbString* cb_rt_string_concat(const CbString* a, const CbString* b) {
-    // Empty-operand fast paths: retain the non-empty side and avoid the
-    // allocation. Mirrors the legacy `LString::operator+` early exit.
+    // Empty-operand fast paths: when one side is empty the result is just the
+    // other side, so retain it and skip the allocation; two empties yield the
+    // shared sentinel.
     std::size_t la = cb_rt_string_len(a);
     std::size_t lb = cb_rt_string_len(b);
     if (la == 0 && lb == 0) {
-        return cb_rt_string_retain(const_cast<CbString*>(&CB_EMPTY_STRING_INSTANCE));
+        return cb_rt_string_retain(const_cast<CbString*>(&k_empty_string_instance));
     }
     if (la == 0) return cb_rt_string_retain(const_cast<CbString*>(b));
     if (lb == 0) return cb_rt_string_retain(const_cast<CbString*>(a));
@@ -179,5 +182,5 @@ extern "C" const CbStringApi cb_runtime_string_api = {
     /* len          */ cb_rt_string_len,
     /* data         */ cb_rt_string_data,
     /* concat       */ cb_rt_string_concat,
-    /* empty        */ &CB_EMPTY_STRING_INSTANCE,
+    /* empty        */ &k_empty_string_instance,
 };

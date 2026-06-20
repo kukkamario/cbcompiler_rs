@@ -19,8 +19,7 @@
 #include <type_traits>
 
 extern "C" {
-    // Forward-declare implementations defined in the .c TUs (gfx.c, input.c)
-    // and below in this TU.
+    // Forward-declare the implementations defined below in this TU.
     void    cb_rt_print(const CbString* text);
     int32_t cb_rt_abs_int(int32_t x);
     double  cb_rt_abs_float(double x);
@@ -32,9 +31,9 @@ extern "C" {
 
 // ─── Test-handle implementations ──────────────────────────────────────
 //
-// These were previously in catalog.c. Kept here because they're the only
-// runtime functions that use a runtime-defined opaque type, so they
-// double as compile-time tests of the `type_tag<CbTestHandle>` path.
+// These are the only runtime functions that use a runtime-defined opaque
+// type, so they double as compile-time tests of the
+// `type_tag<CbTestHandle>` path.
 
 extern "C" CbTestHandle* cb_rt_create_test_handle(void) {
     return reinterpret_cast<CbTestHandle*>(static_cast<uintptr_t>(42));
@@ -108,10 +107,10 @@ template<> struct type_tag<uint64_t>      { static constexpr CbTypeTag value = C
 template<> struct type_tag<float>         { static constexpr CbTypeTag value = CB_TYPE_FLOAT; };
 template<> struct type_tag<double>        { static constexpr CbTypeTag value = CB_TYPE_FLOAT; };
 template<> struct type_tag<bool>          { static constexpr CbTypeTag value = CB_TYPE_BOOL; };
-// Strings flow as opaque `CbString*` (catalog v4+). The legacy
-// `const char*` form is intentionally NOT specialized — any runtime
-// function declaring a string parameter as `const char*` now fails to
-// compile, enforcing the v4 ABI at template-deduction time.
+// Strings flow as opaque `CbString*` (catalog v4+). A `const char*` form
+// is intentionally NOT specialized — any runtime function declaring a
+// string parameter as `const char*` fails to compile, enforcing the v4
+// ABI at template-deduction time.
 template<> struct type_tag<      CbString*>     { static constexpr CbTypeTag value = CB_TYPE_STRING; };
 template<> struct type_tag<const CbString*>     { static constexpr CbTypeTag value = CB_TYPE_STRING; };
 
@@ -234,8 +233,8 @@ static const CbConstDesc catalog_consts[] = {
 //
 // Adding a new runtime function: declare its prototype in cb_runtime.h
 // (with extern "C" if not already in the extern "C" block), implement
-// it in one of the .c TUs (gfx.c / input.c) or here, and add one line
-// to this array. No other edits required.
+// it in one of the subsystem TUs (cb_gfx.cpp / cb_input.cpp / …) or here,
+// and add one line to this array. No other edits required.
 
 // `static const` rather than `constexpr` because `reinterpret_cast` of a
 // function pointer is not a constant expression. Static initialization runs
@@ -403,7 +402,7 @@ static const CbFuncDesc catalog_funcs[] = {
     // Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
     // No new opaque type — camera state is process-global. RotateCamera/
     // TurnCamera take two angle args (logical, render) feeding two independent
-    // fields (cbEnchanted's desyncable angles).
+    // fields (CoolBasic's desyncable logical/render angles).
     CB_FN("positioncamera",   cb_rt_position_camera),
     CB_FN("movecamera",       cb_rt_move_camera),
     CB_FN("translatecamera",  cb_rt_translate_camera),
