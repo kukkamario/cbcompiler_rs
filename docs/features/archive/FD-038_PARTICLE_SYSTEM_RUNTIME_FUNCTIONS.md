@@ -1,6 +1,7 @@
 # FD-038: Particle System Runtime Functions
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-20
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings CoolBasic's "Effects" subsystem online — particle emitters for smoke, sparks, fire, and exhaust trails — the last of the core game-programming subsystems before the independent runtime modules (Sound, File I/O, etc.).
