@@ -275,6 +275,34 @@ fn runtime_raise_error_writes_stderr_and_exits_one() {
         .stderr(contains("runtime error: boom"));
 }
 
+#[cfg(feature = "interp")]
+#[test]
+fn particle_command_on_non_emitter_traps() {
+    // FD-038: the Particle* commands are typed to take an Object, so the checker
+    // can't distinguish a plain object from an emitter. A plain object reaching
+    // ParticleMovement traps via the FD-015 channel (classic CB blind-casts → UB;
+    // resolved OQ3: trap, not a silent no-op). Graphics-gated — MakeObject /
+    // ParticleMovement only exist in the full Allegro build.
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping: SDK-free runtime build has no graphics");
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "emit_trap.cb",
+        "Dim o As Object\no = MakeObject()\nParticleMovement(o, 1.0, 0.1)\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("after").not())
+        .stderr(contains("runtime error: ParticleMovement"))
+        .stderr(contains("not a particle emitter"));
+}
+
 #[test]
 fn runtime_abs_overload_resolves() {
     let dir = tempdir().unwrap();

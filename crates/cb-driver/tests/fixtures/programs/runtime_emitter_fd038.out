@@ -1,0 +1,10 @@
+emitter_pos_ok
+emitter_angle_ok
+particle_cmds_ok
+emitter_enumerable_ok
+emitter_ticked_ok
+emitter_no_overlap_ok
+emitter_no_collision_ok
+emitter_no_pick_ok
+emitter_deleted_ok
+fd038_emitter_done

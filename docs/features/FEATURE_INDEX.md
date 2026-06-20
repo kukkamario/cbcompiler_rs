@@ -10,7 +10,7 @@ The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object r
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-038](FD-038_PARTICLE_SYSTEM_RUNTIME_FUNCTIONS.md) | Particle System Runtime Functions | Open | High | Medium |
+| [FD-038](FD-038_PARTICLE_SYSTEM_RUNTIME_FUNCTIONS.md) | Particle System Runtime Functions | Pending Verification | High | Medium |
 
 ## Completed
 

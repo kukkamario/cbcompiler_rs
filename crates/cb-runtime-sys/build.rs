@@ -53,6 +53,7 @@ const RERUN_SOURCES: &[&str] = &[
     "cb_object.cpp",
     "cb_object.h",
     "cb_object_data.h",
+    "cb_particle.h",
     "cb_collision_data.h",
     "cb_font.cpp",
     "cb_font.h",

@@ -537,6 +537,16 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("objectsight",           cb_rt_object_sight),
     CB_FN("screenpositionobject",  cb_rt_screen_position_object),
 
+    // Particle emitters (FD-038). An emitter IS an `Object` (MakeEmitter returns
+    // tag 13), so the object commands above drive it; the Particle* commands take
+    // that `Object` and trap on a non-emitter. ParticleMovement's acceleration is
+    // an optional arg (own arity overload).
+    CB_FN("makeemitter",           cb_rt_make_emitter),
+    CB_FN("particlemovement",      cb_rt_particle_movement),
+    CB_FN("particlemovement",      cb_rt_particle_movement_acc),
+    CB_FN("particleemission",      cb_rt_particle_emission),
+    CB_FN("particleanimation",     cb_rt_particle_animation),
+
     // Text & fonts (FD-018)
     CB_FN("text",             cb_rt_text),
     CB_FN("centertext",       cb_rt_center_text),

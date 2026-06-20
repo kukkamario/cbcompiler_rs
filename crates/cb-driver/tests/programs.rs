@@ -314,6 +314,17 @@ fn runtime_pick_fd036() {
 }
 
 #[test]
+fn runtime_emitter_fd038() {
+    // Particle emitters: MakeEmitter returns the Object handle (no distinct type),
+    // so object commands drive it and it enumerates; the Particle* commands wire
+    // up (3-/4-arg movement, emission, animation); and the emitter is excluded
+    // from both ObjectsOverlap/SetupCollision and ObjectPickable/ObjectPick (real
+    // CB — see FD-038). Driven through UpdateGame. The particle simulation math is
+    // unit-tested headlessly in runtime/tests/test_particle.cpp.
+    run_graphics("runtime_emitter_fd038");
+}
+
+#[test]
 fn runtime_gameloop_fd036() {
     // UpdateGame drives the per-tick advancement: ObjectLife decrement + auto-
     // delete, animation frame advance, and the persistent SetupCollision checks

@@ -378,6 +378,20 @@ double    cb_rt_picked_angle(void);
 int32_t   cb_rt_object_sight(const CbObject* a, const CbObject* b);
 void      cb_rt_screen_position_object(CbObject* o, double sx, double sy);
 
+/* Particle emitters (cb_object.cpp, FD-038). A CoolBasic "Effects" emitter IS an
+   Object: MakeEmitter returns the `Object` handle (tag 13), and the emitter is
+   moved/rotated/deleted with the ordinary object commands above. The three
+   Particle* commands take an `Object` (the emitter) and trap (FD-015) if handed
+   a non-emitter object. MakeEmitter(image, lifeTime): lifeTime is the per-PARTICLE
+   life in DrawScreen frames. ParticleMovement's acceleration arg is optional (own
+   arity overload, default 1.0). Density/count/spread are integers (Help docs).
+   Particles never pick or collide (real CB; see FD-038). */
+CbObject* cb_rt_make_emitter(const CbImage* image, int32_t life_time);
+void      cb_rt_particle_movement(CbObject* o, double speed, double gravity);
+void      cb_rt_particle_movement_acc(CbObject* o, double speed, double gravity, double accel);
+void      cb_rt_particle_emission(CbObject* o, int32_t density, int32_t count, int32_t spread);
+void      cb_rt_particle_animation(CbObject* o, int32_t frames);
+
 /* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/
    ClearText manage a persistent on-screen text queue re-rendered each DrawScreen.

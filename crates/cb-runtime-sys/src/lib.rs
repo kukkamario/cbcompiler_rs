@@ -959,6 +959,38 @@ mod tests {
             assert_eq!(cam_pick.name, "camerapick");
             assert_eq!(cam_pick.params.len(), 2);
             assert_eq!(cam_pick.params[0].ty, IrType::Float);
+
+            // Particle emitters (FD-038). MakeEmitter returns the Object handle
+            // (no new type); ParticleMovement is a 3-arg + 4-arg (accel) overload
+            // pair; the Particle* commands all take an Object (the emitter).
+            let make_emitter = by_symbol["cb_rt_make_emitter"];
+            assert_eq!(make_emitter.name, "makeemitter");
+            assert_eq!(make_emitter.params.len(), 2);
+            assert_eq!(make_emitter.params[0].ty, image_ty2);
+            assert_eq!(make_emitter.params[1].ty, IrType::Int);
+            assert_eq!(make_emitter.return_ty, object_ty);
+            let pmove = by_symbol["cb_rt_particle_movement"];
+            assert_eq!(pmove.name, "particlemovement");
+            assert_eq!(pmove.params.len(), 3);
+            assert_eq!(pmove.params[0].ty, object_ty);
+            assert_eq!(pmove.params[1].ty, IrType::Float);
+            assert_eq!(pmove.return_ty, IrType::Void);
+            assert_eq!(
+                by_symbol["cb_rt_particle_movement_acc"].name,
+                "particlemovement"
+            );
+            assert_eq!(by_symbol["cb_rt_particle_movement_acc"].params.len(), 4);
+            let pemit = by_symbol["cb_rt_particle_emission"];
+            assert_eq!(pemit.name, "particleemission");
+            assert_eq!(pemit.params.len(), 4);
+            assert_eq!(pemit.params[0].ty, object_ty);
+            assert_eq!(pemit.params[1].ty, IrType::Int);
+            assert_eq!(pemit.params[3].ty, IrType::Int);
+            let panim = by_symbol["cb_rt_particle_animation"];
+            assert_eq!(panim.name, "particleanimation");
+            assert_eq!(panim.params.len(), 2);
+            assert_eq!(panim.params[0].ty, object_ty);
+            assert_eq!(panim.params[1].ty, IrType::Int);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

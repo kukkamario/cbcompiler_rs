@@ -1,6 +1,6 @@
 # FD-038: Particle System Runtime Functions
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings CoolBasic's "Effects" subsystem online — particle emitters for smoke, sparks, fire, and exhaust trails — the last of the core game-programming subsystems before the independent runtime modules (Sound, File I/O, etc.).
@@ -73,6 +73,20 @@ Decision:
 - `cargo build`/`test --workspace`, `clippy -D warnings`, `fmt --check` green in both SDK-free and full-Allegro modes.
 - **Negative tests (real-CB-verified):** `ObjectPickable`/`SetupCollision`/`ObjectsOverlap` on an emitter no-op (emitter never picked or collided); pixel-pick on an emitter does not crash; an emitter-only command on a plain `Object` traps with a clear message.
 - **Deferred (needs a real display):** visual smoke of smoke/spark/fire/exhaust emitters, spread/gravity/acceleration tuning, animated particles, emitter-as-object move/rotate.
+
+## Implementation Notes (2026-06-20)
+
+Implemented as designed: emitter reuses `Object`, internal kind, runtime trap, no new catalog type/version bump. Net change is C++ runtime + 5 catalog rows + asserts — **zero Rust frontend changes**.
+
+- **`runtime/cb_particle.h` (new, header-only, Allegro-free):** `CbParticle` / `CbEmitterState` + the pure simulation — `particle_launch_rad` (uniform ±spread), `integrate_and_cull` (x+=v; v*=accel; vy-=gravity; cull), `spawn_due` (density schedule, non-positive-density guard), `particle_frame` (forward, clamped). Mirrors the cb_*_data.h headless-test pattern.
+- **`runtime/cb_object.cpp`:** `CbObject` gained a `std::unique_ptr<CbEmitterState> emitter` (the kind discriminator) + a `rogue_emitters` drain list. New entry points `cb_rt_make_emitter` / `cb_rt_particle_movement` (+`_acc`) / `cb_rt_particle_emission` / `cb_rt_particle_animation`; `require_emitter` traps non-emitters via `cb_host()->raise_error`. `render_particles` (in the world-transform bracket), `update_emitter` + `update_rogue_emitters` (in `update_all`), deferred-free in `delete_object`, rogue cleanup in `clear_objects`. Emitters excluded in `register_collision` / `objects_overlap_impl` / `object_pickable` / `mirror_object`. Spawn RNG draws from the shared `cb_rt_rnd_max` (so `Randomize` applies).
+- **`runtime/cb_gfx.{h,cpp}`:** new `cb::gfx::image_frame_info` accessor (frame cell size + strip length) so MakeEmitter can size/clamp animated particles.
+- **`runtime/cb_runtime_func.h` + `catalog.cpp`:** 5 prototypes + 5 `CB_FN` rows (MakeEmitter, 2× ParticleMovement overloads, ParticleEmission, ParticleAnimation), all `Object`-typed. No new type row, no `CB_CATALOG_VERSION` bump.
+- **Tests:** `runtime/tests/test_particle.cpp` (13 gtest cases, the pure math); `cb-runtime-sys` catalog asserts for the 5 functions; driver fixture `runtime_emitter_fd038` (emitter-as-object + enumeration + collision/pick exclusion through `UpdateGame`); cli.rs `particle_command_on_non_emitter_traps` (the trap, exit 1).
+
+**Verified (2026-06-20, Windows + Allegro SDK):** `cargo test --workspace` all green (0 failed); `cargo clippy --workspace --all-targets -D warnings` clean; `cargo fmt --all --check` clean; `cb-runtime-sys` catalog asserts 20/20 (full Allegro build, emitter signatures decode); native `ctest` **70/70** (57 prior + 13 new `Particle.*`); emitter driver fixture + trap cli test pass.
+
+**Deferred (needs a real display — can't run headless):** visual smoke of smoke/spark/fire/exhaust emitters, spread/gravity/acceleration tuning, animated particles, emitter-as-object move/rotate. One detail worth a real-CB check: the animation *direction* (we play forward per the Help; cbEnchanted played reverse).
 
 ## Related
 

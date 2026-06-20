@@ -51,9 +51,8 @@ none". The user never sees their internals.
 | `Font` | Loaded TrueType font |
 | `Sound` | Preloaded audio sample |
 | `Channel` | An active sound playback instance (returned by `PlaySound`) |
-| `Object` | 2D sprite object (position, angle, scale, animation, collision) |
+| `Object` | 2D sprite object (position, angle, scale, animation, collision). Also the type of a particle emitter — see Particle Effects |
 | `Map` | Tilemap |
-| `Emitter` | Particle emitter |
 | `File` | Open file handle |
 | `Memblock` | Raw memory block for byte-level access |
 
@@ -312,12 +311,39 @@ CoolBasic `…Animation` commands play a video file (single active video).
 
 ## Particle Effects
 
+A particle emitter **is an `Object`** (cbEnchanted: `CBParticleEmitter : public
+CBObject`). `MakeEmitter` returns the `Object` handle, so the emitter is moved,
+rotated, given a life, deleted, and enumerated with the ordinary object commands
+below — particles fly in the direction the emitter object faces, within the
+`spread` sector. There is no distinct `Emitter` type (cbcompiler_rs reuses
+`Object`; a distinct type would not type-check against the object commands — see
+FD-038). The four entry points below are the entire public surface.
+
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `MakeEmitter` | `img: Image, lifeTime: Integer` | `Emitter` | Creates a particle emitter using `img` as the particle sprite; `lifeTime` is the particle lifetime in **frames** (update cycles), decremented once per update |
-| `ParticleEmission` | `emitter: Emitter, density: Float, count: Float, spread: Float` | — | `density` = spawn **interval** in update cycles (smaller = denser; a batch spawns whenever an internal per-frame counter exceeds `density`), `count` = particles per batch, `spread` = angular half-spread (degrees) |
-| `ParticleMovement` | `emitter: Emitter, speed: Float, gravity: Float, acceleration: Float` | — | Initial speed, gravity (subtracted from vertical velocity each update), and `acceleration` = **per-frame velocity multiplier** (default 1; `<1` decelerates, `>1` accelerates) |
-| `ParticleAnimation` | `emitter: Emitter, frameCount: Integer` | — | Frame cycling for animated particle images |
+| `MakeEmitter` | `img: Image, lifeTime: Integer` | `Object` | Creates a particle emitter at (0,0) using `img` as the particle sprite; `lifeTime` is each **particle's** life in frames (update cycles). Delete with `DeleteObject` |
+| `ParticleMovement` | `emitter: Object, speed: Float, gravity: Float [, acceleration: Float]` | — | Launch `speed` (px), `gravity` (subtracted from vertical velocity each update — positive pulls particles down), and the optional per-frame velocity multiplier `acceleration` (default 1; `<1` decelerates, `>1` accelerates) |
+| `ParticleEmission` | `emitter: Object, density: Integer, count: Integer, spread: Integer` | — | `density` = spawn **interval** in update cycles (smaller = denser; a batch spawns whenever an internal per-frame counter exceeds `density`), `count` = particles per batch, `spread` = the ± angular half-sector in degrees (0..180; 180 = all directions, 0 = a tight stream). Launch direction is **uniform** over the sector |
+| `ParticleAnimation` | `emitter: Object, frameCount: Integer` | — | Animate a `LoadAnimImage` particle sprite as a `frameCount`-long strip, played once over each particle's life (frame 0 at spawn → last at death). Clamped to the strip's real length |
+
+**Behavior notes / cbEnchanted & docs divergences (FD-038):**
+
+- **Emitters never pick or collide.** Despite the CoolBasic Help ("*even collision
+  and pick commands work with sources*"), the real compiler does neither —
+  `ObjectPickable`/`SetupCollision`/`ObjectsOverlap` are inert on an emitter, and
+  pixel-pick is kept from crashing. cbEnchanted left emitters in both registries
+  (a divergence in the other direction).
+- **`ParticleMovement`/`ParticleEmission`/`ParticleAnimation` trap** (clean runtime
+  error) if handed a non-emitter `Object` — classic CB blind-casts the handle (UB).
+- **Animation plays forward** (frame 0 → last over the particle's life), per the
+  Help; cbEnchanted played it in reverse. Frame slicing uses the FD-036-correct
+  row/offset math (cbEnchanted's particle slicer carried the same row/offset bugs
+  FD-036 fixed for images).
+- **No `StopEmitting` command** — it is a cbEnchanted extension, not CoolBasic.
+  Deleting an emitter (`DeleteObject`, or `ObjectLife` expiry) lets its live
+  particles finish before the emitter is freed.
+- A non-positive emission `density` spawns nothing (guards cbEnchanted's infinite
+  spawn loop).
 
 ---
 
@@ -890,8 +916,21 @@ intentionally. Known status and divergences as of the latest runtime work
   (cbEnchanted's hooks are defined but never registered). The update tick advances
   animation and `ObjectLife` (auto-deleting at 0), wipes per-frame collision lists,
   steps map-tile animation, and re-runs every collision check.
-- **Not yet implemented** in cbcompiler_rs: sound, video playback, particles, file
-  I/O, memblocks, `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the
+- **Particle emitters** (FD-038, `runtime/cb_object.cpp` + `runtime/cb_particle.h`)
+  are implemented: `MakeEmitter`/`ParticleMovement`/`ParticleEmission`/
+  `ParticleAnimation`. An emitter is a `CbObject` carrying an emitter payload (the
+  kind discriminator), so it reuses the `Object` type (tag 13) — every object
+  command drives it, with zero frontend/catalog-type changes. It renders its
+  particles and steps them on the Phase-5 update tick, defers `DeleteObject` until
+  the particles drain, and is **excluded from picking and collision** (real CB does
+  neither, contradicting the Help docs). The pure simulation (uniform launch
+  direction, gravity/acceleration integration, cull, forward+clamped animation
+  frame) lives in the Allegro-free `cb_particle.h` and is unit-tested headlessly.
+  Divergences from cbEnchanted: forward animation (it played reverse), trap on a
+  non-emitter handle (it blind-cast → UB), no `StopEmitting` (its own extension),
+  and a non-positive-density spawn guard.
+- **Not yet implemented** in cbcompiler_rs: sound, video playback, file I/O,
+  memblocks, `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the
   plumbing-heavy System funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)

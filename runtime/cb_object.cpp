@@ -26,6 +26,7 @@
 
 #include "cb_object.h"
 #include "cb_object_data.h"
+#include "cb_particle.h"
 #include "cb_collision_data.h"
 #include "cb_camera.h"
 #include "cb_gfx.h"           // cb::gfx::image_bitmap / image_pristine / apply_*
@@ -121,6 +122,16 @@ struct CbObject {
     // ObjectPickable; read by ObjectPick's raycast and CameraPick's point test.
     int pickStyle = 0;
 
+    // ─── Particle emitter (FD-038) ─────────────────────────────────────
+    // Non-null exactly for an emitter (MakeEmitter). This pointer IS the
+    // emitter-kind discriminator (cbEnchanted used a virtual type() tag): an
+    // emitter renders its particles instead of a sprite, updates them each tick,
+    // defers its DeleteObject until the particles drain, and is excluded from
+    // picking/collision. The `tex`/frameWidth/frameHeight fields hold the
+    // particle image (copied from MakeEmitter's Image), and maxFrames its strip
+    // length, reusing the object texture machinery.
+    std::unique_ptr<cb::particle::CbEmitterState> emitter;
+
     explicit CbObject(bool floor)
         : visible(g_default_visible), maskColor(al_map_rgb(0, 0, 0)), isFloor(floor) {}
 };
@@ -136,6 +147,12 @@ namespace {
 std::vector<CbObject*> live_objects;
 std::vector<CbObject*> floor_objects;
 std::vector<CbObject*> regular_objects;
+
+// Deleted emitters draining their remaining particles (FD-038). DeleteObject on
+// an emitter with live particles stops it spawning and moves it here (out of
+// live_objects, so no longer enumerable/addressable) but keeps it in its draw
+// chain so the particles finish; update_all drains and frees them.
+std::vector<CbObject*> rogue_emitters;
 
 // Shared stateful enumeration cursor (InitObjectList resets it; NextObject
 // advances). Non-reentrant — a single shared iterator, as in CoolBasic.
@@ -344,7 +361,47 @@ void render_floor(const CbObject* o, ALLEGRO_BITMAP* bmp) {
     }
 }
 
+// Draw an emitter's live particles (FD-038). Camera world space is already
+// active (called from render_all's bracket). Each particle is a translated,
+// centred sprite — no rotation, no ghost alpha (faithful to cbEnchanted). For an
+// animated strip the frame is chosen forward over the particle's life and the
+// cell sliced with the FD-036-correct row/offset math (cbEnchanted's particle
+// slicer had the same row/offset bugs FD-036 fixed for images).
+void render_particles(const CbObject* o) {
+    const cb::particle::CbEmitterState& e = *o->emitter;
+    if (!o->tex || !o->tex->bmp || e.particles.empty()) return;
+    ALLEGRO_BITMAP* bmp = o->tex->bmp;
+    bool animated = e.frameCount > 1 && o->frameWidth > 0 && o->frameHeight > 0;
+    int32_t tw = al_get_bitmap_width(bmp);
+    float fullCx = al_get_bitmap_width(bmp) * 0.5f;
+    float fullCy = al_get_bitmap_height(bmp) * 0.5f;
+    for (const cb::particle::CbParticle& p : e.particles) {
+        float dx = (float)p.x;
+        float dy = (float)(-p.y);  // convertCoords Y-flip
+        if (animated) {
+            int32_t frame = cb::particle::particle_frame(p.lifeTime,
+                                                         e.particleLifeTime,
+                                                         e.frameCount);
+            int32_t col = 0, row = 0, left = 0, top = 0;
+            if (!cb_object_frame_slice(tw, o->frameWidth, o->frameHeight, frame,
+                                       col, row, left, top)) {
+                continue;
+            }
+            al_draw_bitmap_region(bmp, (float)left, (float)top,
+                                  (float)o->frameWidth, (float)o->frameHeight,
+                                  dx - o->frameWidth * 0.5f,
+                                  dy - o->frameHeight * 0.5f, 0);
+        } else {
+            al_draw_bitmap(bmp, dx - fullCx, dy - fullCy, 0);
+        }
+    }
+}
+
 void render_object(const CbObject* o) {
+    if (o->emitter) {
+        if (o->visible) render_particles(o);
+        return;
+    }
     if (!o->visible || !o->painted || !o->tex || !o->tex->bmp) return;
     ALLEGRO_BITMAP* bmp = o->tex->bmp;
 
@@ -379,6 +436,25 @@ void render_object(const CbObject* o) {
     } else {
         al_draw_rotated_bitmap(bmp, cx, cy, dx, dy, rot, 0);
     }
+}
+
+// Resolve the emitter state behind an Object handle for the Particle* commands.
+// Returns null and raises a clean runtime error (FD-015 trap channel) if the
+// handle is not an emitter — classic CB blind-casts here (UB); we refuse. The
+// Particle* commands are typed to take an Object, so the type checker can't catch
+// a plain-object argument (resolved OQ3: trap, not a silent no-op).
+cb::particle::CbEmitterState* require_emitter(CbObject* o, const char* cmd) {
+    if (o && o->emitter) return o->emitter.get();
+    const CbHostApi* h = cb_host();
+    if (h && h->raise_error) {
+        std::string msg = std::string(cmd) +
+                          ": object is not a particle emitter (create it with MakeEmitter)";
+        CbString* s = cb_rt_string_from_literal(
+            reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+        h->raise_error(s);       // host copies the bytes at the boundary
+        cb_rt_string_release(s);
+    }
+    return nullptr;
 }
 
 }  // namespace
@@ -494,9 +570,24 @@ extern "C" CbObject* cb_rt_clone_object(const CbObject* src) {
 // only when the last owner (a clone) releases it. Dangling-handle if reused.
 extern "C" void cb_rt_delete_object(CbObject* o) {
     if (!o) return;
+    // Emitter graceful drain (FD-038): a deleted emitter that still has live
+    // particles stops spawning and finishes them before being freed. It leaves
+    // live_objects (no longer addressable/enumerable) but stays in its draw chain
+    // so the particles keep rendering; update_rogue_emitters drains then frees it.
+    // (This also smooths an emitter auto-deleted by ObjectLife, unlike cbEnchanted
+    // which dropped its particles abruptly on life expiry.)
+    if (o->emitter && !o->emitter->stop && !o->emitter->particles.empty()) {
+        erase_from(live_objects, o);
+        erase_from(pickable_objects, o);  // emitters are never pickable; defensive
+        if (last_picked == o) last_picked = nullptr;
+        o->emitter->stop = true;
+        rogue_emitters.push_back(o);
+        return;
+    }
     erase_from(live_objects, o);
     erase_from(floor_objects, o);
     erase_from(regular_objects, o);
+    erase_from(rogue_emitters, o);
     erase_from(pickable_objects, o);
     if (last_picked == o) last_picked = nullptr;
     // Drop any collision check that references the deleted object (else the next
@@ -512,9 +603,14 @@ extern "C" void cb_rt_delete_object(CbObject* o) {
 // alone (FD-036 decoupling decision; LoadMap/MakeMap own the map's lifetime).
 extern "C" void cb_rt_clear_objects(void) {
     for (CbObject* o : live_objects) delete o;
+    // Rogue (deleted, still-draining) emitters are no longer in live_objects, so
+    // free them separately (FD-038). They remain in regular_objects, but that is
+    // cleared below without dereferencing, so there is no double free.
+    for (CbObject* o : rogue_emitters) delete o;
     live_objects.clear();
     floor_objects.clear();
     regular_objects.clear();
+    rogue_emitters.clear();
     pickable_objects.clear();
     last_picked = nullptr;
     collision_checks.clear();  // every check referenced a now-deleted object
@@ -687,7 +783,7 @@ extern "C" void cb_rt_ghost_object(CbObject* o, double alpha) {
 // Allocates a fresh PRIVATE holder and repoints only this object — clones keep
 // the old shared bitmap (faithful to CoolBasic, which mirrors into a new target).
 extern "C" void cb_rt_mirror_object(CbObject* o, int32_t dir) {
-    if (!o || dir < 0 || dir > 2 || o->isFloor) return;
+    if (!o || dir < 0 || dir > 2 || o->isFloor || o->emitter) return;
     if (!o->tex || !o->tex->pristine) return;
     ALLEGRO_BITMAP* srcp = o->tex->pristine;
     int w = al_get_bitmap_width(srcp);
@@ -866,6 +962,8 @@ namespace {
 void register_collision(CbObject* a, int typeA, CbObject* b, bool bIsMap, int typeB,
                         int handling) {
     if (!a) return;
+    if (a->emitter) return;            // emitters never collide (FD-038, real CB)
+    if (b && b->emitter) return;
     if (typeA != 1 && typeA != 2) return;  // colliding type must be Box or Circle
     if (bIsMap) {
         if (typeB != 4) return;  // the Map overload is map-collision only
@@ -893,6 +991,7 @@ void set_object_range(CbObject* o, double r1, double r2) {
 // centred AABB (range1×range2); circle uses range1/2 as the radius.
 int32_t objects_overlap_impl(const CbObject* a, const CbObject* b, int32_t type) {
     if (!a || !b) return 0;
+    if (a->emitter || b->emitter) return 0;  // emitters never collide (FD-038)
     if (type < 1 || type > 3) return 0;
     if (type == 1) {
         double w1 = a->range1, h1 = a->range2, w2 = b->range1, h2 = b->range2;
@@ -1258,6 +1357,7 @@ void run_collision_checks(void) {
 // pixel. Adds/removes the object from the pickable set.
 extern "C" void cb_rt_object_pickable(CbObject* o, int32_t style) {
     if (!o) return;
+    if (o->emitter) return;  // emitters are never pickable (FD-038, real CB)
     if (style == 0) {
         o->pickStyle = 0;
         erase_from(pickable_objects, o);
@@ -1367,6 +1467,89 @@ extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) 
     o->posY = sy;
 }
 
+// ─── Particle emitters (FD-038) ─────────────────────────────────────────
+//
+// A CoolBasic "Effects" emitter IS an Object (cbEnchanted: CBParticleEmitter :
+// public CBObject). MakeEmitter returns the `Object` handle, so every object
+// command above works on it unchanged; the three Particle* commands configure
+// the emitter payload and trap on a non-emitter handle. Emitters render their
+// particles (render_particles), step them each tick (update_emitter / the rogue
+// drain), and are excluded from picking and collision (real CB — see FD-038).
+
+// MakeEmitter(image, lifeTime): create an emitter at (0,0). `lifeTime` is the
+// per-PARTICLE life in DrawScreen frames (not the emitter's own life). The
+// particle texture is copied from the image into the object's own masked holder
+// (so a later DeleteImage of the source is safe), and the strip's frame geometry
+// is captured for animated particles.
+extern "C" CbObject* cb_rt_make_emitter(const CbImage* image, int32_t life_time) {
+    CbObject* o = new CbObject(false);
+    o->emitter = std::make_unique<cb::particle::CbEmitterState>();
+    o->emitter->particleLifeTime = life_time;
+
+    ALLEGRO_BITMAP* srcPristine = cb::gfx::image_pristine(image);
+    if (srcPristine) {
+        ALLEGRO_BITMAP* pristine = clone_bitmap_headless(srcPristine);
+        if (pristine) {
+            set_object_texture(o, pristine);  // pristine + derived masked copy
+            o->sizeX = al_get_bitmap_width(pristine);
+            o->sizeY = al_get_bitmap_height(pristine);
+        }
+    }
+    // Frame geometry for an animated particle strip (all 0 for a plain image).
+    int32_t fw = 0, fh = 0, fc = 0;
+    cb::gfx::image_frame_info(image, &fw, &fh, &fc);
+    o->frameWidth = fw;
+    o->frameHeight = fh;
+    o->maxFrames = fc;
+    o->painted = true;
+    register_object(o);
+    return o;
+}
+
+// ParticleMovement(emitter, speed, gravity[, acceleration]): launch speed (px),
+// gravity (positive pulls particles down), and an optional per-frame velocity
+// scale (default 1.0 = constant; <1 decelerates, >1 accelerates). The 3-arg form
+// resets acceleration to the 1.0 default; the 4-arg form is its own overload.
+extern "C" void cb_rt_particle_movement(CbObject* o, double speed, double gravity) {
+    if (auto* e = require_emitter(o, "ParticleMovement")) {
+        e->speed = speed;
+        e->gravity = gravity;
+        e->acceleration = 1.0;
+    }
+}
+extern "C" void cb_rt_particle_movement_acc(CbObject* o, double speed, double gravity,
+                                            double accel) {
+    if (auto* e = require_emitter(o, "ParticleMovement")) {
+        e->speed = speed;
+        e->gravity = gravity;
+        e->acceleration = accel;
+    }
+}
+
+// ParticleEmission(emitter, density, count, spread): emission interval in frames
+// (smaller = denser), particles per emission, and the ± spread sector in degrees
+// (0..180; 180 = all directions, 0 = a tight stream along the facing direction).
+extern "C" void cb_rt_particle_emission(CbObject* o, int32_t density, int32_t count,
+                                        int32_t spread) {
+    if (auto* e = require_emitter(o, "ParticleEmission")) {
+        e->density = (double)density;
+        e->count = count;
+        e->spread = (double)spread;
+    }
+}
+
+// ParticleAnimation(emitter, frames): animate the (LoadAnimImage) particle image
+// as a `frames`-long strip, played once over each particle's life. Clamped to the
+// strip's real frame count so an over-long value can't slice past the sheet
+// (resolved OQ5: classic CB crashes; we clamp).
+extern "C" void cb_rt_particle_animation(CbObject* o, int32_t frames) {
+    if (auto* e = require_emitter(o, "ParticleAnimation")) {
+        if (frames < 0) frames = 0;
+        if (o->maxFrames > 0 && frames > o->maxFrames) frames = o->maxFrames;
+        e->frameCount = frames;
+    }
+}
+
 // ─── Game-loop update (FD-036 Phase 5) ──────────────────────────────────
 
 namespace {
@@ -1386,6 +1569,39 @@ void advance_object_anim(CbObject* o) {
     o->playing = s.playing;
 }
 
+// One emitter tick (FD-038): bump the spawn counter, integrate+cull existing
+// particles, then spawn any emissions due. Spawn randomness draws from the shared
+// CB RNG (cb_rt_rnd_max → [0,1), the randf() cbEnchanted used), so Randomize
+// affects particles too. ObjectLife decrement/auto-delete is handled by the
+// caller (update_all), as for any object.
+void update_emitter(CbObject* o) {
+    cb::particle::CbEmitterState& e = *o->emitter;
+    e.spawnCounter += 1.0;
+    cb::particle::integrate_and_cull(e);
+    if (e.stop) return;  // defensive; live emitters are never stopped
+    cb::particle::spawn_due(e, o->posX, o->posY, o->angle,
+                            [] { return cb_rt_rnd_max(1.0); });
+}
+
+// Drain deleted emitters (FD-038): each rogue keeps integrating its particles
+// (no spawning) until empty, then leaves its draw chain and is freed. Called once
+// per update tick. A rogue created during this same tick's main loop integrates
+// once more here (a 1-frame cosmetic nicety, not a correctness issue).
+void update_rogue_emitters(void) {
+    for (std::size_t i = 0; i < rogue_emitters.size();) {
+        CbObject* o = rogue_emitters[i];
+        cb::particle::integrate_and_cull(*o->emitter);
+        if (o->emitter->particles.empty()) {
+            erase_from(floor_objects, o);
+            erase_from(regular_objects, o);
+            rogue_emitters.erase(rogue_emitters.begin() + (std::ptrdiff_t)i);
+            delete o;
+        } else {
+            ++i;
+        }
+    }
+}
+
 }  // namespace
 
 // The per-frame object update: per object advance animation, decrement ObjectLife
@@ -1396,13 +1612,19 @@ void update_all(void) {
     // Snapshot the live set: auto-delete (life) mutates the registries mid-loop.
     std::vector<CbObject*> snapshot = live_objects;
     for (CbObject* o : snapshot) {
-        advance_object_anim(o);
+        if (o->emitter) {
+            update_emitter(o);  // spawn + step particles (FD-038)
+        } else {
+            advance_object_anim(o);
+        }
         if (o->usingLife && cb_object_life_tick(o->life)) {
-            cb_rt_delete_object(o);  // life hit 0 → auto-delete (registries + free)
+            cb_rt_delete_object(o);  // life hit 0 → auto-delete (an emitter with
+                                     // live particles defers to the rogue drain)
             continue;
         }
         o->collisions.clear();  // eraseCollisions: wipe last tick's contacts
     }
+    update_rogue_emitters();      // drain + free deleted emitters (FD-038)
     cb::map::tick_animation();    // advance animated map tiles
     run_collision_checks();  // re-test every registered check
     for (CbObject* o : live_objects) o->checkCollisions = true;  // re-arm

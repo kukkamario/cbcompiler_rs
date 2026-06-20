@@ -153,11 +153,11 @@ file(GENERATE
 #   cmake --build build-tests --config Release
 #   ctest --test-dir build-tests -C Release --output-on-failure
 #
-# The pure-logic suites (geom, utf8, camera, map, object, collision) only #include
-# cb_geom.h / cb_utf8.h / cb_camera_math.h / cb_map_data.h / cb_object_data.h /
-# cb_collision_data.h; the input suite drives the extern "C" state machine in
-# cb_runtime with synthetic ALLEGRO_EVENTs (no display), so the target links
-# cb_runtime + Allegro.
+# The pure-logic suites (geom, utf8, camera, map, object, collision, particle)
+# only #include cb_geom.h / cb_utf8.h / cb_camera_math.h / cb_map_data.h /
+# cb_object_data.h / cb_collision_data.h / cb_particle.h; the input suite drives
+# the extern "C" state machine in cb_runtime with synthetic ALLEGRO_EVENTs (no
+# display), so the target links cb_runtime + Allegro.
 option(CB_RUNTIME_TESTS "Build the native C++ unit tests (requires GoogleTest)" OFF)
 if(CB_RUNTIME_TESTS)
     enable_testing()
@@ -169,6 +169,7 @@ if(CB_RUNTIME_TESTS)
         tests/test_map.cpp
         tests/test_object.cpp
         tests/test_collision.cpp
+        tests/test_particle.cpp
         tests/test_input.cpp
         tests/test_masking.cpp
     )
