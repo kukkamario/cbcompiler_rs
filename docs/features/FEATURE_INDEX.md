@@ -6,7 +6,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
-The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, and FD-039 (memory blocks) completed 2026-06-21. **FD-040 (File I/O) is now in design** — promoted from the Backlog. Remaining Backlog after it: Sound → Video, then DATA / Encrypt / System / `CallDLL`.
+The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, and FD-039 (memory blocks) completed 2026-06-21. **FD-040 (File I/O) is pending verification** — promoted from the Backlog. Remaining Backlog after it: Sound → Video, then DATA / Encrypt / System / `CallDLL`.
 
 | FD | Title | Status | Priority | Effort |
 |----|-------|--------|----------|--------|
