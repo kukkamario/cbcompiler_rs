@@ -1,6 +1,7 @@
 # FD-040: File I/O Runtime Functions and Types
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-21
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings CoolBasic's file-I/O subsystem online — opening/reading/writing binary & text files, plus filesystem/directory queries — unlocking save games, level/config files, and asset tooling in CoolBasic programs. Headless-testable (Allegro-free), so it lands in the SDK-free catalog and runs in CI.
