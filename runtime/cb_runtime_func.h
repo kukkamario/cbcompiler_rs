@@ -44,6 +44,12 @@ typedef struct CbObject CbObject;
    DeleteMEMBlock. Allegro-free (present in the SDK-free catalog). */
 typedef struct CbMemblock CbMemblock;
 
+/* File handle — the CB-visible `File` opaque type (FD-040, tag 16). An open file
+   stream; defined in cb_file.cpp. Created by OpenToRead/OpenToWrite/OpenToEdit
+   (Null on failure), freed by CloseFile. Allegro-free (present in the SDK-free
+   catalog). */
+typedef struct CbFile CbFile;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -146,6 +152,47 @@ void        cb_rt_poke_byte(CbMemblock* m, int32_t offset, int32_t value);
 void        cb_rt_poke_short(CbMemblock* m, int32_t offset, int32_t value);
 void        cb_rt_poke_int(CbMemblock* m, int32_t offset, int32_t value);
 void        cb_rt_poke_float(CbMemblock* m, int32_t offset, double value);
+
+/* File I/O (cb_file.cpp, FD-040). `File` is the opaque CbFile* handle (tag 16);
+   OpenTo* return it (Null on failure), CloseFile frees it. Allegro-free, so
+   these are in the SDK-free catalog. Binary numerics are little-endian on the
+   wire; ReadByte/ReadShort return unsigned, ReadInt signed, ReadFloat is 32-bit
+   on disk; ReadString is a 32-bit length prefix + bytes; ReadLine strips LF/CR/
+   CRLF. Reads are lenient at end-of-data (return 0/""); a null handle or a
+   wrong-mode op traps via the FD-015 channel. On-disk string content is raw
+   UTF-8. CurrentDir has a trailing separator; CopyFile traps if dst exists;
+   FindFile omits "."/".." and returns "" when done (single global cursor). */
+CbFile*   cb_rt_open_to_read(const CbString* path);
+CbFile*   cb_rt_open_to_write(const CbString* path);
+CbFile*   cb_rt_open_to_edit(const CbString* path);
+void      cb_rt_close_file(CbFile* f);
+void      cb_rt_seek_file(CbFile* f, int32_t pos);
+int32_t   cb_rt_file_offset(CbFile* f);
+int32_t   cb_rt_eof(CbFile* f);
+int32_t   cb_rt_read_byte(CbFile* f);
+int32_t   cb_rt_read_short(CbFile* f);
+int32_t   cb_rt_read_int(CbFile* f);
+double    cb_rt_read_float(CbFile* f);
+CbString* cb_rt_read_string(CbFile* f);
+CbString* cb_rt_read_line(CbFile* f);
+void      cb_rt_write_byte(CbFile* f, int32_t value);
+void      cb_rt_write_short(CbFile* f, int32_t value);
+void      cb_rt_write_int(CbFile* f, int32_t value);
+void      cb_rt_write_float(CbFile* f, double value);
+void      cb_rt_write_string(CbFile* f, const CbString* s);
+void      cb_rt_write_line(CbFile* f, const CbString* s);
+int32_t   cb_rt_file_exists(const CbString* path);
+int32_t   cb_rt_is_directory(const CbString* path);
+int32_t   cb_rt_file_size(const CbString* path);
+CbString* cb_rt_current_dir(void);
+void      cb_rt_chdir(const CbString* path);
+void      cb_rt_make_dir(const CbString* path);
+void      cb_rt_copy_file(const CbString* src, const CbString* dst);
+void      cb_rt_delete_file(const CbString* path);
+void      cb_rt_execute(const CbString* cmd);
+void      cb_rt_start_search(void);
+CbString* cb_rt_find_file(void);
+void      cb_rt_end_search(void);
 
 /* Graphics & images (cb_gfx.cpp, FD-013 Batch 4). CB `Float` args arrive as
    `double`, `Int` as `int32_t`. `Image` is the opaque CbImage* handle. Many

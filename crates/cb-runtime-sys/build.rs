@@ -20,10 +20,11 @@ fn strip_unc(path: PathBuf) -> PathBuf {
 /// primitives in `cb_string.cpp` + the `cb_runtime_init` host handshake in
 /// `cb_host.cpp`), the Allegro-free functionality (`cb_math.cpp`, the string
 /// library `cb_strfuncs.cpp`, `cb_system.cpp`, the memory blocks in
-/// `cb_memblock.cpp`), and the catalog assembly compiled with `-DCB_NO_ALLEGRO`
-/// so its graphics/input/text `CB_FN` rows — the only things that would
-/// otherwise force a link against Allegro — are guarded out. This is enough to
-/// build a real catalog of every language-core runtime function (FD-033).
+/// `cb_memblock.cpp`, the file I/O in `cb_file.cpp`), and the catalog assembly
+/// compiled with `-DCB_NO_ALLEGRO` so its graphics/input/text `CB_FN` rows — the
+/// only things that would otherwise force a link against Allegro — are guarded
+/// out. This is enough to build a real catalog of every language-core runtime
+/// function (FD-033).
 const SDK_FREE_TUS: &[&str] = &[
     "cb_string.cpp",
     "cb_host.cpp",
@@ -31,6 +32,7 @@ const SDK_FREE_TUS: &[&str] = &[
     "cb_strfuncs.cpp",
     "cb_system.cpp",
     "cb_memblock.cpp",
+    "cb_file.cpp",
     "catalog.cpp",
 ];
 
@@ -44,6 +46,7 @@ const RERUN_SOURCES: &[&str] = &[
     "cb_strfuncs.cpp",
     "cb_system.cpp",
     "cb_memblock.cpp",
+    "cb_file.cpp",
     "cb_gfx.cpp",
     "cb_geom.h",
     "cb_camera.cpp",

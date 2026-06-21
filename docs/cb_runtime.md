@@ -609,7 +609,37 @@ NumLock/Pause, matching DirectInput and the real CoolBasic `cbKey*` constants:
 
 ## File I/O
 
-File handles are integer ids (0 = failed to open).
+**Implemented (FD-040, `runtime/cb_file.cpp`).** `File` is the opaque `CbFile*`
+handle (catalog tag 16): a declared-but-unassigned `File` is `Null`, and a failed
+open returns `Null` — not an integer id (classic CB used integer file ids). The
+subsystem is Allegro-free, so it is present in the SDK-free catalog and runs
+headless. Authoritative behaviour was taken from the cbEnchanted reference and
+the official CoolBasic Help; deliberate divergences from classic CoolBasic, all
+for safety/correctness:
+
+- **Lenient at end-of-data.** A read at/past EOF returns a zero value
+  (`0`/`0.0`/`""`) and zero-fills any missing bytes of a multi-byte read; `EOF`
+  stays the guard. Classic CB returned uninitialised garbage (and `ReadByte`
+  returned 255 at the end).
+- **Traps on misuse.** A null/closed/invalid `File`, or a wrong-mode op (writing
+  a read handle / reading a write handle), raises a runtime error through the
+  FD-015 trap channel (exit 1). Classic CB is permissive.
+- **Little-endian on the wire**, independent of host byte order (byte-compatible
+  with classic x86 CB files). `ReadByte`/`ReadShort` are unsigned, `ReadInt`
+  signed, and `ReadFloat`/`WriteFloat` are 32-bit on disk.
+- **`ReadString`** reads exactly the 32-bit length prefix's bytes (preserving
+  embedded NULs) and guards a negative/over-long prefix; **`ReadLine`** strips
+  LF, CR, or CRLF (classic CB only broke on CR/EOF, mis-reading Unix files).
+- **On-disk string content is raw UTF-8** (the runtime string ABI), vs classic
+  CB's CP1252 — identical for ASCII, different for non-ASCII content.
+- **`FindFile`** returns real entries only (no `"."`/`".."`), `""` when done,
+  over a single global, non-reentrant cursor on the current directory.
+  **`CurrentDir`** keeps a trailing separator. **`CopyFile`** traps if the
+  destination already exists. **`Execute`** shells out via `start` (Windows) /
+  `xdg-open` (elsewhere), like cbEnchanted.
+
+A `File` is returned into a `File` variable; compare against `Null` to detect a
+failed open.
 
 ### Open / close / position
 

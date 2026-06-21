@@ -451,15 +451,17 @@ mod tests {
         let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
             catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
         assert_eq!(types_by_name["TestHandle"].tag, 10);
-        // Memblock (FD-039, tag 15) is Allegro-free, so it is advertised in BOTH
-        // the full and SDK-free catalogs (unlike the graphics handles below).
+        // Memblock (FD-039, tag 15) and File (FD-040, tag 16) are Allegro-free,
+        // so they are advertised in BOTH the full and SDK-free catalogs (unlike
+        // the graphics handles below).
         assert_eq!(types_by_name["Memblock"].tag, 15);
+        assert_eq!(types_by_name["File"].tag, 16);
         // Image/Font (and the graphics/input functions below) exist only in the
         // full Allegro build; the SDK-free catalog (FD-033) advertises just
-        // TestHandle, Memblock, and the language-core functions.
+        // TestHandle, Memblock, File, and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 6);
+            assert_eq!(catalog.types.len(), 7);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
             // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
@@ -467,7 +469,7 @@ mod tests {
             assert_eq!(types_by_name["Map"].tag, 14);
         }
         #[cfg(cb_no_allegro)]
-        assert_eq!(catalog.types.len(), 2);
+        assert_eq!(catalog.types.len(), 3);
 
         // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
         // makes this a linker-checked invariant.
@@ -560,6 +562,85 @@ mod tests {
             "cb_rt_poke_short",
         ] {
             assert!(by_symbol.contains_key(sym), "missing memblock entry {sym}");
+        }
+
+        // File I/O (FD-040). Allegro-free, so present in BOTH builds. `File` is
+        // the tag-16 opaque handle; OpenTo* return it, the read/write/query funcs
+        // take it + Int/Float/String, and the filesystem funcs take String paths.
+        let file_ty = IrType::RuntimeType("File".to_string());
+
+        let open_read = by_symbol["cb_rt_open_to_read"];
+        assert_eq!(open_read.name, "opentoread");
+        assert_eq!(open_read.params.len(), 1);
+        assert_eq!(open_read.params[0].ty, IrType::String);
+        assert_eq!(open_read.return_ty, file_ty);
+
+        let read_byte = by_symbol["cb_rt_read_byte"];
+        assert_eq!(read_byte.name, "readbyte");
+        assert_eq!(read_byte.params[0].ty, file_ty);
+        assert_eq!(read_byte.return_ty, IrType::Int);
+
+        let read_float = by_symbol["cb_rt_read_float"];
+        assert_eq!(read_float.name, "readfloat");
+        assert_eq!(read_float.return_ty, IrType::Float);
+
+        let read_string = by_symbol["cb_rt_read_string"];
+        assert_eq!(read_string.name, "readstring");
+        assert_eq!(read_string.params[0].ty, file_ty);
+        assert_eq!(read_string.return_ty, IrType::String);
+
+        let write_int = by_symbol["cb_rt_write_int"];
+        assert_eq!(write_int.name, "writeint");
+        assert_eq!(write_int.params.len(), 2);
+        assert_eq!(write_int.params[0].ty, file_ty);
+        assert_eq!(write_int.params[1].ty, IrType::Int);
+        assert_eq!(write_int.return_ty, IrType::Void);
+
+        let write_string = by_symbol["cb_rt_write_string"];
+        assert_eq!(write_string.name, "writestring");
+        assert_eq!(write_string.params[1].ty, IrType::String);
+
+        let copy_file = by_symbol["cb_rt_copy_file"];
+        assert_eq!(copy_file.name, "copyfile");
+        assert_eq!(copy_file.params.len(), 2);
+        assert_eq!(copy_file.params[0].ty, IrType::String);
+        assert_eq!(copy_file.params[1].ty, IrType::String);
+
+        let current_dir = by_symbol["cb_rt_current_dir"];
+        assert_eq!(current_dir.name, "currentdir");
+        assert_eq!(current_dir.params.len(), 0);
+        assert_eq!(current_dir.return_ty, IrType::String);
+
+        let find_file = by_symbol["cb_rt_find_file"];
+        assert_eq!(find_file.name, "findfile");
+        assert_eq!(find_file.return_ty, IrType::String);
+
+        // All 31 entry points must be registered (the rest share shapes above).
+        for sym in [
+            "cb_rt_open_to_write",
+            "cb_rt_open_to_edit",
+            "cb_rt_close_file",
+            "cb_rt_seek_file",
+            "cb_rt_file_offset",
+            "cb_rt_eof",
+            "cb_rt_read_short",
+            "cb_rt_read_int",
+            "cb_rt_read_line",
+            "cb_rt_write_byte",
+            "cb_rt_write_short",
+            "cb_rt_write_float",
+            "cb_rt_write_line",
+            "cb_rt_file_exists",
+            "cb_rt_is_directory",
+            "cb_rt_file_size",
+            "cb_rt_chdir",
+            "cb_rt_make_dir",
+            "cb_rt_delete_file",
+            "cb_rt_execute",
+            "cb_rt_start_search",
+            "cb_rt_end_search",
+        ] {
+            assert!(by_symbol.contains_key(sym), "missing file entry {sym}");
         }
 
         // Graphics + input entries are present only in the full Allegro build.

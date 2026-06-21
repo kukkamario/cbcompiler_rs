@@ -1,0 +1,50 @@
+// FD-040: file I/O. Binary + text round-trip, position/EOF, and filesystem
+// queries. Allegro-free, so this runs in the SDK-free build too (run_isolated,
+// not graphics-gated). Runs in a throwaway working directory; the relative file
+// is created there. Trap paths (null handle, CopyFile over an existing dst) are
+// covered by cli.rs; C++ edge cases in runtime/tests/test_file.cpp.
+
+Dim f As File
+f = OpenToWrite("fd040.dat")
+If f <> Null Then Print "open_write_ok"
+WriteByte(f, 65)
+WriteByte(f, 300)                 // only the low byte (44) is stored
+WriteShort(f, 65535)
+WriteInt(f, -1)
+WriteFloat(f, 2.5)
+WriteString(f, "hello")
+WriteLine(f, "line one")
+CloseFile(f)
+
+If FileExists("fd040.dat") Then Print "exists_ok"
+If IsDirectory("fd040.dat") = 0 Then Print "not_dir_ok"
+
+f = OpenToRead("fd040.dat")
+If f <> Null Then Print "open_read_ok"
+Print Str(ReadByte(f))            // 65
+Print Str(ReadByte(f))            // 44
+Print Str(ReadShort(f))           // 65535 (unsigned)
+Print Str(ReadInt(f))             // -1    (signed)
+Print Str(ReadFloat(f))           // 2.5   (32-bit on disk)
+Print ReadString(f)               // hello
+Print ReadLine(f)                 // line one
+If EOF(f) <> 0 Then Print "eof_ok"
+Print Str(ReadByte(f))            // 0     (lenient past-EOF)
+CloseFile(f)
+
+// Random access with OpenToEdit.
+f = OpenToEdit("fd040.dat")
+SeekFile(f, 0)
+Print Str(FileOffset(f))          // 0
+Print Str(ReadByte(f))            // 65
+Print Str(FileOffset(f))          // 1
+CloseFile(f)
+
+// CurrentDir is non-empty and ends with a separator.
+Dim cd As String
+cd = CurrentDir()
+If Len(cd) > 0 Then Print "currentdir_ok"
+
+DeleteFile("fd040.dat")
+If FileExists("fd040.dat") = 0 Then Print "delete_ok"
+Print "done"
