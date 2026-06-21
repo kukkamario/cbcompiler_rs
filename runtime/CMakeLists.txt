@@ -31,6 +31,7 @@ add_library(cb_runtime STATIC
     cb_strfuncs.cpp
     cb_system.cpp
     cb_memblock.cpp
+    cb_file.cpp
     cb_gfx.cpp
     cb_camera.cpp
     cb_map.cpp
@@ -156,9 +157,9 @@ file(GENERATE
 #
 # The pure-logic suites (geom, utf8, camera, map, object, collision, particle)
 # only #include cb_geom.h / cb_utf8.h / cb_camera_math.h / cb_map_data.h /
-# cb_object_data.h / cb_collision_data.h / cb_particle.h; the input and memblock
-# suites drive the extern "C" entry points in cb_runtime directly (no display),
-# so the target links cb_runtime + Allegro.
+# cb_object_data.h / cb_collision_data.h / cb_particle.h; the input, memblock,
+# and file suites drive the extern "C" entry points in cb_runtime directly (no
+# display), so the target links cb_runtime + Allegro.
 option(CB_RUNTIME_TESTS "Build the native C++ unit tests (requires GoogleTest)" OFF)
 if(CB_RUNTIME_TESTS)
     enable_testing()
@@ -172,6 +173,7 @@ if(CB_RUNTIME_TESTS)
         tests/test_collision.cpp
         tests/test_particle.cpp
         tests/test_memblock.cpp
+        tests/test_file.cpp
         tests/test_input.cpp
         tests/test_masking.cpp
     )

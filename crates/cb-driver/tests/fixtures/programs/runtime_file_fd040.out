@@ -1,0 +1,19 @@
+open_write_ok
+exists_ok
+not_dir_ok
+open_read_ok
+65
+44
+65535
+-1
+2.5
+hello
+line one
+eof_ok
+0
+0
+65
+1
+currentdir_ok
+delete_ok
+done

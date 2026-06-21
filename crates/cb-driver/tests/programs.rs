@@ -126,6 +126,37 @@ fn run_graphics_with_assets(name: &str, assets: &[&str]) {
     );
 }
 
+/// Like [`run`], but runs the program in a throwaway working directory. Unlike
+/// [`run_graphics_isolated`] it is NOT graphics-gated — for Allegro-free fixtures
+/// (e.g. File I/O) that write/read files by relative path and so need an isolated
+/// cwd to keep temp files out of the crate root, while still running in the
+/// SDK-free build.
+fn run_isolated(name: &str) {
+    let dir = fixtures_dir();
+    let cb_path = dir.join(format!("{name}.cb"));
+    let out_path = dir.join(format!("{name}.out"));
+    let expected = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", out_path.display()));
+    let work = tempfile::tempdir().expect("create temp working dir");
+
+    let output = Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&cb_path)
+        .current_dir(work.path())
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf-8");
+
+    let normalise = |s: &str| s.replace("\r\n", "\n");
+    assert_eq!(
+        normalise(&stdout),
+        normalise(&expected),
+        "stdout mismatch for {name}.cb",
+    );
+}
+
 // Type system ------------------------------------------------------------
 
 #[test]
@@ -250,6 +281,18 @@ fn runtime_memblock_fd039() {
     // out-of-bounds trap path is in cli.rs; the C++ edge cases in
     // runtime/tests/test_memblock.cpp.
     run("runtime_memblock_fd039");
+}
+
+#[test]
+fn runtime_file_fd040() {
+    // File I/O is Allegro-free (FD-040), so this runs in BOTH the full and
+    // SDK-free builds. Isolated cwd (the fixture writes a relative file), not
+    // graphics-gated. Covers binary + text round-trips, unsigned/signed/32-bit
+    // conventions, position/EOF, lenient past-EOF reads, and the filesystem
+    // queries. Trap paths (null handle, CopyFile over an existing dst) are in
+    // cli.rs; C++ edge cases (ReadLine endings, search, embedded NUL) in
+    // runtime/tests/test_file.cpp.
+    run_isolated("runtime_file_fd040");
 }
 
 #[test]

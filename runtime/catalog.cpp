@@ -150,6 +150,13 @@ constexpr CbTypeTag CB_TYPE_MEMBLOCK = 15;
 template<> struct type_tag<      CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
 template<> struct type_tag<const CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
 
+// File — the file-handle opaque type (FD-040, tag 16). Allegro-free like
+// Memblock, so it (and its functions) stay outside the CB_NO_ALLEGRO guard and
+// ship in the SDK-free catalog.
+constexpr CbTypeTag CB_TYPE_FILE = 16;
+template<> struct type_tag<      CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
+template<> struct type_tag<const CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -203,6 +210,8 @@ static constexpr CbTypeDesc catalog_types[] = {
     // the graphics handles below, which would have no functions in the SDK-free
     // catalog).
     { "Memblock",   ::cb_catalog::CB_TYPE_MEMBLOCK },
+    // File (FD-040) is likewise Allegro-free, so it ships in every catalog.
+    { "File",       ::cb_catalog::CB_TYPE_FILE },
 #ifndef CB_NO_ALLEGRO
     // Image/Font are graphics handles; their operations live behind the
     // Allegro guard below, so they're absent from the SDK-free catalog
@@ -339,6 +348,41 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("pokeshort",        cb_rt_poke_short),
     CB_FN("pokeint",          cb_rt_poke_int),
     CB_FN("pokefloat",        cb_rt_poke_float),
+
+    // File I/O (cb_file.cpp, FD-040). Allegro-free, so — like the memory blocks
+    // above — these stay outside the CB_NO_ALLEGRO guard and ship in the SDK-free
+    // catalog. `File` is the opaque tag-16 handle.
+    CB_FN("opentoread",       cb_rt_open_to_read),
+    CB_FN("opentowrite",      cb_rt_open_to_write),
+    CB_FN("opentoedit",       cb_rt_open_to_edit),
+    CB_FN("closefile",        cb_rt_close_file),
+    CB_FN("seekfile",         cb_rt_seek_file),
+    CB_FN("fileoffset",       cb_rt_file_offset),
+    CB_FN("eof",              cb_rt_eof),
+    CB_FN("readbyte",         cb_rt_read_byte),
+    CB_FN("readshort",        cb_rt_read_short),
+    CB_FN("readint",          cb_rt_read_int),
+    CB_FN("readfloat",        cb_rt_read_float),
+    CB_FN("readstring",       cb_rt_read_string),
+    CB_FN("readline",         cb_rt_read_line),
+    CB_FN("writebyte",        cb_rt_write_byte),
+    CB_FN("writeshort",       cb_rt_write_short),
+    CB_FN("writeint",         cb_rt_write_int),
+    CB_FN("writefloat",       cb_rt_write_float),
+    CB_FN("writestring",      cb_rt_write_string),
+    CB_FN("writeline",        cb_rt_write_line),
+    CB_FN("fileexists",       cb_rt_file_exists),
+    CB_FN("isdirectory",      cb_rt_is_directory),
+    CB_FN("filesize",         cb_rt_file_size),
+    CB_FN("currentdir",       cb_rt_current_dir),
+    CB_FN("chdir",            cb_rt_chdir),
+    CB_FN("makedir",          cb_rt_make_dir),
+    CB_FN("copyfile",         cb_rt_copy_file),
+    CB_FN("deletefile",       cb_rt_delete_file),
+    CB_FN("execute",          cb_rt_execute),
+    CB_FN("startsearch",      cb_rt_start_search),
+    CB_FN("findfile",         cb_rt_find_file),
+    CB_FN("endsearch",        cb_rt_end_search),
 
     // Graphics, text, and input (cb_gfx.cpp / cb_font.cpp / cb_input.cpp) pull
     // in Allegro. The SDK-free build (FD-033, -DCB_NO_ALLEGRO) compiles only the

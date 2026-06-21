@@ -328,6 +328,56 @@ fn memblock_out_of_bounds_traps() {
         .stderr(contains("out of bounds"));
 }
 
+#[cfg(feature = "interp")]
+#[test]
+fn file_op_on_null_handle_traps() {
+    // FD-040: a read/write on a null (never-opened) File handle traps via the
+    // FD-015 channel — exit 1, and the statement after it does not run. Classic
+    // CB is permissive; we refuse (resolved as: trap). Allegro-free, so present
+    // in the SDK-free build too.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "null_file.cb",
+        "Dim f As File\nPrint \"before\"\nPrint Str(ReadByte(f))\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stdout(contains("before"))
+        .stdout(contains("after").not())
+        .stderr(contains("runtime error: ReadByte"))
+        .stderr(contains("invalid file handle"));
+}
+
+#[cfg(feature = "interp")]
+#[test]
+fn copy_file_over_existing_traps() {
+    // FD-040: CopyFile refuses to overwrite an existing destination — it traps
+    // (resolved as: trap), matching classic CB's "operation fails". Runs in the
+    // temp dir so the relative files land there.
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "copy.cb",
+        "Dim a As File\na = OpenToWrite(\"a.dat\")\nWriteInt(a, 1)\nCloseFile(a)\n\
+         Dim b As File\nb = OpenToWrite(\"b.dat\")\nWriteInt(b, 2)\nCloseFile(b)\n\
+         Print \"before\"\nCopyFile(\"a.dat\", \"b.dat\")\nPrint \"after\"\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .current_dir(dir.path())
+        .assert()
+        .code(1)
+        .stdout(contains("before"))
+        .stdout(contains("after").not())
+        .stderr(contains("runtime error: CopyFile"))
+        .stderr(contains("destination already exists"));
+}
+
 #[test]
 fn runtime_abs_overload_resolves() {
     let dir = tempdir().unwrap();
