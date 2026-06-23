@@ -6,9 +6,11 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
-The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, and FD-039 (memory blocks) completed 2026-06-21, and FD-040 (File I/O) completed 2026-06-21. No FDs are currently active — remaining Backlog: Sound → Video, then DATA / Encrypt / System / `CallDLL`.
+The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, and FD-039 (memory blocks) completed 2026-06-21, and FD-040 (File I/O) completed 2026-06-21. **FD-041 (Sound) is now Open** (promoted from Backlog 2026-06-22) — remaining Backlog: Video, then DATA / Encrypt / System / `CallDLL`.
 
-_(none — all designed FDs are complete)_
+| FD | Title | Status | Effort | Priority |
+|----|-------|--------|--------|----------|
+| [FD-041](FD-041_SOUND_RUNTIME_FUNCTIONS.md) | Sound Runtime Functions and Types | Open | High | Medium |
 
 ## Completed
 
@@ -67,8 +69,7 @@ Low-priority or blocked items. Promote to Active when ready to design.
 
 | FD | Title | Notes |
 |----|-------|-------|
-| - | Sound | Independent runtime subsystem. Do after the FD-036 game cluster. New `Sound`/`Channel` opaque types. Prerequisite for Video. |
-| - | Video Playback | After Sound — video mixes audio through the sound interface. |
+| - | Video Playback | After Sound ([FD-041](FD-041_SOUND_RUNTIME_FUNCTIONS.md)) — video mixes audio through the sound interface. |
 | - | DATA / `Read` / `Restore` | Compiler-side `DATA` statements + runtime cursor. |
 | - | `Encrypt` / `Decrypt` | Independent utility. |
 | - | Plumbing System funcs | `Crc32`, `SetWindow`, `FrameLimit`, `Errors` — window/loop/error-display plumbing. |
