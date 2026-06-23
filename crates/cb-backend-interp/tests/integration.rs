@@ -1002,3 +1002,93 @@ fn observer_sees_nested_call_results() {
         "after_inst should observe both nested call results, innermost first"
     );
 }
+
+#[test]
+fn logical_xor_yields_canonical_bool() {
+    // cb_syntax.md §5.1: logical `Xor` tests operands as `<> 0` and yields
+    // Integer 1/0 — it is NOT a bitwise xor. So `2 Xor 1` is `true Xor true` = 0,
+    // and `5 Xor 3` (both truthy) is also 0. (S-H3)
+    assert_eq!(run("Print Str(2 Xor 1)"), "0\n");
+    assert_eq!(run("Print Str(2 Xor 0)"), "1\n");
+    assert_eq!(run("Print Str(0 Xor 0)"), "0\n");
+    assert_eq!(run("Print Str(5 Xor 3)"), "0\n");
+    assert_eq!(run("Print Str(0 Xor 7)"), "1\n");
+}
+
+#[test]
+fn implicit_for_var_in_function_does_not_alias() {
+    // §6.3: `For i = 1 To n` needs no prior `Dim`. Inside a function the implicit
+    // loop variable must get its own local — otherwise it silently aliases
+    // LocalId(0) (here `acc`) and corrupts an unrelated local. (S-H1)
+    let out = run("Function f() As Integer\n\
+           Dim acc As Integer = 0\n\
+           For i = 1 To 3\n\
+             acc = acc + i\n\
+           Next\n\
+           Return acc\n\
+         EndFunction\n\
+         Print Str(f())");
+    assert_eq!(out, "6\n");
+}
+
+#[test]
+fn implicit_for_each_var_in_function_does_not_alias() {
+    // Same hazard for `For Each` over an array inside a function. (S-H1)
+    let out = run("Function sumArr() As Float\n\
+           Dim xs As Float[] = New Float[3]\n\
+           xs[0] = 1.0\n\
+           xs[1] = 2.0\n\
+           xs[2] = 3.0\n\
+           Dim total As Float = 0.0\n\
+           For v = Each xs\n\
+             total = total + v\n\
+           Next v\n\
+           Return total\n\
+         EndFunction\n\
+         Print Str(sumArr())");
+    assert_eq!(out, "6\n");
+}
+
+/// Run `src` on a worker thread, failing if it does not finish in time. The
+/// `Select … Default`-in-the-middle miscompile (S-H2) produces a self-looping
+/// block, so before the fix the program spins forever — this surfaces that as a
+/// test failure rather than a hang.
+fn run_within(src: &'static str, millis: u64) -> String {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(run(src));
+    });
+    match rx.recv_timeout(std::time::Duration::from_millis(millis)) {
+        Ok(out) => out,
+        Err(_) => panic!("interpreter did not terminate within {millis}ms"),
+    }
+}
+
+#[test]
+fn select_default_in_non_final_position() {
+    // §6.2: `Default` may appear in any position. A `Case` listed *after*
+    // `Default` must still be reachable, and `Default` must only run when no
+    // `Case` matches — regardless of its source position. (S-H2)
+    let prog = "Dim x As Integer\nx = 2\n\
+         Dim r As Integer\nr = -1\n\
+         Select x\n\
+           Case 1\n    r = 10\n\
+           Default\n    r = 99\n\
+           Case 2\n    r = 20\n\
+         End Select\n\
+         Print Str(r)";
+    // x = 2 matches the post-Default `Case 2`, not Default.
+    assert_eq!(run_within(prog, 5000), "20\n");
+
+    // A value matching nothing falls to Default wherever it sits.
+    let prog_default = "Dim x As Integer\nx = 7\n\
+         Dim r As Integer\nr = -1\n\
+         Select x\n\
+           Case 1\n    r = 10\n\
+           Default\n    r = 99\n\
+           Case 2\n    r = 20\n\
+         End Select\n\
+         Print Str(r)";
+    assert_eq!(run_within(prog_default, 5000), "99\n");
+}

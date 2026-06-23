@@ -399,6 +399,14 @@ impl<'a> Checker<'a> {
         for &id in program {
             self.pass1_stmt(id, top);
         }
+        // Hoist constants from every top-level statement body (inside If, For,
+        // While, Select, etc.) so references resolve regardless of block nesting
+        // — §4.2 has no block scoping, §7.3 hoists definitions. This mirrors
+        // `check_function`; `pass1_stmt` no longer handles `Const` itself, so
+        // directly-top-level consts are collected here too (no double-declare).
+        for &id in program {
+            self.collect_consts_recursive(id, top);
+        }
         // Collect labels recursively from all top-level statement bodies
         // (inside For, While, If, etc.) so Goto can resolve them.
         // Also records which For loops contain each label (for E0321).
@@ -563,15 +571,8 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Label { name_span }) => {
                 self.pass1_label(scope, name_span);
             }
-            Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
-                ty,
-                value: _,
-                is_global,
-            }) => {
-                self.pass1_const(scope, name_span, sigil, ty, is_global);
-            }
+            // `Const` is hoisted by `collect_consts_recursive` in `pass1`, which
+            // also reaches block-nested consts — do not declare it here too.
             _ => {}
         }
     }
@@ -3003,6 +3004,21 @@ mod tests {
     fn pass2_function_sees_hoisted_const() {
         let result =
             analyze_src("Const MAX = 100\nFunction f() As Integer\nReturn MAX\nEndFunction\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_top_level_block_nested_const_is_hoisted() {
+        // §4.2 has no block scoping and §7.3 hoists definitions, so a `Const`
+        // nested inside a top-level block is visible outside that block — both
+        // from a sibling statement and from a function. A directly top-level
+        // `Const` must keep working too. (S-H4)
+        let result = analyze_src(
+            "Const FALLBACK = 5\n\
+             If True Then\n  Const MAX = 100\nEndIf\n\
+             Dim x As Integer\nx = MAX + FALLBACK\n\
+             Function getMax() As Integer\nReturn MAX\nEndFunction\n",
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 

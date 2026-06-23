@@ -138,6 +138,18 @@ fn select_case() {
 }
 
 #[test]
+fn select_default_in_middle() {
+    // §6.2: `Default` may appear in any position. With `Default` between two
+    // `Case`s, the dispatch chain must still test both cases (the second one's
+    // "else" pointing at the default body), and the default must run only on a
+    // no-match — not drop the trailing `Case`. (S-H2)
+    let ir = lower_src(
+        "Dim x As Int\nx = 2\nSelect x\n  Case 1\n    x = 10\n  Default\n    x = 99\n  Case 2\n    x = 20\nEnd Select\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
 fn function_call() {
     let ir = lower_src(
         "Function Add(a As Int, b As Int) As Int\n  Return a + b\nEnd Function\nDim result As Int\nresult = Add(3, 4)\n",

@@ -638,9 +638,17 @@ impl<'a> Lowerer<'a> {
                 }
                 Node::Stmt(Stmt::While { body, .. })
                 | Node::Stmt(Stmt::RepeatForever { body })
-                | Node::Stmt(Stmt::RepeatWhile { body, .. })
-                | Node::Stmt(Stmt::For { body, .. })
-                | Node::Stmt(Stmt::ForEach { body, .. }) => {
+                | Node::Stmt(Stmt::RepeatWhile { body, .. }) => {
+                    self.scan_body_for_locals(&body);
+                }
+                // `For`/`For Each` also bind a loop variable, which may be
+                // implicit (no prior `Dim`, §6.3). The checker declares it in the
+                // symbol table, but only `Dim`/`Assign` names are scanned here, so
+                // allocate its local explicitly — otherwise `resolve_var` misses
+                // and the loop silently aliases `LocalId(0)`.
+                Node::Stmt(Stmt::For { var, body, .. })
+                | Node::Stmt(Stmt::ForEach { var, body, .. }) => {
+                    self.alloc_loop_var(var);
                     self.scan_body_for_locals(&body);
                 }
                 Node::Stmt(Stmt::Select { arms, .. }) => {
@@ -670,6 +678,24 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// Allocate a local for a `For`/`For Each` loop variable if it does not
+    /// already have one. The type comes from the checker's recorded type for the
+    /// loop-variable node (it declares implicit loop vars in the symbol table and
+    /// records their type), defaulting to `Int`.
+    fn alloc_loop_var(&mut self, var: NodeId) {
+        if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
+            let name = self.intern_ident(*name_span, *sigil);
+            if self.lookup_local(name).is_none() {
+                let var_ty = self
+                    .types
+                    .get(var)
+                    .map(|t| self.sema_type_to_ir(t))
+                    .unwrap_or(IrType::Int);
+                self.alloc_local(name, var_ty, false);
             }
         }
     }
@@ -914,6 +940,38 @@ impl<'a> Lowerer<'a> {
         let lhs_reg = self.lower_expr(lhs);
         let rhs_reg = self.lower_expr(rhs);
 
+        // Logical `Xor` (cb_syntax.md §5.1): operands are tested as `<> 0` and the
+        // result is canonical Integer 1/0 — distinct from the bitwise `BinXor`
+        // operator. `check_binary` already coerces both operands to `Int`, so we
+        // only need to normalize each to 0/1 before the bitwise xor.
+        if matches!(op, BinOp::Xor) {
+            let zero = self.emit(InstKind::ConstInt(0), span);
+            let lb = self.emit(
+                InstKind::BinOp {
+                    op: IrBinOp::NotEq,
+                    lhs: lhs_reg,
+                    rhs: zero,
+                },
+                span,
+            );
+            let rb = self.emit(
+                InstKind::BinOp {
+                    op: IrBinOp::NotEq,
+                    lhs: rhs_reg,
+                    rhs: zero,
+                },
+                span,
+            );
+            return self.emit(
+                InstKind::BinOp {
+                    op: IrBinOp::BinXor,
+                    lhs: lb,
+                    rhs: rb,
+                },
+                span,
+            );
+        }
+
         // Check if this is a string operation by looking at operand types.
         let is_string = self
             .types
@@ -969,8 +1027,8 @@ impl<'a> Lowerer<'a> {
             BinOp::Gt => IrBinOp::Gt,
             BinOp::LtEq => IrBinOp::LtEq,
             BinOp::GtEq => IrBinOp::GtEq,
-            // Xor in expression position is logical XOR (not short-circuit)
-            BinOp::Xor => IrBinOp::BinXor,
+            // Logical Xor is normalized to 0/1 in `lower_binary` before this point.
+            BinOp::Xor => unreachable!("logical Xor handled in lower_binary"),
             // And/Or should have been handled by lower_short_circuit
             BinOp::And | BinOp::Or => unreachable!("And/Or handled by short-circuit lowering"),
         }
@@ -1723,13 +1781,16 @@ impl<'a> Lowerer<'a> {
     ) {
         let span = self.arena.span_of(stmt_id);
 
-        // Get the loop variable.
-        let var_ref = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
-            let name = self.intern_ident(*name_span, *sigil);
-            self.resolve_var(name).unwrap_or(VarRef::Local(LocalId(0)))
-        } else {
-            VarRef::Local(LocalId(0))
+        // Get the loop variable. `scan_body_for_locals`/`lower_main` always
+        // allocate a slot for it (including implicit loop vars), so a miss here
+        // is an internal lowering bug — fail loudly rather than alias LocalId(0).
+        let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] else {
+            panic!("For loop variable is not an identifier — internal lowering bug");
         };
+        let name = self.intern_ident(*name_span, *sigil);
+        let var_ref = self
+            .resolve_var(name)
+            .unwrap_or_else(|| panic!("For loop variable not allocated — internal lowering bug"));
 
         // Initialize: var = from
         let from_reg = self.lower_expr(from);
@@ -1883,12 +1944,15 @@ impl<'a> Lowerer<'a> {
         let span = self.arena.span_of(stmt_id);
         let source_ty = self.types.get(source).cloned().unwrap_or(Type::Void);
 
-        let var_ref = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
-            let name = self.intern_ident(*name_span, *sigil);
-            self.resolve_var(name).unwrap_or(VarRef::Local(LocalId(0)))
-        } else {
-            VarRef::Local(LocalId(0))
+        // As in `lower_for`, the loop variable always has an allocated slot;
+        // a miss is an internal lowering bug.
+        let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] else {
+            panic!("For Each loop variable is not an identifier — internal lowering bug");
         };
+        let name = self.intern_ident(*name_span, *sigil);
+        let var_ref = self.resolve_var(name).unwrap_or_else(|| {
+            panic!("For Each loop variable not allocated — internal lowering bug")
+        });
 
         match &source_ty {
             Type::TypeRef { name } => {
@@ -2091,122 +2155,108 @@ impl<'a> Lowerer<'a> {
             arm_bodies.push(self.fresh_block());
         }
 
-        // Build the comparison chain.
-        let mut current_check = self.fresh_block();
-        self.terminate(Terminator::Goto(current_check), span);
+        // The `Default` arm is the dispatch chain's final "else" target; its
+        // source position is not significant (cb_syntax.md §6.2). Find its body
+        // block (if any); when absent, a no-match falls through to `merge_block`.
+        let default_body = arms.iter().enumerate().find_map(|(i, arm_id)| {
+            matches!(self.arena[*arm_id], Node::CaseArm(CaseArm::Default { .. }))
+                .then(|| arm_bodies[i])
+        });
+        let no_match = default_body.unwrap_or(merge_block);
 
+        // Build the dispatch chain over the `Case` arms only — each `Case`'s
+        // "else" is the next `Case`'s check block, and the last `Case`'s "else"
+        // is `no_match`. `Default` deliberately takes no part here.
+        let case_indices: Vec<usize> = arms
+            .iter()
+            .enumerate()
+            .filter(|(_, arm_id)| {
+                matches!(self.arena[**arm_id], Node::CaseArm(CaseArm::Case { .. }))
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let entry_check = self.fresh_block();
+        self.terminate(Terminator::Goto(entry_check), span);
+        self.switch_to(entry_check);
+
+        if case_indices.is_empty() {
+            // No comparisons: jump straight to the default body (or the exit).
+            self.terminate(Terminator::Goto(no_match), span);
+        } else {
+            let mut current_check = entry_check;
+            for (k, &arm_idx) in case_indices.iter().enumerate() {
+                let last = k + 1 == case_indices.len();
+                let else_bb = if last { no_match } else { self.fresh_block() };
+                let Node::CaseArm(CaseArm::Case { values, .. }) = self.arena[arms[arm_idx]].clone()
+                else {
+                    unreachable!("case_indices only holds Case arms");
+                };
+                self.switch_to(current_check);
+                self.lower_case_test(scrut_reg, &values, arm_bodies[arm_idx], else_bb, span);
+                current_check = else_bb;
+            }
+        }
+
+        // Lower every arm body in source order (Case and Default alike) so a
+        // `Continue` falls through to the next arm's body regardless of kind.
         for (arm_idx, &arm_id) in arms.iter().enumerate() {
-            let arm_body_bb = arm_bodies[arm_idx];
             let next_arm_body = arm_bodies.get(arm_idx + 1).copied();
-
-            match self.arena[arm_id].clone() {
-                Node::CaseArm(CaseArm::Case { values, body }) => {
-                    // Chain comparisons for multi-value cases.
-                    self.switch_to(current_check);
-
-                    let next_check = if arm_idx + 1 < arms.len() {
-                        self.fresh_block()
-                    } else {
-                        merge_block
-                    };
-
-                    if values.len() == 1 {
-                        let val_reg = self.lower_expr(values[0]);
-                        let eq = self.emit(
-                            InstKind::BinOp {
-                                op: IrBinOp::Eq,
-                                lhs: scrut_reg,
-                                rhs: val_reg,
-                            },
-                            span,
-                        );
-                        self.terminate(
-                            Terminator::BranchIf {
-                                cond: eq,
-                                then_block: arm_body_bb,
-                                else_block: next_check,
-                            },
-                            span,
-                        );
-                    } else {
-                        // Multiple values: chain with Or-style logic.
-                        let mut prev_check = current_check;
-                        for (vi, &val_id) in values.iter().enumerate() {
-                            if vi > 0 {
-                                self.switch_to(prev_check);
-                            }
-                            let val_reg = self.lower_expr(val_id);
-                            let eq = self.emit(
-                                InstKind::BinOp {
-                                    op: IrBinOp::Eq,
-                                    lhs: scrut_reg,
-                                    rhs: val_reg,
-                                },
-                                span,
-                            );
-                            let else_target = if vi + 1 < values.len() {
-                                let nb = self.fresh_block();
-                                self.terminate(
-                                    Terminator::BranchIf {
-                                        cond: eq,
-                                        then_block: arm_body_bb,
-                                        else_block: nb,
-                                    },
-                                    span,
-                                );
-                                prev_check = nb;
-                                nb
-                            } else {
-                                self.terminate(
-                                    Terminator::BranchIf {
-                                        cond: eq,
-                                        then_block: arm_body_bb,
-                                        else_block: next_check,
-                                    },
-                                    span,
-                                );
-                                next_check
-                            };
-                            let _ = else_target;
-                        }
-                    }
-
-                    // Arm body.
-                    self.switch_to(arm_body_bb);
-                    self.context_stack
-                        .push(ControlContext::Select { next_arm_body });
-                    for &s in &body {
-                        self.lower_stmt(s);
-                    }
-                    self.context_stack.pop();
-                    if !self.current_block_is_terminated() {
-                        self.terminate(Terminator::Goto(merge_block), span);
-                    }
-
-                    current_check = next_check;
-                }
-                Node::CaseArm(CaseArm::Default { body }) => {
-                    // Default arm: the check block falls through here.
-                    self.switch_to(current_check);
-                    self.terminate(Terminator::Goto(arm_body_bb), span);
-
-                    self.switch_to(arm_body_bb);
-                    self.context_stack
-                        .push(ControlContext::Select { next_arm_body });
-                    for &s in &body {
-                        self.lower_stmt(s);
-                    }
-                    self.context_stack.pop();
-                    if !self.current_block_is_terminated() {
-                        self.terminate(Terminator::Goto(merge_block), span);
-                    }
-
-                    current_check = merge_block;
-                }
-                _ => {}
+            let body = match self.arena[arm_id].clone() {
+                Node::CaseArm(CaseArm::Case { body, .. }) => body,
+                Node::CaseArm(CaseArm::Default { body }) => body,
+                _ => continue,
+            };
+            self.switch_to(arm_bodies[arm_idx]);
+            self.context_stack
+                .push(ControlContext::Select { next_arm_body });
+            for &s in &body {
+                self.lower_stmt(s);
+            }
+            self.context_stack.pop();
+            if !self.current_block_is_terminated() {
+                self.terminate(Terminator::Goto(merge_block), span);
             }
         }
 
         self.switch_to(merge_block);
+    }
+
+    /// Emit the equality test(s) for one `Case` arm into the current block,
+    /// branching to `body_bb` on a match and `else_bb` otherwise. A multi-value
+    /// `Case` chains `scrut == v_i` comparisons Or-style: each non-final value
+    /// falls through to a fresh block holding the next comparison.
+    fn lower_case_test(
+        &mut self,
+        scrut_reg: Reg,
+        values: &[NodeId],
+        body_bb: BlockId,
+        else_bb: BlockId,
+        span: Span,
+    ) {
+        for (vi, &val_id) in values.iter().enumerate() {
+            let val_reg = self.lower_expr(val_id);
+            let eq = self.emit(
+                InstKind::BinOp {
+                    op: IrBinOp::Eq,
+                    lhs: scrut_reg,
+                    rhs: val_reg,
+                },
+                span,
+            );
+            let last = vi + 1 == values.len();
+            let next = if last { else_bb } else { self.fresh_block() };
+            self.terminate(
+                Terminator::BranchIf {
+                    cond: eq,
+                    then_block: body_bb,
+                    else_block: next,
+                },
+                span,
+            );
+            if !last {
+                self.switch_to(next);
+            }
+        }
     }
 }
