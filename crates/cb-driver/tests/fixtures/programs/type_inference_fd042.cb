@@ -1,0 +1,33 @@
+// FD-042: an implicit declaration infers its type from the assigned value,
+// so String / Float / array / loop variables need no explicit `Dim` or sigil.
+// Under the old "default to Integer" rule the String line would not even
+// compile and the Float lines would be narrowed to integers.
+
+// String inferred from the value.
+greeting = "Hello, " + "world"
+Print greeting
+
+// Float inferred (Float division yields a Float).
+ratio = 7 / 2.0
+Print Str(ratio)
+
+// Array inferred from `New`; indexable with no `Dim`.
+scores = New Integer[3]
+scores[0] = 10
+scores[1] = 25
+scores[2] = 7
+Print Str(scores[0] + scores[1] + scores[2])
+
+// Integer For variable inferred from integer bounds.
+total = 0
+For i = 0 To 2
+    total = total + scores[i]
+Next i
+Print Str(total)
+
+// Float For variable inferred from Float bounds (default Step is 1.0).
+acc = 0.0
+For x = 1.0 To 3.0
+    acc = acc + x
+Next x
+Print Str(acc)
