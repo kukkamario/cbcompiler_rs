@@ -1,0 +1,30 @@
+' FD-041: sound surface smoke. Exercises the full command path end to end —
+' LoadSound -> PlaySound -> StopSound -> SoundPlaying -> DeleteSound — through the
+' opaque Sound / SoundChannel types and the PlaySound statement form.
+'
+' The assertions are DEVICE-INDEPENDENT: the audible behaviour needs a real
+' output device and is verified separately (deferred smoke). On a host with audio
+' LoadSound/PlaySound succeed and StopSound makes the channel stop; on an
+' audio-less host they degrade to Null and the null-Sound trap is suppressed — so
+' SoundPlaying after StopSound is 0 either way, and the program runs identically.
+
+' Preloaded sample, played as a one-shot, then stopped.
+Dim s As Sound = LoadSound("beep.wav")
+Dim ch As SoundChannel = PlaySound(s)
+StopSound ch
+Print "stopped=" + Str(SoundPlaying(ch))
+
+' SetSound on the (now stopped/finished) channel is a safe no-op.
+SetSound ch, 1
+Print "after_set=" + Str(SoundPlaying(ch))
+
+' PlaySound as a fire-and-forget statement (the returned channel is discarded),
+' plus the streamed filename form. Both degrade to a non-playing channel without
+' audio; neither is asserted on directly.
+PlaySound s
+Dim music As SoundChannel = PlaySound("beep.wav")
+StopSound music
+Print "music=" + Str(SoundPlaying(music))
+
+DeleteSound s
+Print "done"

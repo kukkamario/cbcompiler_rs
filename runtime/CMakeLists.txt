@@ -38,6 +38,7 @@ add_library(cb_runtime STATIC
     cb_object.cpp
     cb_font.cpp
     cb_input.cpp
+    cb_sound.cpp
 )
 
 target_include_directories(cb_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -65,6 +66,12 @@ if(VCPKG_TARGET_TRIPLET MATCHES "static")
     # INTERFACE_LINK_LIBRARIES, but allegro_win_get_path needs SHGetFolderPathW.
     if(WIN32)
         list(APPEND CB_LINK_SEEDS shell32)
+        # allegro_audio's WASAPI backend (openal-soft) boosts its mixer thread via
+        # MMCSS — AvSetMmThreadCharacteristicsW / AvRevertMmThreadCharacteristics
+        # from avrt.lib (FD-041). Like shell32 and fmt below, the static openal
+        # references it but the vcpkg port doesn't surface it to the transitive
+        # walk (openal is recorded as an absolute path), so add it explicitly.
+        list(APPEND CB_LINK_SEEDS avrt)
     endif()
 endif()
 
@@ -176,6 +183,7 @@ if(CB_RUNTIME_TESTS)
         tests/test_file.cpp
         tests/test_input.cpp
         tests/test_masking.cpp
+        tests/test_sound.cpp
     )
     target_link_libraries(cb_runtime_tests PRIVATE
         cb_runtime ${CB_LINK_SEEDS} GTest::gtest GTest::gtest_main)

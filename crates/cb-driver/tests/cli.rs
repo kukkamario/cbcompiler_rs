@@ -354,6 +354,54 @@ fn file_op_on_null_handle_traps() {
 
 #[cfg(feature = "interp")]
 #[test]
+fn delete_sound_on_null_handle_traps_when_audio_available() {
+    // FD-041: DeleteSound on a null (never-loaded) `Sound` raises the FD-015 trap
+    // ("invalid sound handle", cbEnchanted's "Sound access violation") — exit 1,
+    // and "after" is not reached. But the FD deliberately SUPPRESSES that trap on
+    // an audio-less host (LoadSound would have returned Null there through no fault
+    // of the program), so on a silent box the op is a no-op and the program runs
+    // to completion. Graphics-gated (the Sound funcs exist only in the full Allegro
+    // build); within that, tolerant of whether a real audio device is present so
+    // CI never flakes either way.
+    if !cb_runtime_sys::HAS_GRAPHICS {
+        eprintln!("skipping: SDK-free runtime build has no audio");
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let path = write_cb(
+        &dir,
+        "null_sound.cb",
+        "Dim s As Sound\nPrint \"before\"\nDeleteSound s\nPrint \"after\"\n",
+    );
+    let output = Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("before"), "stdout: {stdout}");
+    match output.status.code() {
+        // Audio available: the trap fired, halting before "after".
+        Some(1) => {
+            assert!(!stdout.contains("after"), "trap should halt before 'after'");
+            assert!(
+                stderr.contains("runtime error: DeleteSound"),
+                "stderr: {stderr}"
+            );
+            assert!(stderr.contains("invalid sound handle"), "stderr: {stderr}");
+        }
+        // Audio unavailable: the trap is suppressed and the program runs on.
+        Some(0) => assert!(
+            stdout.contains("after"),
+            "suppressed trap should run to completion; stdout: {stdout}"
+        ),
+        other => panic!("unexpected exit code {other:?}; stderr: {stderr}"),
+    }
+}
+
+#[cfg(feature = "interp")]
+#[test]
 fn copy_file_over_existing_traps() {
     // FD-040: CopyFile refuses to overwrite an existing destination — it traps
     // (resolved as: trap), matching classic CB's "operation fails". Runs in the
