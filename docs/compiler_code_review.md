@@ -23,25 +23,16 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 
 | Domain | High | Medium | Low |
 |---|---|---|---|
-| Sema (check / lower / types / scope) | 4 | 14 | 21 |
+| Sema (check / lower / types / scope) | 0 | 14 | 21 |
 | Frontend (lexer / parser / AST) | 0 | 12 | 28 |
 | IR + Interpreter | 0 | 5 | 26 |
 | Diagnostics + Runtime/Driver/LLVM | 0 | 3 | 21 |
 
-### The four bugs to fix first
-
-All four were traced through the actual control flow and confirmed as genuine,
-and all live in `cb-sema`:
-
-1. **For/ForEach loop variable is never allocated a local**, so an implicit loop
-   counter silently aliases `LocalId(0)` — corrupting an unrelated local and the
-   counter. (S-H1)
-2. **`Select … Default` in a non-final position drops every subsequent `Case`.**
-   (S-H2)
-3. **Logical `Xor` is lowered as bitwise `BinXor`**, so `2 Xor 1` yields `3`
-   instead of `0`. (S-H3)
-4. **A top-level `Const` nested inside a block is never hoisted**, so references
-   to it (from before the block, or from a function) fail to resolve. (S-H4)
+> The four High-severity `cb-sema` miscompiles originally reported here (S-H1
+> implicit For/ForEach loop-variable aliasing, S-H2 `Select … Default` in a
+> non-final position dropping later `Case`s, S-H3 logical `Xor` lowered as
+> bitwise, S-H4 block-nested top-level `Const` not hoisted) have been **fixed**
+> and removed from this report.
 
 ### Cross-cutting themes
 
@@ -50,10 +41,10 @@ one-off:
 
 - **Silent fallbacks that mask lowering bugs.** The interpreter is the
   *reference implementation* and should fail loudly on internal inconsistencies,
-  but several paths swallow them: `unwrap_or(LocalId(0))` (S-H1), `default_value`
-  returning `Null` for an unknown struct (II-V20), `push_frame` tolerating arity
-  mismatch (II-V27), and `type_def_map[..]` indexing a fabricated `"<unknown>"`
-  key (S-M6). Prefer `debug_assert!`/`panic!` at these points.
+  but several paths swallow them: `default_value` returning `Null` for an unknown
+  struct (II-V20), `push_frame` tolerating arity mismatch (II-V27), and
+  `type_def_map[..]` indexing a fabricated `"<unknown>"` key (S-M6). Prefer
+  `debug_assert!`/`panic!` at these points.
 - **Coercion / widening logic duplicated across crates.** The "Byte/Short widen
   to Int, else keep type" rule appears three times in `cb-sema` (S-M14), and a
   near-identical value→i64 / value→f64 pair exists in both `interp.rs` and
@@ -79,60 +70,8 @@ one-off:
 
 ## Sema (`cb-sema`)
 
-### High
-
-#### S-H1 — For/ForEach loop variable never allocated; silent `LocalId(0)` aliasing
-- `lower.rs:603-675` (`scan_body_for_locals`), `lower.rs:1727-1732` (`lower_for`), `lower.rs:1886-1891` (`lower_for_each`)
-- Category: Bug
-- `scan_body_for_locals` allocates locals only from `Dim` names and `Assign`
-  targets; its `For`/`ForEach` arms recurse into the body but never allocate the
-  loop **variable**. The checker *does* declare an implicit loop variable in the
-  symbol table (`check.rs:1984-1991`, and §6.3 permits `For i = 1 To 10` with no
-  prior `Dim`), but `resolve_var` (`lower.rs:196-202`) consults only
-  `local_map`/`global_map`. For an implicit loop var the lookup misses and both
-  loops fall back to `unwrap_or(VarRef::Local(LocalId(0)))`, aliasing the counter
-  onto the first declared local/parameter.
-- Fix: allocate a local for the loop `var` when recursing into `For`/`ForEach` in
-  `scan_body_for_locals` (typed via the symbol table, as the `Dim`/`Assign` arms
-  do), and replace the `unwrap_or(LocalId(0))` fallbacks with a hard error so a
-  missing slot can never silently corrupt local 0.
-
-#### S-H2 — `Select … Default` in a non-final position drops all subsequent `Case`s
-- `lower.rs:2188-2205` (`lower_select`, Default arm)
-- Category: Bug
-- §6.2 says `Default` "may appear in any position." The Default arm makes the
-  current check block `Goto(arm_body_bb)` and then sets
-  `current_check = merge_block`. A `Case` that follows `Default` in source order
-  then emits its comparison terminator into `merge_block` (the exit join) — wrong
-  block, and unreachable anyway because Default already jumped past it.
-- Fix: collect the default arm separately and emit it last regardless of source
-  position — build the `Case` comparison chain whose final `else_block` targets
-  the default body (or `merge_block` if absent), then lower the default body.
-  Document that the source-order position of `Default` is not significant.
-
-#### S-H3 — Logical `Xor` lowered as bitwise `BinXor`
-- `lower.rs:972-973` (`map_binop`)
-- Category: Bug
-- §5.1 defines logical `Xor` ("operands tested as `<> 0`; result is Integer
-  1/0") as distinct from the bitwise `BinXor` operator. `And`/`Or` are lowered
-  via short-circuit logic that yields canonical 1/0, but `Xor` maps straight to
-  `IrBinOp::BinXor`, so `2 Xor 1` gives `3` instead of `0`. The comment "logical
-  XOR (not short-circuit)" masks the mismatch.
-- Fix: normalize both operands to 0/1 (`x <> 0`) before `BinXor` (or `Ne` of the
-  two booleans). Keep `BinOp::BinXor` → `IrBinOp::BinXor` for the genuine bitwise
-  operator.
-
-#### S-H4 — Top-level block-nested `Const` is never hoisted
-- `check.rs:397-408` (`pass1`) vs `check.rs:2134-2137` (`check_function`)
-- Category: Bug / Inconsistency
-- `check_function` hoists nested consts (`for &s in body { collect_consts_recursive(s, fn_scope) }`),
-  but top-level `pass1` calls only `pass1_stmt` and `collect_labels_recursive` —
-  never `collect_consts_recursive`. A `Const` nested in a top-level
-  `If`/`For`/`While`/`Select` body is therefore not hoisted into the top scope,
-  even though §4.2 has no block scoping and §7.3 hoists definitions. (A directly
-  top-level `Const` works; only the block-nested case is broken.)
-- Fix: add `for &id in program { self.collect_consts_recursive(id, top); }` to
-  `pass1`, mirroring the function path.
+> The four High-severity findings (S-H1–S-H4) have been fixed and removed; the
+> Medium/Low findings below are unchanged.
 
 ### Medium
 
