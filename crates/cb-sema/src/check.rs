@@ -1843,14 +1843,15 @@ impl<'a> Checker<'a> {
                 ));
                 Type::Error
             }
-            // The right-hand side produces no value (a Sub call).
+            // The right-hand side produces no value (a call to a return-typeless
+            // function — a subroutine, in the spec's terms; §7.1).
             Type::Void => {
                 let name_str = self.interner.resolve(name);
                 self.diagnostics.push(Diagnostic::error(
                     E_CANNOT_INFER_TYPE,
                     format!(
                         "cannot infer a type for `{name_str}`: the right-hand side \
-                         has no value (a Sub returns nothing)"
+                         has no value (a subroutine returns nothing)"
                     ),
                     Label::new(span),
                 ));

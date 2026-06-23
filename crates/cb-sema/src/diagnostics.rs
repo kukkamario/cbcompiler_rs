@@ -46,6 +46,6 @@ pub const E_ADDRESS_OF_UNSUPPORTED: DiagnosticCode = DiagnosticCode::new("E0329"
 pub const E_RESERVED_TYPE: DiagnosticCode = DiagnosticCode::new("E0330");
 /// An implicit declaration (a first assignment with no sigil and no `As`) could
 /// not infer a type from its value — the value is `Null` (no concrete reference
-/// type) or has no value at all (a Sub call). The fix is an explicit `As`
-/// annotation or `Dim` (cb_syntax.md §4.1).
+/// type) or has no value at all (a call to a return-typeless subroutine). The
+/// fix is an explicit `As` annotation or `Dim` (cb_syntax.md §4.1).
 pub const E_CANNOT_INFER_TYPE: DiagnosticCode = DiagnosticCode::new("E0331");
