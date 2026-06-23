@@ -407,3 +407,15 @@ fn runtime_constants_fd029() {
     // decoding itself is covered by the cb-runtime-sys unit tests in both modes.
     run_graphics("runtime_constants_fd029");
 }
+
+#[test]
+fn runtime_sound_fd041() {
+    // LoadSound -> PlaySound -> StopSound -> SoundPlaying -> DeleteSound through
+    // the Sound/SoundChannel opaque types, incl. the PlaySound statement form and
+    // the streamed filename overload. Staged with a real .wav so a host with audio
+    // exercises the live path; the assertions are device-independent (SoundPlaying
+    // after StopSound is 0 whether or not audio is available), since the audible
+    // behaviour needs a real device (deferred). The gain/pan/speed math and the
+    // channel pool liveness are unit-tested headlessly in test_sound.cpp.
+    run_graphics_with_assets("runtime_sound_fd041", &["beep.wav"]);
+}

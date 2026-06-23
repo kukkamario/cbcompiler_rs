@@ -65,6 +65,8 @@ const RERUN_SOURCES: &[&str] = &[
     "cb_input.cpp",
     "cb_input.h",
     "cb_keys.def",
+    "cb_sound.cpp",
+    "cb_sound.h",
     "cb_utf8.h",
     "cb_runtime.h",
     "cb_runtime_core.h",

@@ -3154,6 +3154,82 @@ mod tests {
         }
     }
 
+    // FD-041: a catalog with the Sound surface — the `Sound` (tag 17) and
+    // `SoundChannel` (tag 18) opaque types, plus enough of the command set to pin
+    // the naming trap (Set/Stop/SoundPlaying take a SoundChannel, not a Sound) and
+    // the opaque strictness. Only the representative arities are registered.
+    fn sound_catalog() -> crate::RuntimeCatalog {
+        let sound = IrType::RuntimeType("Sound".into());
+        let channel = IrType::RuntimeType("SoundChannel".into());
+        let mut catalog = catalog_of(vec![
+            rt_func(
+                "LoadSound",
+                "cb_rt_load_sound",
+                &[("p", IrType::String)],
+                sound.clone(),
+            ),
+            // PlaySound's two source-typed overloads, both returning SoundChannel.
+            rt_func(
+                "PlaySound",
+                "cb_rt_play_sound4",
+                &[
+                    ("s", sound.clone()),
+                    ("v", IrType::Float),
+                    ("b", IrType::Float),
+                    ("f", IrType::Int),
+                ],
+                channel.clone(),
+            ),
+            rt_func(
+                "PlaySound",
+                "cb_rt_play_sound",
+                &[("s", sound.clone())],
+                channel.clone(),
+            ),
+            rt_func(
+                "PlaySound",
+                "cb_rt_play_sound_file",
+                &[("p", IrType::String)],
+                channel.clone(),
+            ),
+            // The naming trap: these say "Sound" but take a SoundChannel.
+            rt_func(
+                "SetSound",
+                "cb_rt_set_sound",
+                &[("c", channel.clone()), ("loop", IrType::Int)],
+                IrType::Void,
+            ),
+            rt_func(
+                "StopSound",
+                "cb_rt_stop_sound",
+                &[("c", channel.clone())],
+                IrType::Void,
+            ),
+            rt_func(
+                "SoundPlaying",
+                "cb_rt_sound_playing",
+                &[("c", channel.clone())],
+                IrType::Int,
+            ),
+            // ...while these take a Sound.
+            rt_func(
+                "DeleteSound",
+                "cb_rt_delete_sound",
+                &[("s", sound.clone())],
+                IrType::Void,
+            ),
+        ]);
+        catalog.types.push(crate::RuntimeTypeDesc {
+            name: "Sound".into(),
+            tag: 17,
+        });
+        catalog.types.push(crate::RuntimeTypeDesc {
+            name: "SoundChannel".into(),
+            tag: 18,
+        });
+        catalog
+    }
+
     #[test]
     fn runtime_fn_call_ok() {
         let catalog = catalog_of(vec![rt_func(
@@ -3225,6 +3301,98 @@ mod tests {
                    Return o\n\
                    EndFunction\n";
         let result = analyze_with_catalog(src, &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── sound: the SoundChannel-vs-Sound naming trap (FD-041) ───────────────
+
+    #[test]
+    fn sound_channel_ops_accept_channel_fd041() {
+        // The trap: SetSound/StopSound/SoundPlaying name "Sound" but take a
+        // SoundChannel (PlaySound's return), and PlaySound's preloaded form and
+        // its filename form both type as SoundChannel. All correct → no diags.
+        let catalog = sound_catalog();
+        let src = "Dim s As Sound = LoadSound(\"a.ogg\")\n\
+                   Dim ch As SoundChannel = PlaySound(s, 100.0, 0.0, -1)\n\
+                   Dim st As SoundChannel = PlaySound(\"music.ogg\")\n\
+                   SetSound ch, 1\n\
+                   StopSound st\n\
+                   Dim p As Integer = SoundPlaying(ch)\n\
+                   DeleteSound s\n";
+        let result = analyze_with_catalog(src, &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn sound_channel_op_rejects_sound_handle_fd041() {
+        // StopSound takes a SoundChannel; handing it a `Sound` is the trap firing
+        // — the lone overload's param type can't accept it (E0317, cannot convert
+        // one opaque handle to the other).
+        let catalog = sound_catalog();
+        let src = "Dim s As Sound = LoadSound(\"a.ogg\")\n\
+                   StopSound s\n";
+        let result = analyze_with_catalog(src, &catalog);
+        assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn delete_sound_rejects_channel_handle_fd041() {
+        // The mirror image: DeleteSound takes a `Sound`; a SoundChannel is wrong.
+        let catalog = sound_catalog();
+        let src = "Dim ch As SoundChannel = PlaySound(\"music.ogg\")\n\
+                   DeleteSound ch\n";
+        let result = analyze_with_catalog(src, &catalog);
+        assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn play_sound_statement_form_discards_channel_fd041() {
+        // PlaySound is a hybrid: used as a statement, the returned SoundChannel is
+        // simply discarded. A value-returning call in statement position is legal
+        // (no void overload needed, and a void one would be ambiguous).
+        let catalog = sound_catalog();
+        let result = analyze_with_catalog(
+            "Dim s As Sound = LoadSound(\"a.ogg\")\nPlaySound s\n",
+            &catalog,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn sound_handles_reject_arithmetic_and_ordering_fd041() {
+        // Strict opaque handles: arithmetic and ordering on a Sound/SoundChannel
+        // are type errors (E0301), exactly like every other runtime opaque type.
+        let catalog = sound_catalog();
+        let add = analyze_with_catalog(
+            "Dim a As Sound = LoadSound(\"a\")\n\
+             Dim b As Sound = LoadSound(\"b\")\n\
+             Dim x As Integer = a + b\n",
+            &catalog,
+        );
+        assert_eq!(error_codes(&add), vec!["E0301"]);
+
+        let cmp = analyze_with_catalog(
+            "Dim c As SoundChannel = PlaySound(\"m\")\n\
+             Dim d As SoundChannel = PlaySound(\"n\")\n\
+             Dim y As Integer = c < d\n",
+            &catalog,
+        );
+        assert_eq!(error_codes(&cmp), vec!["E0301"]);
+    }
+
+    #[test]
+    fn sound_handle_equality_and_null_allowed_fd041() {
+        // Equality and `= Null` are the ONLY operators allowed on an opaque
+        // handle (assignment, identity, null check) — pin that they don't error.
+        // Both comparisons yield Int 1/0 (FD-035), assigned to plain Integers.
+        let catalog = sound_catalog();
+        let result = analyze_with_catalog(
+            "Dim s As Sound = LoadSound(\"a\")\n\
+             Dim ch As SoundChannel = PlaySound(s)\n\
+             Dim unloaded As Integer = (s = Null)\n\
+             Dim done As Integer = (SoundPlaying(ch) = 0)\n",
+            &catalog,
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 

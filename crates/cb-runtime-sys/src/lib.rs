@@ -461,12 +461,17 @@ mod tests {
         // TestHandle, Memblock, File, and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
-            assert_eq!(catalog.types.len(), 7);
+            assert_eq!(catalog.types.len(), 9);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
             // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
             assert_eq!(types_by_name["Object"].tag, 13);
             assert_eq!(types_by_name["Map"].tag, 14);
+            // Sound is tag 17, SoundChannel tag 18 (FD-041). Both Allegro-
+            // dependent, so they exist only in the full build. The CB-visible
+            // name is "SoundChannel", not "Channel".
+            assert_eq!(types_by_name["Sound"].tag, 17);
+            assert_eq!(types_by_name["SoundChannel"].tag, 18);
         }
         #[cfg(cb_no_allegro)]
         assert_eq!(catalog.types.len(), 3);
@@ -1133,6 +1138,89 @@ mod tests {
             assert_eq!(panim.params.len(), 2);
             assert_eq!(panim.params[0].ty, object_ty);
             assert_eq!(panim.params[1].ty, IrType::Int);
+
+            // Sound (FD-041). `Sound` (tag 17) is the loaded sample; `SoundChannel`
+            // (tag 18) is a playing channel. LoadSound/DeleteSound take a Sound;
+            // PlaySound is two source-typed overloads (preloaded Sound vs filename
+            // String), each with a 1/2/3/4-arg arity family supplying the optional
+            // volume/balance/frequency — all returning SoundChannel. SetSound has a
+            // 2/3/4/5-arg family over SoundChannel; StopSound/SoundPlaying take a
+            // SoundChannel. The naming trap: Set/Stop/SoundPlaying say "Sound" but
+            // take a SoundChannel.
+            let sound_ty = IrType::RuntimeType("Sound".to_string());
+            let channel_ty = IrType::RuntimeType("SoundChannel".to_string());
+
+            let load_sound = by_symbol["cb_rt_load_sound"];
+            assert_eq!(load_sound.name, "loadsound");
+            assert_eq!(load_sound.params.len(), 1);
+            assert_eq!(load_sound.params[0].ty, IrType::String);
+            assert_eq!(load_sound.return_ty, sound_ty);
+
+            // PlaySound — preloaded Sound source, 1/2/3/4-arg arity family.
+            let play1 = by_symbol["cb_rt_play_sound"];
+            assert_eq!(play1.name, "playsound");
+            assert_eq!(play1.params.len(), 1);
+            assert_eq!(play1.params[0].ty, sound_ty);
+            assert_eq!(play1.return_ty, channel_ty);
+            assert_eq!(by_symbol["cb_rt_play_sound2"].params.len(), 2);
+            assert_eq!(by_symbol["cb_rt_play_sound3"].params.len(), 3);
+            let play4 = by_symbol["cb_rt_play_sound4"];
+            assert_eq!(play4.name, "playsound");
+            assert_eq!(play4.params.len(), 4);
+            assert_eq!(play4.params[0].ty, sound_ty);
+            assert_eq!(play4.params[1].ty, IrType::Float);
+            assert_eq!(play4.params[2].ty, IrType::Float);
+            assert_eq!(play4.params[3].ty, IrType::Int);
+            assert_eq!(play4.return_ty, channel_ty);
+
+            // PlaySound — filename String source, same arity family, also returns
+            // a SoundChannel (the streamed-file "music" path).
+            let playf1 = by_symbol["cb_rt_play_sound_file"];
+            assert_eq!(playf1.name, "playsound");
+            assert_eq!(playf1.params.len(), 1);
+            assert_eq!(playf1.params[0].ty, IrType::String);
+            assert_eq!(playf1.return_ty, channel_ty);
+            assert_eq!(by_symbol["cb_rt_play_sound_file2"].params.len(), 2);
+            assert_eq!(by_symbol["cb_rt_play_sound_file3"].params.len(), 3);
+            let playf4 = by_symbol["cb_rt_play_sound_file4"];
+            assert_eq!(playf4.params.len(), 4);
+            assert_eq!(playf4.params[0].ty, IrType::String);
+            assert_eq!(playf4.params[3].ty, IrType::Int);
+            assert_eq!(playf4.return_ty, channel_ty);
+
+            // SetSound 2/3/4/5-arg family over SoundChannel (the naming trap:
+            // takes a SoundChannel despite the "Sound" name).
+            let set2 = by_symbol["cb_rt_set_sound"];
+            assert_eq!(set2.name, "setsound");
+            assert_eq!(set2.params.len(), 2);
+            assert_eq!(set2.params[0].ty, channel_ty);
+            assert_eq!(set2.params[1].ty, IrType::Int);
+            assert_eq!(set2.return_ty, IrType::Void);
+            assert_eq!(by_symbol["cb_rt_set_sound3"].params.len(), 3);
+            assert_eq!(by_symbol["cb_rt_set_sound4"].params.len(), 4);
+            let set5 = by_symbol["cb_rt_set_sound5"];
+            assert_eq!(set5.name, "setsound");
+            assert_eq!(set5.params.len(), 5);
+            assert_eq!(set5.params[0].ty, channel_ty);
+            assert_eq!(set5.params[2].ty, IrType::Float);
+            assert_eq!(set5.params[4].ty, IrType::Int);
+
+            let stop = by_symbol["cb_rt_stop_sound"];
+            assert_eq!(stop.name, "stopsound");
+            assert_eq!(stop.params.len(), 1);
+            assert_eq!(stop.params[0].ty, channel_ty);
+            assert_eq!(stop.return_ty, IrType::Void);
+
+            let playing = by_symbol["cb_rt_sound_playing"];
+            assert_eq!(playing.name, "soundplaying");
+            assert_eq!(playing.params[0].ty, channel_ty);
+            assert_eq!(playing.return_ty, IrType::Int);
+
+            let del_sound = by_symbol["cb_rt_delete_sound"];
+            assert_eq!(del_sound.name, "deletesound");
+            assert_eq!(del_sound.params.len(), 1);
+            assert_eq!(del_sound.params[0].ty, sound_ty);
+            assert_eq!(del_sound.return_ty, IrType::Void);
         }
 
         let create = by_symbol["cb_rt_create_test_handle"];

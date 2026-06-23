@@ -50,6 +50,19 @@ typedef struct CbMemblock CbMemblock;
    catalog). */
 typedef struct CbFile CbFile;
 
+/* Sound sample — the CB-visible `Sound` opaque type (FD-041, tag 17). A loaded
+   ALLEGRO_SAMPLE; defined in cb_sound.cpp. Created by LoadSound (Null on failure),
+   freed by DeleteSound. Allegro-dependent (allegro_audio) — absent from the
+   SDK-free catalog. */
+typedef struct CbSound CbSound;
+
+/* Sound channel — the CB-visible `SoundChannel` opaque type (FD-041, tag 18). A
+   playing instance (sample-instance or audio-stream). Never defined: it is a
+   packed generation-pool handle (cb_sound.h), not a real object. Produced by
+   PlaySound, consumed by SetSound/StopSound/SoundPlaying; auto-reaped each frame
+   when it finishes. Allegro-dependent — absent from the SDK-free catalog. */
+typedef struct CbChannel CbChannel;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -518,6 +531,31 @@ int32_t cb_rt_wait_mouse(void);
 void    cb_rt_position_mouse(int32_t x, int32_t y);
 void    cb_rt_show_mouse(int32_t mode);
 void    cb_rt_clear_mouse(void);
+
+/* Sound (cb_sound.cpp, FD-041). Allegro-dependent (allegro_audio + acodec); the
+   `Sound` (CbSound*) and `SoundChannel` (CbChannel*) opaque types. `SoundChannel`
+   is a packed generation-pool handle, not a real pointer. PlaySound/SetSound take
+   the documented optional volume/balance/frequency via arity overloads (one entry
+   per arity, thin wrappers supplying volume=100/balance=0/frequency=-1) and
+   PlaySound's polymorphic first arg via two source-typed overloads (preloaded
+   `Sound` → one-shot sample; filename String → streamed file). PlaySound returns
+   a SoundChannel; used as a statement, the result is simply discarded. */
+CbSound*   cb_rt_load_sound(const CbString* path);
+CbChannel* cb_rt_play_sound(CbSound* sound);
+CbChannel* cb_rt_play_sound2(CbSound* sound, double volume);
+CbChannel* cb_rt_play_sound3(CbSound* sound, double volume, double balance);
+CbChannel* cb_rt_play_sound4(CbSound* sound, double volume, double balance, int32_t frequency);
+CbChannel* cb_rt_play_sound_file(const CbString* path);
+CbChannel* cb_rt_play_sound_file2(const CbString* path, double volume);
+CbChannel* cb_rt_play_sound_file3(const CbString* path, double volume, double balance);
+CbChannel* cb_rt_play_sound_file4(const CbString* path, double volume, double balance, int32_t frequency);
+void    cb_rt_set_sound(CbChannel* channel, int32_t looping);
+void    cb_rt_set_sound3(CbChannel* channel, int32_t looping, double volume);
+void    cb_rt_set_sound4(CbChannel* channel, int32_t looping, double volume, double balance);
+void    cb_rt_set_sound5(CbChannel* channel, int32_t looping, double volume, double balance, int32_t frequency);
+void    cb_rt_stop_sound(CbChannel* channel);
+int32_t cb_rt_sound_playing(CbChannel* channel);
+void    cb_rt_delete_sound(CbSound* sound);
 
 /* Test handle functions for opaque type testing */
 CbTestHandle* cb_rt_create_test_handle(void);

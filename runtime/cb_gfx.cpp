@@ -20,6 +20,7 @@
 #include "cb_object.h"
 #include "cb_font.h"
 #include "cb_geom.h"
+#include "cb_sound.h"
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_primitives.h>
@@ -328,6 +329,10 @@ static void do_draw_screen(bool clear_after) {
     if (!game_drawn) cb::object::render_all();
     game_updated = false;
     game_drawn   = false;
+
+    // FD-041: reap finished sound channels (cbEnchanted's per-frame updateAudio).
+    // Idempotent and cheap — no dedup flag needed.
+    cb::sound::reap();
 
     // Composite queued (Locate/AddText) text onto this frame before presenting.
     render_queued_texts();

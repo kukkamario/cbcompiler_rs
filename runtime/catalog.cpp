@@ -157,6 +157,20 @@ constexpr CbTypeTag CB_TYPE_FILE = 16;
 template<> struct type_tag<      CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
 template<> struct type_tag<const CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
 
+// Sound — the loaded-sample opaque type (FD-041, tag 17). SoundChannel — a
+// playing channel (FD-041, tag 18); registered CB-side as "SoundChannel" but the
+// C struct stays CbChannel (mirroring cbEnchanted's CBChannel). Both are
+// Allegro-dependent (allegro_audio), so the type-table rows and functions below
+// sit inside the CB_NO_ALLEGRO guard — but the tag constants and these
+// specializations are unconditional (like Image/Font/Object/Map), since
+// FuncTraits deduces the tags from the cb_rt_* signatures regardless of build.
+constexpr CbTypeTag CB_TYPE_SOUND = 17;
+template<> struct type_tag<      CbSound*>      { static constexpr CbTypeTag value = CB_TYPE_SOUND; };
+template<> struct type_tag<const CbSound*>      { static constexpr CbTypeTag value = CB_TYPE_SOUND; };
+constexpr CbTypeTag CB_TYPE_CHANNEL = 18;
+template<> struct type_tag<      CbChannel*>    { static constexpr CbTypeTag value = CB_TYPE_CHANNEL; };
+template<> struct type_tag<const CbChannel*>    { static constexpr CbTypeTag value = CB_TYPE_CHANNEL; };
+
 template<typename T> inline constexpr CbTypeTag type_tag_v = type_tag<T>::value;
 
 // FuncTraits<Fn> — deduces param/return tags from a function pointer's type.
@@ -221,6 +235,12 @@ static constexpr CbTypeDesc catalog_types[] = {
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
     { "Object",     ::cb_catalog::CB_TYPE_OBJECT },
     { "Map",        ::cb_catalog::CB_TYPE_MAP },
+    // Sound/SoundChannel (FD-041) are Allegro-dependent (allegro_audio), so they
+    // join the graphics handles inside the guard — absent from the SDK-free
+    // catalog. The CB-visible name is "SoundChannel", not "Channel" (the bare
+    // noun is polysemous and stays free for user code; the tag is CB_TYPE_CHANNEL).
+    { "Sound",        ::cb_catalog::CB_TYPE_SOUND },
+    { "SoundChannel", ::cb_catalog::CB_TYPE_CHANNEL },
 #endif
 };
 
@@ -659,6 +679,31 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("positionmouse",    cb_rt_position_mouse),
     CB_FN("showmouse",        cb_rt_show_mouse),
     CB_FN("clearmouse",       cb_rt_clear_mouse),
+
+    // Sound (cb_sound.cpp, FD-041). PlaySound's polymorphic first arg is two
+    // source-typed overloads (preloaded `Sound` vs filename `String`); each
+    // documented optional arg (volume/balance/frequency) is an arity overload —
+    // the moveobject/playobject pattern (the catalog has no default-arg
+    // mechanism). PlaySound returns `SoundChannel`; the value-returning form also
+    // covers the statement use (the result is discarded). SetSound likewise fans
+    // out over arity. SetSound/StopSound/SoundPlaying take a `SoundChannel`;
+    // LoadSound/DeleteSound and PlaySound's preloaded form take a `Sound`.
+    CB_FN("loadsound",        cb_rt_load_sound),
+    CB_FN("playsound",        cb_rt_play_sound),
+    CB_FN("playsound",        cb_rt_play_sound2),
+    CB_FN("playsound",        cb_rt_play_sound3),
+    CB_FN("playsound",        cb_rt_play_sound4),
+    CB_FN("playsound",        cb_rt_play_sound_file),
+    CB_FN("playsound",        cb_rt_play_sound_file2),
+    CB_FN("playsound",        cb_rt_play_sound_file3),
+    CB_FN("playsound",        cb_rt_play_sound_file4),
+    CB_FN("setsound",         cb_rt_set_sound),
+    CB_FN("setsound",         cb_rt_set_sound3),
+    CB_FN("setsound",         cb_rt_set_sound4),
+    CB_FN("setsound",         cb_rt_set_sound5),
+    CB_FN("stopsound",        cb_rt_stop_sound),
+    CB_FN("soundplaying",     cb_rt_sound_playing),
+    CB_FN("deletesound",      cb_rt_delete_sound),
 #endif // CB_NO_ALLEGRO
 
     // Test handles

@@ -50,7 +50,7 @@ none". The user never sees their internals.
 | `Image` | Bitmap/texture, optionally a multi-frame sprite sheet |
 | `Font` | Loaded TrueType font |
 | `Sound` | Preloaded audio sample |
-| `Channel` | An active sound playback instance (returned by `PlaySound`) |
+| `SoundChannel` | An active sound playback instance (returned by `PlaySound`) |
 | `Object` | 2D sprite object (position, angle, scale, animation, collision). Also the type of a particle emitter — see Particle Effects |
 | `Map` | Tilemap |
 | `File` | Open file handle |
@@ -285,12 +285,47 @@ drawing commands.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `LoadSound` | `path: String` | `Sound` | Loads an audio file; 0 on failure |
-| `PlaySound` | `sound: Sound\|String, volume: Float, balance: Float, frequency: Integer` | `Channel` | Plays a sound (handle or path); returns a channel handle; the channel is freed when playback ends |
-| `SoundPlaying` | `channel: Channel` | `Integer` | 1 if the channel is still playing |
-| `SetSound` | `channel: Channel, looping: Integer, volume: Float, balance: Float, frequency: Integer` | — | Updates loop/volume/pan/pitch on an active channel |
-| `StopSound` | `channel: Channel` | — | Stops a channel |
+| `LoadSound` | `path: String` | `Sound` | Loads an audio file fully into memory as a sample; `Null` on failure |
+| `PlaySound` | `sound: Sound\|String, volume: Float, balance: Float, frequency: Integer` | `SoundChannel` | Plays a sound — a preloaded `Sound` (one-shot sample) or a filename `String` (streamed); returns a `SoundChannel`. `volume`/`balance`/`frequency` are optional (default 100 / 0 / native). Also usable as a fire-and-forget statement (the channel is discarded). A finished channel is auto-reaped each frame |
+| `SoundPlaying` | `channel: SoundChannel` | `Integer` | 1 if the channel is still playing, else 0 (incl. a finished/reaped channel) |
+| `SetSound` | `channel: SoundChannel, looping: Integer, volume: Float, balance: Float, frequency: Integer` | — | Updates loop/volume/pan/pitch on an active channel; `volume`/`balance`/`frequency` optional |
+| `StopSound` | `channel: SoundChannel` | — | Stops a channel |
 | `DeleteSound` | `sound: Sound` | — | Frees a preloaded sound |
+
+**Implemented (FD-041, `runtime/cb_sound.cpp`).** `Sound` is the opaque `CbSound*`
+handle (catalog tag 17, a loaded `ALLEGRO_SAMPLE`); `SoundChannel` is a playing
+instance (catalog tag 18 — a sample-instance or audio-stream). Both are
+Allegro-dependent (`allegro_audio` + `allegro_acodec`), so they are **absent from
+the SDK-free catalog** (like `Image`/`Font`/`Object`/`Map`). Authoritative
+behaviour was taken from the cbEnchanted reference (`soundinterface`/`cbsound`/
+`cbchannel`) and the official CoolBasic Help; deliberate divergences from classic
+CoolBasic:
+
+- **Opaque `Sound`/`SoundChannel` types** (`Null` default / `Null` on load
+  failure) instead of classic CB's plain `int32` ids — consistent with
+  `Object`/`Map`/`File`. Drops the classic int-handle arithmetic.
+- **The CB-visible channel type is `SoundChannel`, not `Channel`** — the bare
+  noun is polysemous (colour/network channel) and stays free for user code.
+- **A finished `SoundChannel` is a safe silent no-op.** Channels are reaped every
+  frame (cbEnchanted's `updateAudio`); a generation-tagged handle pool makes
+  `SetSound`/`StopSound`/`SoundPlaying` on a stale/finished channel a silent
+  no-op (return 0), never a use-after-free. An invalid **`Sound`** handle still
+  traps (FD-015 channel, exit 1) — matching cbEnchanted's asymmetry.
+- **Graceful audio-less degradation.** Best-effort init (never aborts, unlike
+  cbEnchanted): with no audio device `LoadSound`/`PlaySound` return `Null`,
+  `SoundPlaying` returns 0, `Set`/`StopSound` no-op, and the null-`Sound` trap is
+  suppressed (so a `Null`-ignoring program runs silently on a headless/CI host).
+- **`PlaySound`'s polymorphic first arg** is two overloads (preloaded `Sound`
+  vs filename `String` → streamed, 3×8192 buffers); the optional
+  `volume`/`balance`/`frequency` are arity overloads. `volume`/`balance` are the
+  0–100 scale (→ Allegro gain / pan ±1); `frequency` is an absolute target Hz
+  (→ a speed ratio; ≤0 leaves the native rate).
+- **No CD-track form** (the Help's integer-track CD path; cbEnchanted never
+  implemented it, CD audio is dead on modern targets); no `Music`/master-volume/
+  3D-positional commands (classic CB has none — "music" is streamed `PlaySound`).
+- **Deferred:** the audible smoke (real playback, looping, pan/pitch sweep,
+  long-file streaming) needs a real audio device; the gain/pan/speed math and the
+  channel-pool liveness are unit-tested headlessly (`runtime/tests/test_sound.cpp`).
 
 ---
 
@@ -980,9 +1015,10 @@ intentionally. Known status and divergences as of the latest runtime work
   Divergences from cbEnchanted: forward animation (it played reverse), trap on a
   non-emitter handle (it blind-cast → UB), no `StopEmitting` (its own extension),
   and a non-positive-density spawn guard.
-- **Not yet implemented** in cbcompiler_rs: sound, video playback, file I/O,
-  memblocks, `Read`/`Restore`, `Encrypt`/`Decrypt`, `CallDLL`, and the
-  plumbing-heavy System funcs (`Crc32`, `SetWindow`, `FrameLimit`, `Errors`).
+- **Not yet implemented** in cbcompiler_rs: video playback, `Read`/`Restore`,
+  `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System funcs (`Crc32`,
+  `SetWindow`, `FrameLimit`, `Errors`). (Sound is implemented — FD-041; file I/O
+  — FD-040; memblocks — FD-039.)
 
 ### Runtime library architecture (cbcompiler_rs, FD-016)
 
