@@ -1,6 +1,7 @@
 # FD-041: Sound Runtime Functions and Types
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-23
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Brings CoolBasic's audio subsystem online — loading samples and playing/streaming sounds with live volume/pan/pitch/loop control — unlocking sound effects and music in CoolBasic programs. Also the **prerequisite for Video** (FD backlog: video mixes its audio through the sound interface).
