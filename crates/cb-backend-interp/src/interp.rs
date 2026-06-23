@@ -231,6 +231,18 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             locals.push((val, false));
         }
 
+        // (II-V27) Call arity is fixed by sema/lowering: one argument per
+        // parameter local. A mismatch is an internal inconsistency (the binding
+        // loop would silently leave params `Void` or drop extra args), so catch
+        // it loudly in debug builds.
+        debug_assert_eq!(
+            args.len(),
+            func.params.len(),
+            "call arity mismatch: {} args for {} params",
+            args.len(),
+            func.params.len(),
+        );
+
         for (i, arg) in args.iter().enumerate() {
             if i < locals.len() {
                 locals[i] = (arg.clone(), false);

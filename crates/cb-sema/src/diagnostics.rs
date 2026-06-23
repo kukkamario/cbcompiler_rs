@@ -49,3 +49,7 @@ pub const E_RESERVED_TYPE: DiagnosticCode = DiagnosticCode::new("E0330");
 /// type) or has no value at all (a call to a return-typeless subroutine). The
 /// fix is an explicit `As` annotation or `Dim` (cb_syntax.md §4.1).
 pub const E_CANNOT_INFER_TYPE: DiagnosticCode = DiagnosticCode::new("E0331");
+/// A `Break` or `Continue` appears outside any enclosing construct that can
+/// receive it: `Break` requires an enclosing loop, and `Continue` an enclosing
+/// loop or `Select` (cb_syntax.md §6.2/§6.3).
+pub const E_MISPLACED_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E0332");

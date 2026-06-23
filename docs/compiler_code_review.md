@@ -23,9 +23,9 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 
 | Domain | High | Medium | Low |
 |---|---|---|---|
-| Sema (check / lower / types / scope) | 0 | 9 | 21 |
+| Sema (check / lower / types / scope) | 0 | 6 | 21 |
 | Frontend (lexer / parser / AST) | 0 | 12 | 28 |
-| IR + Interpreter | 0 | 5 | 26 |
+| IR + Interpreter | 0 | 2 | 25 |
 | Diagnostics + Runtime/Driver/LLVM | 0 | 3 | 21 |
 
 > The four High-severity `cb-sema` miscompiles originally reported here (S-H1
@@ -39,6 +39,15 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 > operand type, S-M4 param/field sigil-`As` disagreement, S-M5 non-constant
 > `Const` initializer) have also been **fixed**; their entries below are marked
 > ✅ Fixed and kept for traceability.
+>
+> The "Bundle 2" fail-loud robustness items have also been **fixed**: the IR
+> verifier now checks single-assignment (II-V2), result-presence-vs-kind
+> (II-V3, except the deferred `Call`-result/signature cross-check), and
+> `params`↔`is_param`-locals agreement (II-V1); `default_value` panics on an
+> unknown struct (II-V20); `push_frame` debug-asserts call arity (II-V27); the
+> `type_def_map` `"<unknown>"` indexing now falls back gracefully (S-M6); and
+> misplaced `Break`/`Continue` is a new sema error **E0332** with a lowering
+> backstop (S-M7/S-M8). Entries are marked ✅ Fixed.
 
 ### Cross-cutting themes
 
@@ -128,7 +137,7 @@ one-off:
   error is emitted.
 - Fix: emit E0322 at the value span when `eval_const_expr` returns `None`.
 
-#### S-M6 — `type_def_map[&type_name]` panics on the `"<unknown>"` fallback
+#### S-M6 — `type_def_map[&type_name]` panics on the `"<unknown>"` fallback ✅ Fixed
 - `lower.rs:811` (`New(Type)`), `lower.rs:1125` (first/last), `lower.rs:1922` (`lower_for_each_type`)
 - Category: Oversight
 - On a non-`TypeRef` resolved type the code fabricates an interned `"<unknown>"`
@@ -138,7 +147,7 @@ one-off:
 - Fix: use `type_def_map.get(&type_name)` and fall back to a safe IR value (e.g.
   `ConstNull`) when absent.
 
-#### S-M7 — `Break`/`Continue` silently no-op when no enclosing context is found
+#### S-M7 — `Break`/`Continue` silently no-op when no enclosing context is found ✅ Fixed
 - `lower.rs:1382-1398` (`Break`), `lower.rs:1399-1415` (`Continue`)
 - Category: Oversight
 - If `Break N` can't find the Nth enclosing loop (or `Continue` has an empty
@@ -148,7 +157,7 @@ one-off:
 - Fix: document the sema-validated-placement assumption, and emit an
   unreachable/trap terminator (or `debug_assert!`) when no target is found.
 
-#### S-M8 — `Continue` in a `Select` last arm leaves the block unterminated
+#### S-M8 — `Continue` in a `Select` last arm leaves the block unterminated ✅ Fixed
 - `lower.rs:1408-1412` (`Continue`, Select context)
 - Category: Bug / Oversight
 - For a `Select` arm, `Continue` should fall through to the next case body, but
@@ -448,7 +457,7 @@ one-off:
 
 ### Medium
 
-#### II-V1 — `Function.params` duplicates `locals[is_param]` and is never cross-checked
+#### II-V1 — `Function.params` duplicates `locals[is_param]` and is never cross-checked ✅ Fixed
 - `cb-ir/src/lib.rs:203` (`params`), `lib.rs:167-171` (`Local.is_param`); consumers `print.rs:53`, `interp.rs:225-226`
 - Category: Inconsistency / Oversight
 - Parameter info is stored twice: the printer renders the signature from
@@ -459,7 +468,7 @@ one-off:
   `is_param` locals (ideally also the `UserDefined` decl's `sig.params`), or
   derive `params` from `locals` and drop the field.
 
-#### II-V2 — Verifier does not check single-assignment of result registers
+#### II-V2 — Verifier does not check single-assignment of result registers ✅ Fixed
 - `cb-ir/src/verify.rs:91-93`
 - Category: Oversight
 - The forward pass does `defined_regs.insert(r)` and discards the bool, although
@@ -468,7 +477,7 @@ one-off:
 - Fix: `assert!(defined_regs.insert(r), "register {r} defined more than once")`,
   or document that redefinition is intentionally permitted.
 
-#### II-V3 — Verifier never checks result-register presence vs instruction kind
+#### II-V3 — Verifier never checks result-register presence vs instruction kind ✅ Fixed (subset; Call/signature cross-check deferred)
 - `cb-ir/src/verify.rs:83-94`
 - Category: Oversight
 - Value-producing instructions must have `result: Some`; pure-effect ones must
@@ -486,7 +495,7 @@ one-off:
 - Fix: extract a single coercion helper (methods on `Value`) used by both,
   documenting why the ffi path never legitimately sees strings (see II-V11).
 
-#### II-V20 — `default_value` returns `Value::Null` for an unknown `StructVal` name — silent
+#### II-V20 — `default_value` returns `Value::Null` for an unknown `StructVal` name — silent ✅ Fixed
 - `value.rs:84-98` (fallback at 95-97)
 - Category: Bug / Oversight
 - If `StructVal(name)` references a struct missing from `struct_defs`,
@@ -565,9 +574,8 @@ one-off:
   the hot `is_truthy` path; undocumented per-call cost. `string_handle.rs:54-60`.
 - **II-V25** — Shift with Float/String LHS falls through to a generic "type
   mismatch" rather than "shift requires integer operand". `interp.rs:918-928`.
-- **II-V27** — `push_frame` silently tolerates arity mismatch (missing params
-  left `Void`, extra args dropped). Add `debug_assert_eq!(args.len(), param_count)`.
-  `interp.rs:225-238`.
+- **II-V27** — ✅ Fixed. `push_frame` now `debug_assert_eq!`s `args.len()`
+  against the parameter count. `interp.rs:225-238`.
 - **II-V28** — `StorePlace`/`GetElement` index resolution wraps negative indices
   via `as usize`; caught later as out-of-bounds but with a less precise
   diagnostic than `resolve_dims`. `interp.rs:561-567, 688-710`.

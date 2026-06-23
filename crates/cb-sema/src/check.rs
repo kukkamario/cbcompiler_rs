@@ -44,6 +44,17 @@ pub(crate) struct Checker<'a> {
     for_loop_stack: Vec<NodeId>,
     /// For each label symbol, the set of For loop NodeIds containing it.
     label_for_nesting: std::collections::HashMap<Symbol, Vec<NodeId>>,
+    /// Stack of enclosing loop/`Select` constructs, used to validate `Break`
+    /// (needs a loop) and `Continue` (needs a loop or `Select`). Mirrors the
+    /// control-context stack lowering builds (cb_syntax.md §6.2/§6.3).
+    control_stack: Vec<ControlKind>,
+}
+
+/// An enclosing control construct that `Break`/`Continue` can target.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ControlKind {
+    Loop,
+    Select,
 }
 
 impl<'a> Checker<'a> {
@@ -71,6 +82,7 @@ impl<'a> Checker<'a> {
             current_scope: top,
             current_fn_return_ty: None,
             for_loop_stack: Vec::new(),
+            control_stack: Vec::new(),
             label_for_nesting: std::collections::HashMap::new(),
         };
 
@@ -1563,19 +1575,25 @@ impl<'a> Checker<'a> {
             }
             Node::Stmt(Stmt::While { cond, body }) => {
                 self.check_condition(cond);
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
             }
             Node::Stmt(Stmt::RepeatForever { body }) => {
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
             }
             Node::Stmt(Stmt::RepeatWhile { body, cond }) => {
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
                 self.check_condition(cond);
             }
             Node::Stmt(Stmt::For {
@@ -1627,12 +1645,42 @@ impl<'a> Checker<'a> {
                     .insert(name, self.for_loop_stack.clone());
             }
             Node::Stmt(Stmt::Label { .. }) => {}
+            Node::Stmt(Stmt::Break { count }) => {
+                // `Break N` must have at least N enclosing loops; a `Select`
+                // does not count (Break never targets a Select).
+                let n = count.unwrap_or(1).max(1) as usize;
+                let loops = self
+                    .control_stack
+                    .iter()
+                    .filter(|c| **c == ControlKind::Loop)
+                    .count();
+                if loops < n {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_MISPLACED_LOOP_CONTROL,
+                        if count.is_some() {
+                            format!("`Break {n}` has no {n} enclosing loop(s)")
+                        } else {
+                            "`Break` outside of a loop".to_string()
+                        },
+                        Label::new(self.arena.span_of(id)),
+                    ));
+                }
+            }
+            Node::Stmt(Stmt::Continue) => {
+                // `Continue` needs an enclosing loop or `Select` (the explicit
+                // fall-through form, cb_syntax.md §6.2).
+                if self.control_stack.is_empty() {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_MISPLACED_LOOP_CONTROL,
+                        "`Continue` outside of a loop or `Select`",
+                        Label::new(self.arena.span_of(id)),
+                    ));
+                }
+            }
             // Statements that are already handled or require no type checking:
             Node::Stmt(Stmt::Type { .. })
             | Node::Stmt(Stmt::Struct { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
-            | Node::Stmt(Stmt::Break { .. })
-            | Node::Stmt(Stmt::Continue)
             | Node::Stmt(Stmt::End)
             | Node::Stmt(Stmt::Include { .. })
             | Node::Stmt(Stmt::Error) => {}
@@ -2065,9 +2113,11 @@ impl<'a> Checker<'a> {
         }
 
         self.for_loop_stack.push(for_id);
+        self.control_stack.push(ControlKind::Loop);
         for &s in body {
             self.check_stmt(s);
         }
+        self.control_stack.pop();
         self.for_loop_stack.pop();
     }
 
@@ -2104,9 +2154,11 @@ impl<'a> Checker<'a> {
         }
 
         self.for_loop_stack.push(for_id);
+        self.control_stack.push(ControlKind::Loop);
         for &s in body {
             self.check_stmt(s);
         }
+        self.control_stack.pop();
         self.for_loop_stack.pop();
     }
 
@@ -2132,15 +2184,19 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    self.control_stack.push(ControlKind::Select);
                     for &s in &body {
                         self.check_stmt(s);
                     }
+                    self.control_stack.pop();
                 }
                 Node::CaseArm(CaseArm::Default { body }) => {
                     let body = body.clone();
+                    self.control_stack.push(ControlKind::Select);
                     for &s in &body {
                         self.check_stmt(s);
                     }
+                    self.control_stack.pop();
                 }
                 _ => {}
             }
@@ -4027,6 +4083,66 @@ mod tests {
     #[test]
     fn const_constant_initializer_ok() {
         let result = analyze_src("Const x = 1 + 2\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M7/S-M8: Break needs an enclosing loop; Continue an enclosing loop or
+    // Select (cb_syntax.md §6.2/§6.3).
+    #[test]
+    fn break_outside_loop_e0332() {
+        let result = analyze_src("Break\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn continue_outside_loop_e0332() {
+        let result = analyze_src("Continue\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_count_exceeds_loop_nesting_e0332() {
+        let result = analyze_src("While 1\nBreak 2\nWend\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_in_select_without_loop_e0332() {
+        // Break cannot target a Select; a Select that isn't inside a loop has no
+        // loop for Break to break.
+        let result =
+            analyze_src("Dim x As Int\nx = 1\nSelect x\n  Case 1\n    Break\nEnd Select\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_continue_in_loop_ok() {
+        let result = analyze_src("While 1\n  Continue\n  Break\nWend\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn continue_in_select_ok() {
+        // Continue inside a Select is the legal explicit fall-through (§6.2).
+        let result = analyze_src(
+            "Dim x As Int\nx = 1\nSelect x\n  Case 1\n    Continue\n  Case 2\n    x = 2\nEnd Select\n",
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }
