@@ -1,0 +1,14 @@
+// FD-042: an opaque `Object` handle is inferred from the value with no `Dim`.
+// Mirrors the basic-object portion of runtime_object_fd036, but `o` is declared
+// implicitly by `o = MakeObject()` rather than `Dim o As Object`. Headless-safe:
+// asserts deterministic object state, no display.
+
+o = MakeObject()
+If o <> Null Then Print "make_ok"
+
+PositionObject(o, 10.0, 20.0)
+If ObjectX(o) = 10.0 Then Print "posx_ok"
+If ObjectY(o) = 20.0 Then Print "posy_ok"
+
+DeleteObject(o)
+Print "done"

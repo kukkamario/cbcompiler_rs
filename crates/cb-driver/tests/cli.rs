@@ -117,6 +117,19 @@ fn sema_error_exits_one() {
         .stderr(contains("E0300"));
 }
 
+#[test]
+fn infer_from_null_exits_one_e0331() {
+    // FD-042: an implicit declaration cannot infer a type from `Null` — E0331.
+    let dir = tempdir().unwrap();
+    let path = write_cb(&dir, "infer_null.cb", "x = Null\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stderr(contains("E0331"));
+}
+
 #[cfg(feature = "interp")]
 #[test]
 fn sema_narrowing_warning_exits_zero() {

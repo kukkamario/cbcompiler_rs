@@ -581,12 +581,18 @@ All names share the declared type. The multi-name form does not accept an initia
 **Implicit declaration** at the first assignment:
 
 ```cb
-x = 213                       // x is Integer (default for no sigil/As)
-y# = 23.04                    // y is Float (via sigil)
+x = 213                       // x is Integer (inferred from the Int value)
+obj = LoadObject("hero.png")  // obj is Object (inferred from the value)
+p# = 23.04                    // p is Float (via sigil)
 z As String = "asd"           // z is String (via As, no sigil needed)
 ```
 
-If the first reference has neither a sigil nor an `As` clause, the variable is `Integer`.
+If the first reference has neither a sigil nor an `As` clause, the variable's type is **inferred from the assigned value**: `x = 213` makes `x` an `Integer`, `x = 3.14` makes it a `Float`, `s = "hi"` a `String`, and `obj = LoadObject(...)` an `Object`. A sigil or `As` clause still pins the type explicitly (and the value is coerced to it).
+
+The value must have a concrete type for inference to succeed:
+
+- Assigning `Null` is an error (**E0331**) — `Null` has no type of its own; declare the variable explicitly with `As` (e.g. `Dim node As MyType = Null`).
+- A self-referential first assignment such as `x = x + 1` before any declaration of `x` is a use-before-declaration error (**E0300**): the right-hand side reads `x` before it exists. Declare `x` first if a running total is intended.
 
 ### 4.2 Scope rules
 
@@ -880,6 +886,8 @@ Next
 ```
 
 The variable name after `Next` is optional, but if given it must match the loop variable. `Continue` jumps to the end-of-iteration step (increment + condition check).
+
+An **implicitly declared** loop variable (no prior `Dim`, no sigil) takes its type from the bounds, following the value-inference rule of §4.1: the type is the numeric promotion of `From`/`To`/`Step` (floored at `Integer`, so `Byte`/`Short` bounds give an `Integer` variable). Thus `For i = 1 To 10` makes `i` an `Integer`, while `For i = 0.0 To 1.0 Step 0.1` makes it a `Float`. A sigil (`For i# = ...`) or a prior `Dim` pins the type instead.
 
 #### For Each (over an array or Type list)
 

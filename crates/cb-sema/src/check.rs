@@ -1777,8 +1777,27 @@ impl<'a> Checker<'a> {
             }
             if is_bound {
                 self.check_expr(target)
+            } else if sigil.is_none() {
+                // Implicit declaration with type inference (cb_syntax.md §4.1):
+                // with neither a sigil nor an `As` clause, the variable's type is
+                // inferred from the assigned value. Check the value first so its
+                // type is known before the variable is declared.
+                let value_ty = self.check_expr(value);
+                let var_ty = self.infer_decl_type_from_value(value_ty, name, name_span);
+                let decl = Declaration {
+                    kind: DeclKind::Variable,
+                    ty: var_ty.clone(),
+                    span: name_span,
+                    is_global: false,
+                };
+                self.try_declare(self.current_scope, name, decl, E_DUPLICATE_DECL);
+                self.types.insert(target, var_ty);
+                // The value is already checked and the variable was declared with
+                // that exact type, so no coercion is needed.
+                return;
             } else {
-                // Implicit declaration.
+                // Implicit declaration via a sigil (e.g. `count% = ...`): the
+                // sigil pins the type; the value is coerced to it below.
                 let (var_ty, _) = types::resolve_var_type(sigil, None);
                 let decl = Declaration {
                     kind: DeclKind::Variable,
@@ -1797,6 +1816,48 @@ impl<'a> Checker<'a> {
         let value_ty = self.check_expr(value);
         if !target_ty.is_error() && !value_ty.is_error() && target_ty != value_ty {
             self.coerce(value, &value_ty, &target_ty);
+        }
+    }
+
+    /// Infer the declared type of an implicitly-declared variable (a first
+    /// assignment with no sigil and no `As`) from the type of its initial value
+    /// (cb_syntax.md §4.1). A value with no usable type yields `Type::Error`;
+    /// for `Null` and a void right-hand side this also reports E0331, since the
+    /// fix there is an explicit `As`/`Dim` rather than a different value.
+    fn infer_decl_type_from_value(&mut self, value_ty: Type, name: Symbol, span: Span) -> Type {
+        match value_ty {
+            // The value already errored — e.g. a self-referential RHS such as
+            // `x = x + 1` on an undeclared `x`, which reports E0300. Declare the
+            // variable as `Error` so later uses don't cascade.
+            Type::Error => Type::Error,
+            // `Null` has no concrete reference type to infer from.
+            Type::Null => {
+                let name_str = self.interner.resolve(name);
+                self.diagnostics.push(Diagnostic::error(
+                    E_CANNOT_INFER_TYPE,
+                    format!(
+                        "cannot infer a type for `{name_str}` from `Null`; declare \
+                         it explicitly, e.g. `Dim {name_str} As <Type>`"
+                    ),
+                    Label::new(span),
+                ));
+                Type::Error
+            }
+            // The right-hand side produces no value (a call to a return-typeless
+            // function — a subroutine, in the spec's terms; §7.1).
+            Type::Void => {
+                let name_str = self.interner.resolve(name);
+                self.diagnostics.push(Diagnostic::error(
+                    E_CANNOT_INFER_TYPE,
+                    format!(
+                        "cannot infer a type for `{name_str}`: the right-hand side \
+                         has no value (a subroutine returns nothing)"
+                    ),
+                    Label::new(span),
+                ));
+                Type::Error
+            }
+            other => other,
         }
     }
 
@@ -1863,35 +1924,9 @@ impl<'a> Checker<'a> {
         step: Option<NodeId>,
         body: &[NodeId],
     ) {
-        // The loop variable may be an implicit declaration.
-        let var_ty = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
-            let name = self.intern_ident(*name_span, *sigil);
-            if self.symbols.lookup(self.current_scope, name).is_none() {
-                let (vt, _) = types::resolve_var_type(*sigil, None);
-                let decl = Declaration {
-                    kind: DeclKind::Variable,
-                    ty: vt.clone(),
-                    span: *name_span,
-                    is_global: false,
-                };
-                self.try_declare(self.current_scope, name, decl, E_DUPLICATE_DECL);
-                self.types.insert(var, vt.clone());
-                vt
-            } else {
-                self.check_expr(var)
-            }
-        } else {
-            self.check_expr(var)
-        };
-
-        if !var_ty.is_numeric() && !var_ty.is_error() {
-            self.diagnostics.push(Diagnostic::error(
-                E_FOR_VAR_NOT_NUMERIC,
-                "For loop variable must be numeric",
-                Label::new(self.arena.span_of(var)),
-            ));
-        }
-
+        // Check the bounds first: their types drive inference of an implicitly
+        // declared loop variable (cb_syntax.md §4.1), so they must be known
+        // before the variable is declared.
         let from_ty = self.check_expr(from);
         if !from_ty.is_numeric() && !from_ty.is_error() {
             self.diagnostics.push(Diagnostic::error(
@@ -1919,6 +1954,56 @@ impl<'a> Checker<'a> {
             }
             step_ty
         });
+
+        // The loop variable may be an implicit declaration. With neither a sigil
+        // nor an `As` clause, infer its type from the numeric promotion of the
+        // bounds (so `For i = 1.0 To 10.0` makes `i` a Float). Seeding the fold
+        // with `Int` supplies both the Byte/Short floor (`numeric_promote` never
+        // yields a sub-Int type) and the fallback when a bound is non-numeric. A
+        // sigil pins the type as usual.
+        let var_ty = if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[var] {
+            let name = self.intern_ident(*name_span, *sigil);
+            if self.symbols.lookup(self.current_scope, name).is_none() {
+                let vt = if sigil.is_some() {
+                    types::resolve_var_type(*sigil, None).0
+                } else {
+                    let mut vt = Type::Int;
+                    if from_ty.is_numeric() {
+                        vt = types::numeric_promote(&vt, &from_ty);
+                    }
+                    if to_ty.is_numeric() {
+                        vt = types::numeric_promote(&vt, &to_ty);
+                    }
+                    if let Some(st) = &step_ty
+                        && st.is_numeric()
+                    {
+                        vt = types::numeric_promote(&vt, st);
+                    }
+                    vt
+                };
+                let decl = Declaration {
+                    kind: DeclKind::Variable,
+                    ty: vt.clone(),
+                    span: *name_span,
+                    is_global: false,
+                };
+                self.try_declare(self.current_scope, name, decl, E_DUPLICATE_DECL);
+                self.types.insert(var, vt.clone());
+                vt
+            } else {
+                self.check_expr(var)
+            }
+        } else {
+            self.check_expr(var)
+        };
+
+        if !var_ty.is_numeric() && !var_ty.is_error() {
+            self.diagnostics.push(Diagnostic::error(
+                E_FOR_VAR_NOT_NUMERIC,
+                "For loop variable must be numeric",
+                Label::new(self.arena.span_of(var)),
+            ));
+        }
 
         // Coerce the bounds and step to the loop-variable type so conversions are
         // recorded (and narrowing warnings fire) — matching `check_assign`. With
@@ -2481,6 +2566,79 @@ mod tests {
         // Guards against the historical double-strip collapsing single-char
         // sigil'd names to the empty string.
         let result = analyze_src("a$ = \"hi\"\na = \"bye\"\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── FD-042: default type inference for implicit declarations ─────────
+
+    #[test]
+    fn fd042_infer_float_from_value() {
+        // `x = 3.14` infers Float (not the old Integer default), so a later
+        // Integer-sigil reference conflicts. Under the old default `x%` would
+        // have matched and produced no E0302.
+        let result = analyze_src("x = 3.14\nx% = 2\n");
+        assert!(
+            error_codes(&result).contains(&"E0302"),
+            "expected E0302 (x inferred Float), got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn fd042_infer_string_no_coercion_error() {
+        // `s = "hi"` infers String. Under the old Integer default this was a
+        // String→Int coercion error (E0317); now it is clean.
+        let result = analyze_src("s = \"hi\"\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn fd042_infer_array_from_new() {
+        // `a = New Integer[10]` infers `Integer[]`, so the variable is indexable
+        // with no `Dim`. Under the old default this was an Array→Int coercion
+        // error plus an index-non-array error.
+        let result = analyze_src("a = New Integer[10]\na[0] = 5\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn fd042_infer_int_from_literal_regression() {
+        // An int literal still yields Integer — the common case is unchanged.
+        let result = analyze_src("x = 5\nx% = 6\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn fd042_null_cannot_infer_e0331() {
+        // `x = Null` on an undeclared var has no type to infer — E0331.
+        let result = analyze_src("x = Null\n");
+        assert_eq!(error_codes(&result), vec!["E0331"]);
+    }
+
+    #[test]
+    fn fd042_self_reference_use_before_decl_e0300() {
+        // `x = x + 1` on an undeclared `x` is now a use-before-declaration error
+        // (E0300) — exactly one diagnostic, no cascade.
+        let result = analyze_src("x = x + 1\n");
+        assert_eq!(error_codes(&result), vec!["E0300"]);
+    }
+
+    #[test]
+    fn fd042_for_infer_float_from_bounds() {
+        // A `For` variable with Float bounds is inferred Float, so a later
+        // Integer-sigil reference conflicts (E0302).
+        let result = analyze_src("For i = 1.0 To 10.0\nNext i\ni% = 2\n");
+        assert!(
+            error_codes(&result).contains(&"E0302"),
+            "expected E0302 (i inferred Float), got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn fd042_for_infer_int_from_bounds_regression() {
+        // Integer bounds still yield an Integer loop variable.
+        let result = analyze_src("For i = 1 To 10\nNext i\ni% = 2\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
@@ -3333,6 +3491,18 @@ mod tests {
                    StopSound s\n";
         let result = analyze_with_catalog(src, &catalog);
         assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn fd042_infer_opaque_runtime_type_fd041() {
+        // FD-042: `s = LoadSound(...)` with no `Dim` infers the opaque `Sound`
+        // type, so `DeleteSound s` (which takes a `Sound`) resolves cleanly.
+        // Under the old Integer default this was a Sound→Int coercion error.
+        let catalog = sound_catalog();
+        let src = "s = LoadSound(\"a.ogg\")\n\
+                   DeleteSound s\n";
+        let result = analyze_with_catalog(src, &catalog);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]

@@ -240,6 +240,20 @@ fn sigil_optional() {
     run("sigil_optional");
 }
 
+// FD-042: a bare implicit declaration infers its type from the assigned value
+// (String / Float / array / For variable) — no `Dim` or sigil needed. Headless.
+#[test]
+fn type_inference_fd042() {
+    run("type_inference_fd042");
+}
+
+// FD-042: an opaque `Object` handle inferred from `MakeObject()` with no `Dim`.
+// Graphics-gated (needs the Allegro-backed object runtime).
+#[test]
+fn object_inference_fd042() {
+    run_graphics("object_inference_fd042");
+}
+
 #[test]
 fn if_elseif_else() {
     run("if_elseif_else");
