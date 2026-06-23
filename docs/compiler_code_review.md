@@ -23,7 +23,7 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 
 | Domain | High | Medium | Low |
 |---|---|---|---|
-| Sema (check / lower / types / scope) | 0 | 14 | 21 |
+| Sema (check / lower / types / scope) | 0 | 9 | 21 |
 | Frontend (lexer / parser / AST) | 0 | 12 | 28 |
 | IR + Interpreter | 0 | 5 | 26 |
 | Diagnostics + Runtime/Driver/LLVM | 0 | 3 | 21 |
@@ -33,6 +33,12 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 > non-final position dropping later `Case`s, S-H3 logical `Xor` lowered as
 > bitwise, S-H4 block-nested top-level `Const` not hoisted) have been **fixed**
 > and removed from this report.
+>
+> The five "Bundle 1" `cb-sema` validation gaps (S-M1 `Select` Case
+> constness/convertibility, S-M2 conversion-intrinsic operand, S-M3 array-index
+> operand type, S-M4 param/field sigil-`As` disagreement, S-M5 non-constant
+> `Const` initializer) have also been **fixed**; their entries below are marked
+> ✅ Fixed and kept for traceability.
 
 ### Cross-cutting themes
 
@@ -75,7 +81,7 @@ one-off:
 
 ### Medium
 
-#### S-M1 — `Select` Case values are never checked for constness or convertibility
+#### S-M1 — `Select` Case values are never checked for constness or convertibility ✅ Fixed
 - `check.rs:2065-2088` (`check_select`)
 - Category: Oversight
 - §6.2 requires every `Case` value to be a constant expression implicitly
@@ -87,7 +93,7 @@ one-off:
 - Fix: run `eval_const_expr` (E0322 if `None`) and `coerce` each value to the
   scrutinee type (E0317/E0318 on mismatch); add a test.
 
-#### S-M2 — Conversion-intrinsic argument type computed then discarded
+#### S-M2 — Conversion-intrinsic argument type computed then discarded ✅ Fixed
 - `check.rs:1289-1308` (`check_conversion_intrinsic`)
 - Category: Oversight
 - `Int(x)`/`Float(x)`/`Str(x)` check arity but drop the result of
@@ -96,7 +102,7 @@ one-off:
 - Fix: validate the operand (numeric/String for Int/Float; numeric/String for
   Str), emitting E0301/E0317 otherwise.
 
-#### S-M3 — `check_index` ignores index operand types
+#### S-M3 — `check_index` ignores index operand types ✅ Fixed
 - `check.rs:1310-1339` (`check_index`)
 - Category: Oversight / Inconsistency
 - Index expressions are collected into `_idx_types` and discarded; only array
@@ -105,7 +111,7 @@ one-off:
   inconsistent.
 - Fix: for each index, emit E0301 when `!ty.is_integer() && !ty.is_error()`.
 
-#### S-M4 — `resolve_var_type` sigil/As-disagreement flag dropped for params and fields
+#### S-M4 — `resolve_var_type` sigil/As-disagreement flag dropped for params and fields ✅ Fixed
 - `check.rs:603` (pass1 params), `check.rs:655` & `:692` (fields), `check.rs:2123` (`check_function` params)
 - Category: Inconsistency / Oversight
 - `Dim`/`Global`/`Const`/return types act on the disagreement flag (E0320), but
@@ -114,7 +120,7 @@ one-off:
   sigil/type contradiction. §1.4 gives no exemption.
 - Fix: emit E0320 for params and fields too, or document why they are exempt.
 
-#### S-M5 — Non-constant `Const` initializer silently accepted
+#### S-M5 — Non-constant `Const` initializer silently accepted ✅ Fixed
 - `check.rs:1479-1492` (Const arm of `check_stmt`)
 - Category: Oversight
 - §4.4 requires a constant expression. When `eval_const_expr(value)` is `None`
@@ -179,7 +185,8 @@ one-off:
 - `check.rs:645-662`, `check.rs:682-699`
 - Category: Duplication
 - Byte-for-byte identical field-info collection loops differing only in the final
-  `DeclKind`/`ty`; both also drop the `_disagree` flag (S-M4).
+  `DeclKind`/`ty` (both now also emit the sigil/`As` E0320 per S-M4, so a
+  `collect_fields` extraction would dedup that too).
 - Fix: extract `fn collect_fields(&mut self, fields: &[NodeId]) -> Vec<FieldInfo>`.
 
 #### S-M12 — Duplicated `Dim`-init / `Global`-init coercion that recomputes `var_ty`
