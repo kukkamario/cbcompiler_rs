@@ -82,13 +82,10 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
         match term::emit(&mut self.writer, &self.config, &files, &cs) {
             Ok(()) => Ok(()),
             Err(FilesError::Io(e)) => Err(e),
-            Err(other) => {
-                eprintln!("cb-diagnostics: internal renderer error: {other}");
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    other.to_string(),
-                ))
-            }
+            Err(other) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                other.to_string(),
+            )),
         }
     }
 }
@@ -119,7 +116,6 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
             "invalid Span: end ({}) < start ({})",
             label.span.end, label.span.start
         );
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
     if label.span.file == FileId::SYNTHETIC {
@@ -127,7 +123,6 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
     }
     let Some(src) = sources.get(label.span.file) else {
         let msg = format!("Span references unknown FileId({})", label.span.file.0);
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     };
     // Reuse the byte length the `LineIndex` already stored at build time.
@@ -137,7 +132,6 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
             "Span end ({}) exceeds source length ({}) of file '{}'",
             label.span.end, text_len, src.name
         );
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
     Ok(())

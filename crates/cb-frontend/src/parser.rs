@@ -690,7 +690,21 @@ impl<'t> Parser<'t> {
             let expr = self.parse_expr_bp(0)?;
             args.push(expr);
             if self.cursor.at_punct(Punct::Comma) {
-                self.cursor.bump();
+                let comma = self.cursor.bump();
+                // Trailing comma / empty list element: a `,` immediately
+                // followed by the closer (or another `,`). Targeted message
+                // rather than the generic "expected expression" the recursive
+                // `parse_expr_bp` would otherwise produce (F-P6).
+                if self.cursor.at_punct(close) || self.cursor.at_punct(Punct::Comma) {
+                    return Err(ParseError {
+                        diag: Box::new(Diagnostic::error(
+                            E_BAD_STATEMENT,
+                            "expected expression after `,`",
+                            Label::new(comma.span),
+                        )),
+                        span: comma.span,
+                    });
+                }
                 continue;
             }
             break;
@@ -1383,6 +1397,18 @@ impl<'t> Parser<'t> {
                     count = Some(NonZeroU32::new(v as u32).expect("guard ensures v > 0"));
                     span = start.merge(n_tok.span);
                 }
+                TokenKind::IntLit(v) if v > u32::MAX as u64 => {
+                    // A positive integer literal, but too large for the u32
+                    // loop-break depth. Distinct message from the generic
+                    // non-positive / non-literal case (F-P8).
+                    self.cursor.bump();
+                    self.diagnostics.push(Diagnostic::error(
+                        E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL,
+                        format!("`Break` count {v} exceeds the maximum ({})", u32::MAX),
+                        Label::new(n_tok.span),
+                    ));
+                    span = start.merge(n_tok.span);
+                }
                 _ => {
                     // Consume the offending expression for recovery and record E0213.
                     let bad = self.parse_expr_bp(0)?;
@@ -1868,9 +1894,15 @@ impl<'t> Parser<'t> {
                 Ok(self.alloc(Node::Stmt(Stmt::RepeatWhile { body, cond }), span))
             }
             _ => {
-                // Missing closer (likely EOF — E0203 already emitted by
-                // parse_block_until). Fall back to RepeatForever so the AST
-                // is usable.
+                // Wrong closer (or EOF). At EOF, `parse_block_until` already
+                // emitted E0203 — don't double-report. Otherwise the block was
+                // closed by a token that isn't `Forever`/`While`, so report it
+                // via `consume_block_closer` like While/For do through
+                // `close_loop_block` (F-P4). Fall back to RepeatForever so the
+                // AST is usable.
+                if !matches!(self.cursor.peek(), TokenKind::Eof) {
+                    let _ = self.consume_block_closer(Kw::Forever, opener, "Repeat");
+                }
                 Ok(self.alloc(Node::Stmt(Stmt::RepeatForever { body }), opener))
             }
         }
@@ -3715,6 +3747,44 @@ mod stmt_tests {
     }
 
     #[test]
+    fn arg_list_trailing_comma_reports() {
+        // F-P6: a trailing comma in a call argument list gets a targeted
+        // "expected expression after `,`" message (E0206) instead of the
+        // generic "expected expression, found ...".
+        let src = "f(1,)\n";
+        let r = parse_src(src);
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.message == "expected expression after `,`")
+            .expect("expected trailing-comma diagnostic");
+        assert_eq!(diag.code, Some(E_BAD_STATEMENT));
+    }
+
+    #[test]
+    fn break_count_overflow() {
+        // F-P8: a positive integer literal that exceeds u32::MAX gets a
+        // distinct "exceeds the maximum" message (still E0213), not the
+        // misleading "must be a positive integer literal".
+        let src = "Break 5000000000\n";
+        let r = parse_src(src);
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == Some(E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL))
+            .expect("expected E0213 diagnostic");
+        assert_eq!(
+            diag.message,
+            "`Break` count 5000000000 exceeds the maximum (4294967295)"
+        );
+        assert_eq!(r.program.len(), 1);
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::Break { count } => assert!(count.is_none()),
+            other => panic!("expected Break, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn continue_simple() {
         let src = "Continue\n";
         let r = parse_src(src);
@@ -4216,6 +4286,49 @@ mod block_tests {
             }
             other => panic!("expected RepeatWhile, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repeat_wrong_closer_reports() {
+        // F-P4: a non-EOF wrong closer (here `EndIf`) used to fabricate
+        // RepeatForever with NO diagnostic. Now it routes through
+        // `consume_block_closer` like While/For, emitting E0204.
+        let src = "Repeat\n  a\nEndIf\n";
+        let r = parse_src(src);
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_MISMATCHED_END_KEYWORD)),
+            "expected E0204 mismatched-closer diagnostic, got {:?}",
+            r.diagnostics
+        );
+        // Still recovers to a usable RepeatForever node.
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::RepeatForever { body } => assert_eq!(body.len(), 1),
+            other => panic!("expected RepeatForever, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repeat_eof_no_double_report() {
+        // F-P4: at EOF, parse_block_until already emits E0203 — don't add a
+        // second mismatched-closer diagnostic.
+        let src = "Repeat\n  a\n";
+        let r = parse_src(src);
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_MISMATCHED_END_KEYWORD)),
+            "EOF should not produce a mismatched-closer diagnostic, got {:?}",
+            r.diagnostics
+        );
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_UNTERMINATED_BLOCK)),
+            "expected E0203 at EOF, got {:?}",
+            r.diagnostics
+        );
     }
 
     // ─── For ─────────────────────────────────────────────────────────────

@@ -205,7 +205,7 @@ fn print_inst_kind(
             write!(out, "delete_lvalue {local}").unwrap();
         }
         InstKind::DeleteLvalueGlobal { global } => {
-            write!(out, "delete_lvalue {global}").unwrap();
+            write!(out, "delete_lvalue_global {global}").unwrap();
         }
         InstKind::DeleteRvalue { value } => {
             write!(out, "delete_rvalue {value}").unwrap();
@@ -289,7 +289,12 @@ fn print_inst_kind(
             elem_type,
             dims,
         } => {
-            write!(out, "redim {global}, {}", format_type(elem_type, interner)).unwrap();
+            write!(
+                out,
+                "redim_global {global}, {}",
+                format_type(elem_type, interner)
+            )
+            .unwrap();
             for d in dims {
                 write!(out, ", {d}").unwrap();
             }

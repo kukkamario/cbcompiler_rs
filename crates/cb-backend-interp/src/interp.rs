@@ -613,6 +613,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 // holds a mutable borrow of the root slot and cannot also read
                 // registers. Index regs are integer-typed by sema, so
                 // `to_i64` is exact (a Float would truncate; see `to_i64`).
+                // A negative index is rejected here (II-V28) so it yields a
+                // precise message instead of wrapping to a huge usize and
+                // surfacing as a generic out-of-bounds trap.
                 let mut resolved: Vec<RProj> = Vec::with_capacity(path.len());
                 for proj in path {
                     match proj {
@@ -620,8 +623,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         Projection::Index(idxs) => {
                             let vals = idxs
                                 .iter()
-                                .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
-                                .collect();
+                                .map(|r| {
+                                    self.resolve_index(frame.registers[r.0 as usize].to_i64(), span)
+                                })
+                                .collect::<Result<Vec<usize>, _>>()?;
                             resolved.push(RProj::Index(vals));
                         }
                     }
@@ -753,11 +758,13 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let arr_val = frame.registers[array.0 as usize].clone();
                 // Index regs are integer-typed by sema, so `to_i64` is exact
                 // (a Float would truncate; see `Value::to_i64`). Same for the
-                // flat-index and `Len` dim sites below.
+                // flat-index and `Len` dim sites below. A negative index is
+                // rejected here (II-V28) for a precise message rather than a
+                // wrapped huge usize surfacing as a generic out-of-bounds trap.
                 let idx_vals: Vec<usize> = indices
                     .iter()
-                    .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
-                    .collect();
+                    .map(|r| self.resolve_index(frame.registers[r.0 as usize].to_i64(), span))
+                    .collect::<Result<Vec<usize>, _>>()?;
                 match arr_val {
                     Value::Array(rc) => {
                         let arr = rc.borrow();
@@ -916,6 +923,20 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         Ok(sizes)
     }
 
+    /// Resolve an array-index register to a concrete `usize`, rejecting a
+    /// negative index with a clean error. Without this a negative index would
+    /// wrap to a huge `usize` and surface as a generic out-of-bounds trap
+    /// (II-V28); this mirrors `resolve_dims`'s negative-dimension guard.
+    fn resolve_index(&self, idx: i64, span: Span) -> Result<usize, InterpError> {
+        if idx < 0 {
+            return Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("negative array index: {idx}")),
+                span,
+            ));
+        }
+        Ok(idx as usize)
+    }
+
     /// Map a deferred place-walk error to a concrete interpreter error/trap,
     /// matching the diagnostics the old `SetField`/`SetElement` produced.
     fn store_err(&self, e: StoreErr, span: Span) -> InterpError {
@@ -1046,6 +1067,17 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     span,
                 )),
             },
+
+            // A shift that fell past the integer fast path above has a
+            // non-integer LHS (the count RHS is read via `to_i64`, so only the
+            // LHS type matters). Sema rejects this for compiled programs; the
+            // precise message is for hand-written IR. Checked before the
+            // generic fall-through so the diagnostic names the real problem.
+            (_, _) if matches!(op, IrBinOp::Shl | IrBinOp::Shr | IrBinOp::Sar) => Err(self
+                .error_at(
+                    InterpErrorKind::RuntimeError("shift requires integer operands".into()),
+                    span,
+                )),
 
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!(
@@ -1522,5 +1554,62 @@ fn store_walk(
             Value::Null => Err(StoreErr::Null),
             _ => Err(StoreErr::NotArray),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cb_diagnostics::source::FileId;
+
+    const SPAN: Span = Span::new(0, 0, FileId::SYNTHETIC);
+
+    fn empty_program() -> Program {
+        Program {
+            func_table: Vec::new(),
+            functions: Vec::new(),
+            globals: Vec::new(),
+            type_defs: Vec::new(),
+            struct_defs: Vec::new(),
+        }
+    }
+
+    // II-V25: a shift whose LHS is non-integer (here, Float) falls past the
+    // integer fast path in `eval_binop`. It must surface the precise
+    // "shift requires integer operands" message rather than the generic
+    // "type mismatch in binop" fall-through. Unreachable from well-typed
+    // compiled IR (sema rejects it) — this guards the hand-written-IR message.
+    #[test]
+    fn shift_with_non_integer_lhs_reports_precise_error() {
+        let program = empty_program();
+        let interner = Interner::new();
+        let interp = Interpreter::new(&program, &interner);
+
+        for op in [IrBinOp::Shl, IrBinOp::Shr, IrBinOp::Sar] {
+            let err = interp
+                .eval_binop(op, &Value::Float(1.0), &Value::Int(1), SPAN)
+                .expect_err("non-integer shift LHS should error");
+            assert!(
+                matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m == "shift requires integer operands"),
+                "op {op:?}: expected precise shift error, got {err:?}"
+            );
+        }
+    }
+
+    // A non-shift binop type mismatch must still use the generic message, so
+    // the new arm does not swallow unrelated mismatches.
+    #[test]
+    fn non_shift_type_mismatch_keeps_generic_error() {
+        let program = empty_program();
+        let interner = Interner::new();
+        let interp = Interpreter::new(&program, &interner);
+
+        let err = interp
+            .eval_binop(IrBinOp::Add, &Value::Float(1.0), &Value::Int(1), SPAN)
+            .expect_err("Float + Int (uncoerced) should error");
+        assert!(
+            matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("type mismatch in binop")),
+            "expected generic mismatch, got {err:?}"
+        );
     }
 }

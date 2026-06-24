@@ -13,6 +13,6 @@ fn @main() -> Void {
     r0 = const_int 5
     redim local0, Int, r0
     r1 = const_int 8
-    redim global0, Float, r1
+    redim_global global0, Float, r1
     return
 }
