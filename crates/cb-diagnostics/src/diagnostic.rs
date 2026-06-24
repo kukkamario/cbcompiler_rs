@@ -34,11 +34,20 @@ impl Span {
     }
 
     /// Span length in bytes.
+    ///
+    /// `len` and `is_empty` disagree on an inverted span (`end < start`),
+    /// which `Span::new` forbids in debug builds: `len()` saturates to `0`
+    /// but `is_empty()` is `false` (since `start != end`). Valid spans never
+    /// hit this, so the contradiction is unreachable in practice.
+    #[must_use]
     pub const fn len(self) -> u32 {
         self.end.saturating_sub(self.start)
     }
 
     /// Whether the span is empty (`start == end`).
+    ///
+    /// See [`Span::len`] for how this disagrees with `len` on an inverted span.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
     }

@@ -165,6 +165,10 @@ impl SymbolTable {
     /// runtime-seeded command of the same name (FD-027) — the catalog entry is
     /// overwritten so the name now resolves to the user's declaration.
     pub(crate) fn force_declare(&mut self, scope: ScopeId, name: Symbol, decl: Declaration) {
+        debug_assert!(
+            self.local_is_runtime_command(scope, name),
+            "force_declare is only for shadowing runtime commands"
+        );
         self.scopes[scope.0 as usize].symbols.insert(name, decl);
     }
 
@@ -261,22 +265,31 @@ impl SymbolTable {
         fn_scope: ScopeId,
     ) {
         let s = &mut self.scopes[scope.0 as usize];
+        let mut found = false;
         if let Some(decl) = s.symbols.get_mut(&name)
             && let DeclKind::Function {
                 scope: ref mut s, ..
             } = decl.kind
         {
             *s = Some(fn_scope);
+            found = true;
         }
+        debug_assert!(
+            found,
+            "update_function_scope found no Function decl to update"
+        );
     }
 
     /// Update the ConstValue of an existing Constant declaration.
     pub(crate) fn update_const_value(&mut self, scope: ScopeId, name: Symbol, value: ConstValue) {
         let s = &mut self.scopes[scope.0 as usize];
+        let mut found = false;
         if let Some(decl) = s.symbols.get_mut(&name)
             && let DeclKind::Constant { value: ref mut v } = decl.kind
         {
             *v = value;
+            found = true;
         }
+        debug_assert!(found, "update_const_value found no Constant decl to update");
     }
 }

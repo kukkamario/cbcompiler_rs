@@ -122,6 +122,7 @@ pub fn verify(program: &Program) {
                 verify_inst_func_ids(&inst.kind, func_table_len);
                 verify_inst_type_defs(&inst.kind, num_type_defs);
                 verify_inst_globals(&inst.kind, num_globals);
+                verify_inst_consts(&inst.kind);
                 // (II-V3) Result-register presence must match the instruction
                 // kind: a value-producing instruction defines exactly one
                 // register, a pure-effect one defines none. `Call`/`CallIndirect`
@@ -241,6 +242,18 @@ fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
             ..
         } => check(*global),
         _ => {}
+    }
+}
+
+/// (II-V7) A `ConstInt` carries an `Int`-range (`i32`) value; the interpreter
+/// truncates with `as i32`, so an out-of-range payload would silently lose
+/// bits. `ConstLong` may use the full `i64` range and is unchecked.
+fn verify_inst_consts(kind: &InstKind) {
+    if let InstKind::ConstInt(v) = kind {
+        assert!(
+            i32::try_from(*v).is_ok(),
+            "ConstInt({v}) out of Int (i32) range",
+        );
     }
 }
 

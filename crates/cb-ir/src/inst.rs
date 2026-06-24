@@ -134,7 +134,11 @@ pub enum InstKind {
     },
 
     // ── Constants ───────────────────────────────────────────────────
+    /// 32-bit `Int` constant. The payload is `i64` for uniformity but must hold
+    /// an `i32`-range value (the verifier enforces this; the interpreter
+    /// truncates with `as i32`).
     ConstInt(i64),
+    /// 64-bit `Long` constant — full `i64` range.
     ConstLong(i64),
     ConstFloat(f64),
     ConstString(String),

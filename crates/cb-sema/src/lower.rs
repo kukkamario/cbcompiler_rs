@@ -286,6 +286,9 @@ impl<'a> Lowerer<'a> {
         self.context_stack.clear();
         self.label_blocks.clear();
         self.next_temp = 0;
+        // `blocks` is now empty; clear the stale id. Callers must `fresh_block()`
+        // + `switch_to()` before emitting into `current_block`.
+        self.current_block = BlockId(0);
     }
 
     fn current_block_is_terminated(&self) -> bool {

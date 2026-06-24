@@ -134,7 +134,17 @@ impl Interner {
     /// Panics if `sym` was not produced by this interner (including
     /// [`Symbol::DUMMY`], which [`Interner::intern`] never mints).
     pub fn resolve(&self, sym: Symbol) -> &str {
-        &self.strings[sym.0 as usize]
+        // Explicit guards turn a bare slice-OOB panic into a clear message:
+        // DUMMY (u32::MAX) is never minted, and a small index from another
+        // interner would otherwise silently misresolve to the wrong string.
+        assert!(sym != Symbol::DUMMY, "resolve called on Symbol::DUMMY");
+        let idx = sym.0 as usize;
+        assert!(
+            idx < self.strings.len(),
+            "resolve: {sym:?} out of bounds for this interner ({} symbols) — likely a cross-interner or stale symbol",
+            self.strings.len(),
+        );
+        &self.strings[idx]
     }
 }
 

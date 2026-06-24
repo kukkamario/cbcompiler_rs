@@ -83,7 +83,13 @@ impl Value {
             Value::Long(x) => *x,
             Value::Float(x) => *x as i64,
             Value::String(s) => parse_leading_int(s.as_bytes()),
-            _ => 0,
+            // Non-numeric, non-string variants never reach here under
+            // well-typed IR (sema inserts a Convert); flag the broken
+            // invariant in debug, fall back to 0 in release.
+            _ => {
+                debug_assert!(false, "Value::to_i64 called on non-numeric Value: {self:?}");
+                0
+            }
         }
     }
 
@@ -103,7 +109,13 @@ impl Value {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0),
-            _ => 0.0,
+            // Non-numeric, non-string variants never reach here under
+            // well-typed IR (sema inserts a Convert); flag the broken
+            // invariant in debug, fall back to 0.0 in release.
+            _ => {
+                debug_assert!(false, "Value::to_f64 called on non-numeric Value: {self:?}");
+                0.0
+            }
         }
     }
 }

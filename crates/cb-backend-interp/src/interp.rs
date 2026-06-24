@@ -36,8 +36,24 @@ thread_local! {
     static PENDING_TRAP: Cell<Option<PendingTrap>> = const { Cell::new(None) };
 }
 
+/// Record a pending trap, asserting the single slot is empty first. The
+/// interpreter drains the slot after every FFI dispatch, so a non-empty slot
+/// here means a nested FFI call is about to clobber an undelivered trap.
+fn set_pending_trap(trap: PendingTrap) {
+    PENDING_TRAP.with(|slot| {
+        // `take()` to inspect without requiring `Copy`; in debug we assert it
+        // was empty, in release we proceed (matching the prior overwrite).
+        let prev = slot.take();
+        debug_assert!(
+            prev.is_none(),
+            "PENDING_TRAP overwritten — nested FFI trap lost",
+        );
+        slot.set(Some(trap));
+    });
+}
+
 extern "C" fn host_request_exit(code: i32) {
-    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Exit(code))));
+    set_pending_trap(PendingTrap::Exit(code));
 }
 
 #[allow(unsafe_code)]
@@ -57,7 +73,7 @@ extern "C" fn host_raise_error(msg: *const CbString) {
             String::from_utf8_lossy(bytes).into_owned()
         }
     };
-    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Error(text))));
+    set_pending_trap(PendingTrap::Error(text));
 }
 
 /// The host API handed to the runtime via `cb_runtime_init` at startup.
@@ -373,6 +389,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             .checked_sub(1)
                             .and_then(|i| caller_block.insts.get(i))
                         {
+                            // The deferral mechanism assumes the originating
+                            // call sits at pc-1; assert it really is a call so a
+                            // future change to deferral is caught here.
+                            debug_assert!(
+                                matches!(
+                                    call_inst.kind,
+                                    InstKind::Call { .. } | InstKind::CallIndirect { .. }
+                                ),
+                                "deferred after_inst: instruction at pc-1 is not a Call/CallIndirect",
+                            );
                             self.observer.after_inst(
                                 caller,
                                 &call_inst.kind,
@@ -1064,12 +1090,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             }
             IrBinOp::Pow => {
                 if b < 0 {
-                    match a {
-                        0 => Err(self.trap_error(TrapKind::DivisionByZero, span)),
-                        1 => Ok(wrap(1)),
-                        -1 => Ok(wrap(if b % 2 == 0 { 1 } else { -1 })),
-                        _ => Ok(wrap(0)),
-                    }
+                    // `^` always lowers to a Float Pow: sema coerces both
+                    // operands of Pow to Float (check_binary), so the IR never
+                    // produces an integer Pow — let alone a negative exponent.
+                    unreachable!(
+                        "integer Pow with negative exponent: `^` always lowers to float (§1.7)"
+                    )
                 } else {
                     Ok(wrap(a.wrapping_pow(b as u32)))
                 }
