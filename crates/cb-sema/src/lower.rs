@@ -1284,6 +1284,11 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::ExprStmt { expr }) => {
                 // A bare identifier in statement position that resolves to a
                 // function is a 0-arg call (CoolBasic subroutine call syntax).
+                // Callee resolution is duplicated here rather than delegated to
+                // `lower_call`: for an ambiguous `OverloadSet` (multiple zero-arg
+                // variants) sema records no `resolved_calls` entry, so `lower_call`
+                // would fall through to its `func_id_map[&name]` lookup and panic.
+                // This arm instead picks the first zero-param variant.
                 if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
                     let name = self.intern_ident(*name_span, *sigil);
                     if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
