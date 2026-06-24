@@ -1,44 +1,18 @@
-//! `cb` — CoolBasic compiler driver.
+//! `cb` — CoolBasic compiler driver (interpreter + LLVM-stub binary).
 //!
-//! End-to-end smoke driver: tokenize + parse a single `.cb` file, run semantic
-//! analysis, render any diagnostics to stderr, optionally dump the AST/IR, and
-//! otherwise hand the lowered IR to the selected backend. Exit codes are
-//! documented on [`exit`]. Codegen for the LLVM backend arrives later — for now
-//! selecting it reports "not yet implemented" rather than silently doing
-//! nothing (FD-025).
+//! Thin shell over [`cb_driver`]'s shared compile pipeline: parse CLI flags,
+//! select a backend from the features compiled in (and the `--backend` flag),
+//! run the pipeline, and hand the lowered IR to the chosen backend. The
+//! frontend pipeline and the exit-code contract live in the `cb_driver` library
+//! so a future second binary can reuse them (FD-044). Selecting the LLVM backend
+//! reports "not yet implemented" (exit 3) until codegen lands (FD-025).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cb_backend_api::{BackendErrorKind, BackendOutcome};
-use cb_diagnostics::{CliRenderer, Diagnostic, Renderer, Severity, SourceMap};
-use cb_frontend::ast_print;
-use cb_frontend::parser::ParseResult;
-use cb_frontend::{LexerOptions, parse, tokenize};
+use cb_driver::{Compilation, PipelineOptions, clamp_exit, compile, exit};
 use clap::Parser;
-use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-
-/// Process exit codes the driver returns. Centralised so the contract is
-/// explicit and testable:
-///
-/// * `0` — success.
-/// * `1` — compilation produced error diagnostics, or the program itself
-///   failed at runtime (`MakeError`, an interpreter trap, a runtime
-///   `raise_error`).
-/// * `2` — driver/usage error: bad CLI arguments (clap also exits `2` for
-///   these), an unreadable input file, a runtime-catalog load failure, or an
-///   unknown / not-compiled-in `--backend`.
-/// * `3` — the requested backend is recognised but not yet implemented
-///   (today: `llvm`). The driver maps a [`BackendErrorKind::Unimplemented`]
-///   here. Only actually produced when such a backend is compiled in and
-///   selected, but the mapping is compiled unconditionally so the dispatch
-///   site stays backend-agnostic.
-mod exit {
-    /// Driver or usage error. Matches clap's own exit code for argument errors.
-    pub const USAGE: u8 = 2;
-    /// Backend selected is recognised but has no codegen yet (e.g. `llvm`).
-    pub const BACKEND_UNIMPLEMENTED: u8 = 3;
-}
 
 #[cfg(feature = "interp")]
 const HAS_INTERP: bool = true;
@@ -105,11 +79,10 @@ fn default_backend() -> Option<Backend> {
     }
 }
 
-/// Instantiate the selected backend as a `Box<dyn Backend>` (FD-044). This is
-/// the single feature-gated dispatch point: the run site downstream calls
+/// Instantiate the selected backend as a `Box<dyn Backend>` (FD-044). The
+/// single feature-gated dispatch point: the run site below calls
 /// `backend.execute(...)` with no backend-specific `match`. In a no-backend
-/// build `Backend` is uninhabited, so the body is an empty (diverging) match
-/// and this is never reached.
+/// build `Backend` is uninhabited, so the body is an empty (diverging) match.
 fn make_backend(sel: Backend) -> Box<dyn cb_backend_api::Backend> {
     match sel {
         #[cfg(feature = "interp")]
@@ -144,44 +117,6 @@ fn parse_backend(name: &str) -> Result<Backend, String> {
     }
 }
 
-/// Map a program-level exit code (`i32`) onto an OS process exit code.
-///
-/// OS process exit codes occupy `0..=255`. CoolBasic's `End` / `request_exit`
-/// can name any `i32`, so we clamp into range rather than wrapping: the old
-/// `as u8` cast turned `256` into `0`, silently converting a failure into a
-/// success. Values above `255` saturate to `255` (still non-zero, still a
-/// failure); negative values clamp to `0`.
-///
-/// Only a backend that *runs* the program ([`BackendOutcome::Ran`]) produces a
-/// program-level exit code; today that is the interpreter. Compiled
-/// unconditionally because the dispatch site references it for any backend.
-fn clamp_exit(code: i32) -> u8 {
-    code.clamp(0, 255) as u8
-}
-
-/// Emit a batch of diagnostics to `stderr`, OR-ing whether any was an error
-/// into `had_error`. A renderer I/O failure is fatal: it is reported and
-/// returned as `Err(USAGE)` for the caller to propagate. Factored out so the
-/// catalog-independent (lex/parse) and catalog-dependent (sema) batches share
-/// one emit path even though they are now reported at different points.
-fn emit_diagnostics<'a>(
-    stderr: &mut CliRenderer<StandardStream>,
-    sources: &SourceMap,
-    had_error: &mut bool,
-    diags: impl IntoIterator<Item = &'a Diagnostic>,
-) -> Result<(), ExitCode> {
-    for d in diags {
-        if matches!(d.severity, Severity::Error) {
-            *had_error = true;
-        }
-        if let Err(e) = stderr.emit(d, sources) {
-            eprintln!("cb: failed to render diagnostic: {e}");
-            return Err(ExitCode::from(exit::USAGE));
-        }
-    }
-    Ok(())
-}
-
 fn main() -> ExitCode {
     let Cli {
         backend: backend_arg,
@@ -190,11 +125,11 @@ fn main() -> ExitCode {
         file: path,
     } = Cli::parse();
 
-    // Resolve the requested backend, but don't *require* one yet: a dump-only
-    // build (no backend compiled in) must still be able to `--dump-ast` /
-    // `--dump-ir`. The "no backend compiled in" error is deferred to the point
-    // where we would actually run a program (see the run dispatch below). An
-    // explicitly named but invalid/unavailable backend still fails fast.
+    // Resolve the requested backend up front so an explicitly named but
+    // invalid/unavailable backend fails fast — but don't *require* one: a
+    // dump-only build (no backend compiled in) must still be able to
+    // `--dump-ast` / `--dump-ir`. The "no backend compiled in" error is
+    // deferred to the point a program would actually run (below).
     let backend: Option<Box<dyn cb_backend_api::Backend>> = match backend_arg {
         Some(name) => match parse_backend(&name) {
             Ok(b) => Some(make_backend(b)),
@@ -206,135 +141,39 @@ fn main() -> ExitCode {
         None => default_backend().map(make_backend),
     };
 
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("cb: failed to read {}: {}", path.display(), e);
-            return ExitCode::from(exit::USAGE);
-        }
+    // Run the shared front-end pipeline. It prints diagnostics and any AST/IR
+    // dump itself; we only get IR back when there is something to run.
+    let opts = PipelineOptions { dump_ast, dump_ir };
+    let (ir_program, interner) = match compile(&path, &opts) {
+        Compilation::Ready { program, interner } => (program, interner),
+        Compilation::Finished { exit_code } => return ExitCode::from(exit_code),
     };
 
-    let mut sources = SourceMap::new();
-    let file = sources.add(path.display().to_string(), text.clone());
-
-    let (tokens, lex_diags) = tokenize(&text, file, LexerOptions::default());
-    let ParseResult {
-        arena,
-        program,
-        diagnostics: parse_diags,
-    } = parse(&tokens, &text, file);
-
-    let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
-    let mut had_error = false;
-
-    // The AST dump needs only the parsed arena — never the runtime catalog or
-    // semantic analysis — so emit it up front. This lets a dump-only build
-    // (`--no-default-features`, no runtime linked) inspect the AST even when
-    // the runtime catalog cannot be loaded (DR-R1).
-    if dump_ast {
-        println!("Program ({} top-level statements):", program.len());
-        let mut buf = String::new();
-        for &id in &program {
-            buf.clear();
-            ast_print::debug_print(&mut buf, &arena, id).expect("writing to String never fails");
-            print!("{buf}");
-        }
-    }
-
-    // Lex and parse diagnostics never depend on the runtime catalog; emit them
-    // before attempting the catalog load so they survive a catalog failure on
-    // the dump-only path below.
-    if let Err(code) = emit_diagnostics(
-        &mut stderr,
-        &sources,
-        &mut had_error,
-        lex_diags.iter().chain(parse_diags.iter()),
-    ) {
-        return code;
-    }
-
-    // Semantic analysis needs the runtime function catalog. The catalog is
-    // required to lower/run the program or to dump IR, but a pure `--dump-ast`
-    // does not need it — so a catalog-load failure is only fatal when the
-    // lowered IR is actually required (DR-R1). The AST is already printed.
-    let runtime_catalog = match cb_runtime_sys::load_catalog() {
-        Ok(c) => c,
-        Err(msg) => {
-            if dump_ast && !dump_ir {
-                return if had_error {
-                    ExitCode::from(1)
-                } else {
-                    ExitCode::SUCCESS
-                };
+    // Backend-agnostic dispatch (FD-044): the backend either ran the program —
+    // returning its own exit code, which we clamp to an OS code — or produced an
+    // artifact. On `Err`, the `kind` selects the exit code, keeping all OS-exit
+    // policy here in the driver (FD-025): `Unimplemented` (e.g. the llvm stub)
+    // → 3, any other failure (an interpreter trap / internal error) → 1.
+    match backend {
+        Some(backend) => match backend.execute(&ir_program, &interner) {
+            Ok(BackendOutcome::Ran { exit_code }) => ExitCode::from(clamp_exit(exit_code)),
+            Ok(BackendOutcome::Produced { artifact }) => {
+                println!("cb: wrote {}", artifact.display());
+                ExitCode::SUCCESS
             }
-            eprintln!("cb: failed to load runtime catalog: {msg}");
-            return ExitCode::from(exit::USAGE);
-        }
-    };
-
-    // Run semantic analysis.
-    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &runtime_catalog);
-    if let Err(code) = emit_diagnostics(
-        &mut stderr,
-        &sources,
-        &mut had_error,
-        sema_result.diagnostics.iter(),
-    ) {
-        return code;
-    }
-
-    // Lower to IR (only if no errors).
-    if !had_error {
-        let ir_program = cb_sema::lower::lower(&arena, &program, &text, &mut sema_result);
-
-        #[cfg(debug_assertions)]
-        cb_ir::verify::verify(&ir_program);
-
-        if dump_ir {
-            let output = cb_ir::print::print_program(&ir_program, &sema_result.interner);
-            print!("{output}");
-        }
-
-        if !dump_ast && !dump_ir {
-            match backend {
-                Some(backend) => {
-                    // Backend-agnostic dispatch (FD-044): the backend either ran
-                    // the program — returning its own exit code, which we clamp
-                    // to an OS code — or produced an artifact. On `Err`, the
-                    // `kind` selects the exit code, keeping all OS-exit policy
-                    // here in the driver (FD-025): `Unimplemented` (e.g. the
-                    // llvm stub) → 3, any other failure (an interpreter trap /
-                    // internal error) → 1, each with a diagnostic.
-                    match backend.execute(&ir_program, &sema_result.interner) {
-                        Ok(BackendOutcome::Ran { exit_code }) => {
-                            return ExitCode::from(clamp_exit(exit_code));
-                        }
-                        Ok(BackendOutcome::Produced { artifact }) => {
-                            println!("cb: wrote {}", artifact.display());
-                            return ExitCode::SUCCESS;
-                        }
-                        Err(e) => {
-                            eprintln!("cb: {}", e.message);
-                            return ExitCode::from(match e.kind {
-                                BackendErrorKind::Unimplemented => exit::BACKEND_UNIMPLEMENTED,
-                                BackendErrorKind::Failed => 1,
-                            });
-                        }
-                    }
-                }
-                None => {
-                    eprintln!(
-                        "cb: no backend compiled in; rebuild with --features interp or --features llvm"
-                    );
-                    return ExitCode::from(exit::USAGE);
-                }
+            Err(e) => {
+                eprintln!("cb: {}", e.message);
+                ExitCode::from(match e.kind {
+                    BackendErrorKind::Unimplemented => exit::BACKEND_UNIMPLEMENTED,
+                    BackendErrorKind::Failed => 1,
+                })
             }
+        },
+        None => {
+            eprintln!(
+                "cb: no backend compiled in; rebuild with --features interp or --features llvm"
+            );
+            ExitCode::from(exit::USAGE)
         }
-    }
-
-    if had_error {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
     }
 }
