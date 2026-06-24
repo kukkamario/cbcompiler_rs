@@ -1810,25 +1810,30 @@ impl<'t> Parser<'t> {
         fallback
     }
 
+    /// Consume a loop's closing keyword, recovering if it's missing. If the
+    /// next token is `closer`, returns its span. Otherwise returns the current
+    /// span and — unless we're at EOF (where `parse_block_until` already
+    /// emitted E0203) — reports the wrong/missing closer via
+    /// `consume_block_closer`. Shared by `While`/`For`/`For Each`. (F-P2)
+    fn close_loop_block(&mut self, closer: Kw, opener: Span, name: &str) -> Span {
+        match self.cursor.peek() {
+            TokenKind::Keyword(kw) if kw == closer => self.cursor.bump().span,
+            _ => {
+                let here = self.cursor.current_span();
+                if !matches!(self.cursor.peek(), TokenKind::Eof) {
+                    let _ = self.consume_block_closer(closer, opener, name);
+                }
+                here
+            }
+        }
+    }
+
     fn parse_while(&mut self) -> Result<NodeId, ParseError> {
         let opener = self.cursor.bump().span; // `While`
         let cond = self.parse_expr_bp(0)?;
         self.cursor.eat_newlines();
         let body = self.parse_block_until(&[Kw::Wend], opener, "While");
-        let close_span = match self.cursor.peek() {
-            TokenKind::Keyword(Kw::Wend) => self.cursor.bump().span,
-            _ => {
-                // Missing Wend — parse_block_until already emitted E0203 on
-                // EOF. For any other terminator (e.g. wrong-closer that we
-                // broke on), emit a diagnostic so the user sees what's wrong.
-                let here = self.cursor.current_span();
-                if !matches!(self.cursor.peek(), TokenKind::Eof) {
-                    // Treat the wrong closer as a mismatched end.
-                    let _ = self.consume_block_closer(Kw::Wend, opener, "While");
-                }
-                here
-            }
-        };
+        let close_span = self.close_loop_block(Kw::Wend, opener, "While");
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();
         Ok(self.alloc(Node::Stmt(Stmt::While { cond, body }), span))
@@ -1898,16 +1903,7 @@ impl<'t> Parser<'t> {
             let source = self.parse_expr_bp(0)?;
             self.cursor.eat_newlines();
             let body = self.parse_block_until(&[Kw::Next], opener, "For Each");
-            let close_span = match self.cursor.peek() {
-                TokenKind::Keyword(Kw::Next) => self.cursor.bump().span,
-                _ => {
-                    let here = self.cursor.current_span();
-                    if !matches!(self.cursor.peek(), TokenKind::Eof) {
-                        let _ = self.consume_block_closer(Kw::Next, opener, "For Each");
-                    }
-                    here
-                }
-            };
+            let close_span = self.close_loop_block(Kw::Next, opener, "For Each");
             let next_name = self.parse_optional_next_name(sigil);
             let span = opener.merge(close_span);
             let _ = self.consume_stmt_sep_or_terminator();
@@ -1933,16 +1929,7 @@ impl<'t> Parser<'t> {
         };
         self.cursor.eat_newlines();
         let body = self.parse_block_until(&[Kw::Next], opener, "For");
-        let close_span = match self.cursor.peek() {
-            TokenKind::Keyword(Kw::Next) => self.cursor.bump().span,
-            _ => {
-                let here = self.cursor.current_span();
-                if !matches!(self.cursor.peek(), TokenKind::Eof) {
-                    let _ = self.consume_block_closer(Kw::Next, opener, "For");
-                }
-                here
-            }
-        };
+        let close_span = self.close_loop_block(Kw::Next, opener, "For");
         let next_name = self.parse_optional_next_name(sigil);
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();

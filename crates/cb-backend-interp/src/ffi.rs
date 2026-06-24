@@ -79,35 +79,18 @@ fn ir_to_ffi_type(ty: &IrType) -> Type {
     }
 }
 
-fn value_as_i64(v: &Value) -> i64 {
-    match v {
-        Value::Byte(x) => *x as i64,
-        Value::Short(x) => *x as i64,
-        Value::Int(x) => *x as i64,
-        Value::Long(x) => *x,
-        Value::Float(x) => *x as i64,
-        _ => 0,
-    }
-}
-
-fn value_as_f64(v: &Value) -> f64 {
-    match v {
-        Value::Byte(x) => *x as f64,
-        Value::Short(x) => *x as f64,
-        Value::Int(x) => *x as f64,
-        Value::Long(x) => *x as f64,
-        Value::Float(x) => *x,
-        _ => 0.0,
-    }
-}
-
 fn marshal(value: &Value, ty: &IrType, string_api: &'static CbStringApi) -> Marshaled {
+    // Numeric marshalling shares the interpreter's single coercion source of
+    // truth, `Value::to_i64` / `to_f64` (II-V10). Under well-typed IR these
+    // only ever see numeric variants — a `Value::String` reaching a numeric
+    // slot would mean sema failed to insert a `Convert`; the helpers' non-
+    // numeric arms keep that a quiet 0 rather than a panic (see II-V11).
     match ty {
-        IrType::Byte => Marshaled::I8(value_as_i64(value) as i8),
-        IrType::Short => Marshaled::I16(value_as_i64(value) as i16),
-        IrType::Int => Marshaled::I32(value_as_i64(value) as i32),
-        IrType::Long => Marshaled::I64(value_as_i64(value)),
-        IrType::Float => Marshaled::F64(value_as_f64(value)),
+        IrType::Byte => Marshaled::I8(value.to_i64() as i8),
+        IrType::Short => Marshaled::I16(value.to_i64() as i16),
+        IrType::Int => Marshaled::I32(value.to_i64() as i32),
+        IrType::Long => Marshaled::I64(value.to_i64()),
+        IrType::Float => Marshaled::F64(value.to_f64()),
         IrType::String => {
             // Always go through `as_cb_string` — for Value::String this is
             // a free retain; for anything else it allocates a coerced handle

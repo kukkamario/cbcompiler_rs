@@ -1518,16 +1518,7 @@ impl<'a> Checker<'a> {
                 init: Some(init_id),
             }) => {
                 let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let init_ty = self.check_expr(init_id);
-                // Coerce the initializer to the declared type (mirror check_dim
-                // / check_assign) so lowering emits the right Convert (FD-035).
-                // Global-with-initializer is single-name.
-                if let Some(dn) = names.first() {
-                    let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
-                    if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
-                        self.coerce(init_id, &init_ty, &var_ty);
-                    }
-                }
+                self.coerce_initializer(init_id, &names, as_ty.as_ref());
             }
             Node::Stmt(Stmt::Global { .. }) => {}
             Node::Stmt(Stmt::Const {
@@ -1955,6 +1946,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Coerce a single-name declaration's initializer to its declared type so
+    /// lowering emits the right `Convert` (FD-035 / mirror `check_assign`).
+    /// Shared by `Dim` and `Global`; `check_expr` runs unconditionally (even
+    /// with empty `names`) to match the prior inline behavior, while the
+    /// coercion itself is single-name.
+    fn coerce_initializer(
+        &mut self,
+        init_id: NodeId,
+        names: &[cb_frontend::DimName],
+        as_ty: Option<&Type>,
+    ) {
+        let init_ty = self.check_expr(init_id);
+        if let Some(dn) = names.first() {
+            let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty);
+            if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
+                self.coerce(init_id, &init_ty, &var_ty);
+            }
+        }
+    }
+
     fn check_dim(
         &mut self,
         names: &[cb_frontend::DimName],
@@ -1985,16 +1996,7 @@ impl<'a> Checker<'a> {
         }
 
         if let Some(init_id) = init {
-            let init_ty = self.check_expr(init_id);
-            // Coerce the initializer to the declared type (mirror check_assign)
-            // so lowering emits the right Convert and narrowing is range-checked
-            // / warned (FD-035). Dim-with-initializer is single-name.
-            if let Some(dn) = names.first() {
-                let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
-                if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
-                    self.coerce(init_id, &init_ty, &var_ty);
-                }
-            }
+            self.coerce_initializer(init_id, names, as_ty.as_ref());
         }
     }
 

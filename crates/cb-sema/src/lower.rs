@@ -1705,6 +1705,32 @@ impl<'a> Lowerer<'a> {
         self.switch_to(merge_block);
     }
 
+    /// Lower a loop body into the *current* block — the caller must already have
+    /// `switch_to`'d the body block and emitted any pre-body bindings (e.g.
+    /// for-each's element load). Pushes the loop control context, lowers `body`,
+    /// pops, and falls through to `continue_block` unless the body already
+    /// terminated. The caller emits the step/condition block and the final
+    /// `switch_to(exit_block)`, since those vary per loop. (S-M13)
+    fn lower_loop_body(
+        &mut self,
+        body: &[NodeId],
+        continue_block: BlockId,
+        exit_block: BlockId,
+        span: Span,
+    ) {
+        self.context_stack.push(ControlContext::Loop {
+            continue_block,
+            exit_block,
+        });
+        for &s in body {
+            self.lower_stmt(s);
+        }
+        self.context_stack.pop();
+        if !self.current_block_is_terminated() {
+            self.terminate(Terminator::Goto(continue_block), span);
+        }
+    }
+
     fn lower_while(&mut self, cond: NodeId, body: &[NodeId], stmt_id: NodeId) {
         let span = self.arena.span_of(stmt_id);
         let cond_block = self.fresh_block();
@@ -1727,17 +1753,7 @@ impl<'a> Lowerer<'a> {
 
         // Body block.
         self.switch_to(body_block);
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: cond_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(cond_block), span);
-        }
+        self.lower_loop_body(body, cond_block, exit_block, span);
 
         self.switch_to(exit_block);
     }
@@ -1750,17 +1766,7 @@ impl<'a> Lowerer<'a> {
         self.terminate(Terminator::Goto(body_block), span);
 
         self.switch_to(body_block);
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: body_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(body_block), span);
-        }
+        self.lower_loop_body(body, body_block, exit_block, span);
 
         self.switch_to(exit_block);
     }
@@ -1775,17 +1781,7 @@ impl<'a> Lowerer<'a> {
 
         // Body block.
         self.switch_to(body_block);
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: cond_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(cond_block), span);
-        }
+        self.lower_loop_body(body, cond_block, exit_block, span);
 
         // Condition block.
         self.switch_to(cond_block);
@@ -1942,17 +1938,7 @@ impl<'a> Lowerer<'a> {
 
         // Body block.
         self.switch_to(body_block);
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: step_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block), span);
-        }
+        self.lower_loop_body(body, step_block, exit_block, span);
 
         // Step block: var = var + step
         self.switch_to(step_block);
@@ -2049,17 +2035,7 @@ impl<'a> Lowerer<'a> {
 
         // Body
         self.switch_to(body_block);
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: step_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block), span);
-        }
+        self.lower_loop_body(body, step_block, exit_block, span);
 
         // Step: var = Next(var)
         self.switch_to(step_block);
@@ -2145,17 +2121,7 @@ impl<'a> Lowerer<'a> {
         );
         self.emit_store_var(var_ref, elem, span);
 
-        self.context_stack.push(ControlContext::Loop {
-            continue_block: step_block,
-            exit_block,
-        });
-        for &s in body {
-            self.lower_stmt(s);
-        }
-        self.context_stack.pop();
-        if !self.current_block_is_terminated() {
-            self.terminate(Terminator::Goto(step_block), span);
-        }
+        self.lower_loop_body(body, step_block, exit_block, span);
 
         // Step: idx += 1
         self.switch_to(step_block);

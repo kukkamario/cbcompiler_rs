@@ -573,7 +573,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         Projection::Index(idxs) => {
                             let vals = idxs
                                 .iter()
-                                .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                                .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
                                 .collect();
                             resolved.push(RProj::Index(vals));
                         }
@@ -699,7 +699,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let arr_val = frame.registers[array.0 as usize].clone();
                 let idx_vals: Vec<usize> = indices
                     .iter()
-                    .map(|r| self.value_to_i64(&frame.registers[r.0 as usize]) as usize)
+                    .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
                     .collect();
                 match arr_val {
                     Value::Array(rc) => {
@@ -719,7 +719,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::GetElementFlat { array, index } => {
                 let frame = self.call_stack.last().unwrap();
                 let arr_val = frame.registers[array.0 as usize].clone();
-                let flat = self.value_to_i64(&frame.registers[index.0 as usize]) as usize;
+                let flat = frame.registers[index.0 as usize].to_i64() as usize;
                 match arr_val {
                     Value::Array(rc) => {
                         let arr = rc.borrow();
@@ -771,8 +771,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::Len { array, dim } => {
                 let frame = self.call_stack.last().unwrap();
                 let arr_val = frame.registers[array.0 as usize].clone();
-                let dim_idx =
-                    dim.map(|d| self.value_to_i64(&frame.registers[d.0 as usize]) as usize);
+                let dim_idx = dim.map(|d| frame.registers[d.0 as usize].to_i64() as usize);
                 match arr_val {
                     Value::Array(rc) => {
                         let arr = rc.borrow();
@@ -863,7 +862,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         let frame = self.call_stack.last().unwrap();
         let mut sizes = Vec::with_capacity(dims.len());
         for r in dims {
-            let n = self.value_to_i64(&frame.registers[r.0 as usize]);
+            let n = frame.registers[r.0 as usize].to_i64();
             if n < 0 {
                 return Err(self.error_at(
                     InterpErrorKind::RuntimeError(format!("negative array dimension: {n}")),
@@ -943,25 +942,19 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             )
         {
             let wide = matches!(lhs, Value::Long(_));
-            let a = self.value_to_i64(lhs);
-            let count = self.value_to_i64(rhs);
+            let a = lhs.to_i64();
+            let count = rhs.to_i64();
             return self.int_binop(op, a, count, span, wide);
         }
 
         match (lhs, rhs) {
             // Byte/Short/Int all compute in 32-bit (Int) width per the invariant
-            // above: value_to_i64 widens each operand to i64, int_binop with
+            // above: to_i64 widens each operand to i64, int_binop with
             // wide=false truncates the result back to Int (matching §3.4).
             (
                 Value::Byte(_) | Value::Short(_) | Value::Int(_),
                 Value::Byte(_) | Value::Short(_) | Value::Int(_),
-            ) => self.int_binop(
-                op,
-                self.value_to_i64(lhs),
-                self.value_to_i64(rhs),
-                span,
-                false,
-            ),
+            ) => self.int_binop(op, lhs.to_i64(), rhs.to_i64(), span, false),
             (Value::Long(a), Value::Long(b)) => self.int_binop(op, *a, *b, span, true),
 
             (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b, span),
@@ -1196,10 +1189,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // `toInt` semantics (cb_runtime.md §Math): a Float is rounded to the
         // nearest integer with ties going **away from zero** (`10.5 → 11`,
         // `-1.5 → -2`), not truncated toward zero, and a String is parsed as a
-        // leading integer after trimming. The raw `value_to_i64` helper
+        // leading integer after trimming. The raw `Value::to_i64` helper
         // (truncating) stays for internal, non-language uses.
         let i = self.value_to_int_cb(v);
-        let f = self.value_to_f64(v);
+        let f = v.to_f64();
 
         match to {
             IrType::Byte => Ok(Value::Byte(i as u8)),
@@ -1219,47 +1212,13 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     }
 
     /// CoolBasic `toInt` conversion: Float rounds to the nearest integer with
-    /// ties **away from zero** (`f64::round`, so `2.5 → 3` and `-1.5 → -2`),
-    /// String trims then parses a leading integer (0 on no leading digits),
-    /// everything else matches `value_to_i64`.
+    /// ties **away from zero** (`f64::round`, so `2.5 → 3` and `-1.5 → -2`);
+    /// everything else (including the String leading-integer parse) matches
+    /// [`Value::to_i64`].
     fn value_to_int_cb(&self, v: &Value) -> i64 {
         match v {
             Value::Float(x) => x.round() as i64,
-            Value::String(s) => parse_leading_int(s.as_bytes()),
-            _ => self.value_to_i64(v),
-        }
-    }
-
-    fn value_to_i64(&self, v: &Value) -> i64 {
-        match v {
-            Value::Byte(x) => *x as i64,
-            Value::Short(x) => *x as i64,
-            Value::Int(x) => *x as i64,
-            Value::Long(x) => *x,
-            Value::Float(x) => *x as i64,
-            // Same leading-integer policy as CoolBasic `toInt`
-            // (`value_to_int_cb`): `"3x"` → 3, not 0. Keeps the one
-            // string→int rule used everywhere (array indices/dims included).
-            Value::String(s) => parse_leading_int(s.as_bytes()),
-            _ => 0,
-        }
-    }
-
-    fn value_to_f64(&self, v: &Value) -> f64 {
-        match v {
-            Value::Byte(x) => *x as f64,
-            Value::Short(x) => *x as f64,
-            Value::Int(x) => *x as f64,
-            Value::Long(x) => *x as f64,
-            Value::Float(x) => *x,
-            // Floats keep the strict full-parse policy (a partial parse of a
-            // float prefix has no documented CB semantics); a non-numeric
-            // string yields 0.0.
-            Value::String(s) => std::str::from_utf8(s.as_bytes())
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0),
-            _ => 0.0,
+            _ => v.to_i64(),
         }
     }
 
@@ -1423,34 +1382,6 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             })
             .collect()
     }
-}
-
-/// Parse a leading integer from UTF-8 bytes, mirroring `stoi(trim(s))`: skip
-/// leading ASCII whitespace, accept an optional `+`/`-`, then consume digits
-/// up to the first non-digit. Returns 0 when no digits lead (matching
-/// cbEnchanted's `try { stoi } catch { 0 }`). Saturates rather than wrapping.
-fn parse_leading_int(bytes: &[u8]) -> i64 {
-    let mut i = 0;
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
-        neg = bytes[i] == b'-';
-        i += 1;
-    }
-    let start = i;
-    let mut val: i64 = 0;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        val = val
-            .saturating_mul(10)
-            .saturating_add((bytes[i] - b'0') as i64);
-        i += 1;
-    }
-    if i == start {
-        return 0; // no leading digits
-    }
-    if neg { -val } else { val }
 }
 
 // ── StorePlace path walking ─────────────────────────────────────────────
