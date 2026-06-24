@@ -1,6 +1,7 @@
 # FD-044: Backend Trait Seam
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-25
 **Created:** 2026-06-24
 **Priority:** Medium (blocking for LLVM codegen)
 **Effort:** Medium (a load-bearing structural decision — trait shape, crate placement)
@@ -231,7 +232,17 @@ the FD-025 four-feature matrix (interp / interp+llvm / none / llvm-only) —
 --all-targets -D warnings` clean in every combo; `cargo fmt --all --check` clean;
 smoke: interp run → exit 0, `--backend llvm` → exit 3 (identical message),
 `--dump-ast` under `--no-default-features` → exit 0, no-backend valid program →
-exit 2. Awaiting `/fd-verify` sign-off.
+exit 2.
+
+**`/fd-verify` sign-off (2026-06-25, Windows, SDK-free + interp):** independently
+re-ran the full plan — `cargo test --workspace` green (0 failures); the FD-025
+four-feature `cb-driver` matrix all green (interp 75, +llvm 75, no-default 21,
+llvm-only 20 — counts differ exactly as the feature gating predicts); `clippy
+--workspace --all-targets -D warnings` clean in every combo (the de-`cfg`'d
+`clamp_exit` / `BACKEND_UNIMPLEMENTED` raise no unused-item warnings); `cargo fmt
+--all --check` clean; the four exit-code smokes confirmed identical to today
+(0 / 3 / 0 / 2). One proofread fix folded in at verify: synced the FEATURE_INDEX
+narrative from "Open … ready for implementation" to Pending Verification.
 
 ## References
 
