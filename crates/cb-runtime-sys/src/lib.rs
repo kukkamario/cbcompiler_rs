@@ -176,22 +176,47 @@ unsafe extern "C" {
     pub fn cb_runtime_init(host: *const CbHostApi) -> *const CbRuntimeHooks;
 }
 
-/// Get the string API exposed by the loaded runtime catalog. Panics if
-/// the catalog can't be loaded or reports a version other than
-/// [`CB_CATALOG_VERSION`] — both are configuration errors that should
-/// surface immediately at startup rather than be silently absorbed.
+/// Fetch the catalog pointer the linked runtime exports and null-check it.
+/// The single place the raw `cb_runtime_get_catalog()` FFI result is turned
+/// into a safe reference; both [`string_api`] and [`load_catalog`] start here
+/// so the null-check (and its message) live in exactly one spot (DR-R2).
+///
+/// # Safety
+/// Relies on the runtime returning either null or a pointer valid for
+/// `'static` — the runtime's static catalog satisfies this.
+fn fetch_catalog() -> Result<&'static CbCatalog, String> {
+    let ptr = unsafe { cb_runtime_get_catalog() };
+    if ptr.is_null() {
+        return Err("cb_runtime_get_catalog() returned null".to_string());
+    }
+    Ok(unsafe { &*ptr })
+}
+
+/// Validate a catalog's reported version against the version this crate was
+/// built against. One message, shared by the fatal-by-panic [`string_api`]
+/// startup path and the recoverable [`decode_catalog`] path so the two cannot
+/// drift (DR-R3).
+fn check_catalog_version(version: u32) -> Result<(), String> {
+    if version != CB_CATALOG_VERSION {
+        return Err(format!(
+            "unsupported catalog version {version} (expected {CB_CATALOG_VERSION})"
+        ));
+    }
+    Ok(())
+}
+
+/// Get the string API exposed by the loaded runtime catalog.
+///
+/// Unlike [`load_catalog`], which surfaces the same null/version conditions as
+/// `Err` for the driver's diagnostic flow, this **panics**: a missing or
+/// version-mismatched catalog at the point the interpreter needs the string
+/// runtime is an unrecoverable startup misconfiguration (fatal-by-panic at
+/// init, FD-024) that should surface immediately rather than be absorbed. The
+/// fetch and version checks themselves are shared with `load_catalog` via
+/// [`fetch_catalog`] / [`check_catalog_version`]; only the handling differs.
 pub fn string_api() -> &'static CbStringApi {
-    let catalog_ptr = unsafe { cb_runtime_get_catalog() };
-    assert!(
-        !catalog_ptr.is_null(),
-        "cb_runtime_get_catalog() returned null"
-    );
-    let catalog = unsafe { &*catalog_ptr };
-    assert_eq!(
-        catalog.version, CB_CATALOG_VERSION,
-        "catalog version mismatch (loaded {} but cb-runtime-sys expects {})",
-        catalog.version, CB_CATALOG_VERSION
-    );
+    let catalog = fetch_catalog().unwrap_or_else(|e| panic!("{e}"));
+    check_catalog_version(catalog.version).unwrap_or_else(|e| panic!("{e}"));
     assert!(
         !catalog.strings.is_null(),
         "catalog v{CB_CATALOG_VERSION} has null string API (runtime bug)"
@@ -231,16 +256,12 @@ pub fn runtime_init(host: &'static CbHostApi) -> Result<&'static CbRuntimeHooks,
 // ── Safe conversion ────────────────────────────────────────────────────
 
 /// Load the runtime catalog and convert it to a `RuntimeCatalog` suitable
-/// for passing to `cb_sema::analyze`. Thin wrapper: fetch the catalog pointer
-/// from the linked runtime, null-check it, and hand it to [`decode_catalog`],
+/// for passing to `cb_sema::analyze`. Thin wrapper: fetch + null-check the
+/// catalog pointer via [`fetch_catalog`], then hand it to [`decode_catalog`],
 /// which holds all version/layout validation and is unit-testable against
 /// hand-built fixtures.
 pub fn load_catalog() -> Result<RuntimeCatalog, String> {
-    let catalog_ptr = unsafe { cb_runtime_get_catalog() };
-    if catalog_ptr.is_null() {
-        return Err("cb_runtime_get_catalog() returned null".to_string());
-    }
-    decode_catalog(unsafe { &*catalog_ptr })
+    decode_catalog(fetch_catalog()?)
 }
 
 /// Decode a `CbCatalog` into a `RuntimeCatalog`, validating version, pointers,
@@ -254,12 +275,7 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
 /// The real caller satisfies this with the runtime's static catalog; tests
 /// satisfy it by keeping their fixture backing data alive across the call.
 fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
-    if catalog.version != CB_CATALOG_VERSION {
-        return Err(format!(
-            "unsupported catalog version {} (expected {})",
-            catalog.version, CB_CATALOG_VERSION
-        ));
-    }
+    check_catalog_version(catalog.version)?;
 
     // Read type declarations first — needed to resolve tags in function signatures.
     let mut custom_types = Vec::new();

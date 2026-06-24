@@ -1666,16 +1666,14 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            Node::Stmt(Stmt::Continue) => {
-                // `Continue` needs an enclosing loop or `Select` (the explicit
-                // fall-through form, cb_syntax.md §6.2).
-                if self.control_stack.is_empty() {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_MISPLACED_LOOP_CONTROL,
-                        "`Continue` outside of a loop or `Select`",
-                        Label::new(self.arena.span_of(id)),
-                    ));
-                }
+            // `Continue` needs an enclosing loop or `Select` (the explicit
+            // fall-through form, cb_syntax.md §6.2).
+            Node::Stmt(Stmt::Continue) if self.control_stack.is_empty() => {
+                self.diagnostics.push(Diagnostic::error(
+                    E_MISPLACED_LOOP_CONTROL,
+                    "`Continue` outside of a loop or `Select`",
+                    Label::new(self.arena.span_of(id)),
+                ));
             }
             // Statements that are already handled or require no type checking:
             Node::Stmt(Stmt::Type { .. })

@@ -25,41 +25,23 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 |---|---|---|---|
 | Sema (check / lower / types / scope) | 0 | 6 | 21 |
 | Frontend (lexer / parser / AST) | 0 | 12 | 28 |
-| IR + Interpreter | 0 | 2 | 25 |
-| Diagnostics + Runtime/Driver/LLVM | 0 | 3 | 21 |
+| IR + Interpreter | 0 | 1 | 24 |
+| Diagnostics + Runtime/Driver/LLVM | 0 | 0 | 20 |
 
-> The four High-severity `cb-sema` miscompiles originally reported here (S-H1
-> implicit For/ForEach loop-variable aliasing, S-H2 `Select … Default` in a
-> non-final position dropping later `Case`s, S-H3 logical `Xor` lowered as
-> bitwise, S-H4 block-nested top-level `Const` not hoisted) have been **fixed**
-> and removed from this report.
->
-> The five "Bundle 1" `cb-sema` validation gaps (S-M1 `Select` Case
-> constness/convertibility, S-M2 conversion-intrinsic operand, S-M3 array-index
-> operand type, S-M4 param/field sigil-`As` disagreement, S-M5 non-constant
-> `Const` initializer) have also been **fixed**; their entries below are marked
-> ✅ Fixed and kept for traceability.
->
-> The "Bundle 2" fail-loud robustness items have also been **fixed**: the IR
-> verifier now checks single-assignment (II-V2), result-presence-vs-kind
-> (II-V3, except the deferred `Call`-result/signature cross-check), and
-> `params`↔`is_param`-locals agreement (II-V1); `default_value` panics on an
-> unknown struct (II-V20); `push_frame` debug-asserts call arity (II-V27); the
-> `type_def_map` `"<unknown>"` indexing now falls back gracefully (S-M6); and
-> misplaced `Break`/`Continue` is a new sema error **E0332** with a lowering
-> backstop (S-M7/S-M8). Entries are marked ✅ Fixed.
+> **Resolved findings have been removed from this report.** Fixed and dropped:
+> the four High-severity `cb-sema` miscompiles (S-H1–S-H4); the "Bundle 1" sema
+> validation gaps (S-M1–S-M5); the "Bundle 2" fail-loud robustness items (S-M6,
+> S-M7, S-M8, II-V1, II-V2, II-V3 — except the still-deferred `Call`-result/
+> signature cross-check — II-V20, II-V27); and the "Bundle 3" behavioral
+> inconsistencies (DR-R1, DR-R2/DR-R3, II-V26). DR-D6 was a false positive and
+> is recorded under [Confirmed non-issues](#confirmed-non-issues-checked-and-rejected).
+> The findings below are the open remainder.
 
 ### Cross-cutting themes
 
 These patterns recur across crates and are worth treating as systemic, not
 one-off:
 
-- **Silent fallbacks that mask lowering bugs.** The interpreter is the
-  *reference implementation* and should fail loudly on internal inconsistencies,
-  but several paths swallow them: `default_value` returning `Null` for an unknown
-  struct (II-V20), `push_frame` tolerating arity mismatch (II-V27), and
-  `type_def_map[..]` indexing a fabricated `"<unknown>"` key (S-M6). Prefer
-  `debug_assert!`/`panic!` at these points.
 - **Coercion / widening logic duplicated across crates.** The "Byte/Short widen
   to Int, else keep type" rule appears three times in `cb-sema` (S-M14), and a
   near-identical value→i64 / value→f64 pair exists in both `interp.rs` and
@@ -67,10 +49,6 @@ one-off:
 - **`RuntimeType` is reference-like but excluded from `is_reference()`**, forcing
   duplicated special-case arms in conversion and equality logic. The exclusion
   is deliberate but undocumented. (S-M9)
-- **IR verification is incomplete in ways that can mask lowering bugs** — no
-  single-assignment check, no result-presence-vs-instruction-kind check, and
-  `Function.params` is never cross-checked against the `is_param` locals.
-  (II-V1/V2/V3)
 - **Keyword-only structural duplication in the AST** (`Type`/`Struct`,
   `Dim`/`Global` are byte-for-byte identical variants). Per `CLAUDE.md` these are
   load-bearing-adjacent and should be discussed before refactoring. (F-A1/A2)
@@ -85,88 +63,10 @@ one-off:
 
 ## Sema (`cb-sema`)
 
-> The four High-severity findings (S-H1–S-H4) have been fixed and removed; the
-> Medium/Low findings below are unchanged.
+> The High-severity (S-H1–S-H4) and Bundle 1/2 (S-M1–S-M8) findings have been
+> fixed and removed; the Medium/Low findings below are the open remainder.
 
 ### Medium
-
-#### S-M1 — `Select` Case values are never checked for constness or convertibility ✅ Fixed
-- `check.rs:2065-2088` (`check_select`)
-- Category: Oversight
-- §6.2 requires every `Case` value to be a constant expression implicitly
-  convertible to the scrutinee type. `check_select` runs `check_expr` on each
-  value but never evaluates it as a constant nor coerces it against the scrutinee
-  type, so `Case "foo"` against an Integer scrutinee, or a non-constant `Case x`,
-  passes silently. (Admits programs that should be rejected; does not corrupt
-  codegen.)
-- Fix: run `eval_const_expr` (E0322 if `None`) and `coerce` each value to the
-  scrutinee type (E0317/E0318 on mismatch); add a test.
-
-#### S-M2 — Conversion-intrinsic argument type computed then discarded ✅ Fixed
-- `check.rs:1289-1308` (`check_conversion_intrinsic`)
-- Category: Oversight
-- `Int(x)`/`Float(x)`/`Str(x)` check arity but drop the result of
-  `check_expr(args[0])` with no convertibility check, so `Int(myTypeRef)` is
-  accepted. Contrast the `Len` arm, which validates operand kinds.
-- Fix: validate the operand (numeric/String for Int/Float; numeric/String for
-  Str), emitting E0301/E0317 otherwise.
-
-#### S-M3 — `check_index` ignores index operand types ✅ Fixed
-- `check.rs:1310-1339` (`check_index`)
-- Category: Oversight / Inconsistency
-- Index expressions are collected into `_idx_types` and discarded; only array
-  rank is checked, so `arr[1.5]` / `arr["x"]` pass. `check_new` and
-  `check_redim` both reject non-integer dimensions, so this is also internally
-  inconsistent.
-- Fix: for each index, emit E0301 when `!ty.is_integer() && !ty.is_error()`.
-
-#### S-M4 — `resolve_var_type` sigil/As-disagreement flag dropped for params and fields ✅ Fixed
-- `check.rs:603` (pass1 params), `check.rs:655` & `:692` (fields), `check.rs:2123` (`check_function` params)
-- Category: Inconsistency / Oversight
-- `Dim`/`Global`/`Const`/return types act on the disagreement flag (E0320), but
-  for parameters and `Field` declarations it is discarded, so
-  `Function f(count% As Float)` or `Field x% As Float` silently accepts a
-  sigil/type contradiction. §1.4 gives no exemption.
-- Fix: emit E0320 for params and fields too, or document why they are exempt.
-
-#### S-M5 — Non-constant `Const` initializer silently accepted ✅ Fixed
-- `check.rs:1479-1492` (Const arm of `check_stmt`)
-- Category: Oversight
-- §4.4 requires a constant expression. When `eval_const_expr(value)` is `None`
-  (e.g. `Const x = someVar`), the declaration keeps its zero placeholder and no
-  error is emitted.
-- Fix: emit E0322 at the value span when `eval_const_expr` returns `None`.
-
-#### S-M6 — `type_def_map[&type_name]` panics on the `"<unknown>"` fallback ✅ Fixed
-- `lower.rs:811` (`New(Type)`), `lower.rs:1125` (first/last), `lower.rs:1922` (`lower_for_each_type`)
-- Category: Oversight
-- On a non-`TypeRef` resolved type the code fabricates an interned `"<unknown>"`
-  symbol and immediately indexes `type_def_map[&type_name]` with a key that is
-  never present → panic. Only reachable on error/degenerate inputs, but an
-  ungraceful failure.
-- Fix: use `type_def_map.get(&type_name)` and fall back to a safe IR value (e.g.
-  `ConstNull`) when absent.
-
-#### S-M7 — `Break`/`Continue` silently no-op when no enclosing context is found ✅ Fixed
-- `lower.rs:1382-1398` (`Break`), `lower.rs:1399-1415` (`Continue`)
-- Category: Oversight
-- If `Break N` can't find the Nth enclosing loop (or `Continue` has an empty
-  context stack), nothing is emitted and the block is left unterminated and
-  falls through. Sema presumably validates placement, but if anything slips
-  through this is a silent miscompile with no documented assumption.
-- Fix: document the sema-validated-placement assumption, and emit an
-  unreachable/trap terminator (or `debug_assert!`) when no target is found.
-
-#### S-M8 — `Continue` in a `Select` last arm leaves the block unterminated ✅ Fixed
-- `lower.rs:1408-1412` (`Continue`, Select context)
-- Category: Bug / Oversight
-- For a `Select` arm, `Continue` should fall through to the next case body, but
-  the lowering only terminates when `next_arm_body` is `Some`. For the last arm
-  it emits nothing and relies on the `Goto(merge_block)` guard at `lower.rs:2182`
-  — silently ignoring intent.
-- Fix: confirm against §6.2 whether `Continue` in the final case is legal; if
-  illegal make it a sema error, if legal terminate explicitly (likely
-  `merge_block`).
 
 #### S-M9 — `RuntimeType` excluded from `is_reference()`, forcing scattered special-casing
 - `types.rs:60-65` (`is_reference`), `types.rs:277-279` (Eq/NotEq), `convert.rs:77-80`
@@ -457,35 +357,6 @@ one-off:
 
 ### Medium
 
-#### II-V1 — `Function.params` duplicates `locals[is_param]` and is never cross-checked ✅ Fixed
-- `cb-ir/src/lib.rs:203` (`params`), `lib.rs:167-171` (`Local.is_param`); consumers `print.rs:53`, `interp.rs:225-226`
-- Category: Inconsistency / Oversight
-- Parameter info is stored twice: the printer renders the signature from
-  `func.params`; the interpreter sets up its frame from `func.locals` +
-  `is_param`. `verify()` never asserts they agree (nor that either matches
-  `decl.sig.params`), so a mismatch desyncs printer from interpreter silently.
-- Fix: add a verifier check that `func.params` equals the types of the leading
-  `is_param` locals (ideally also the `UserDefined` decl's `sig.params`), or
-  derive `params` from `locals` and drop the field.
-
-#### II-V2 — Verifier does not check single-assignment of result registers ✅ Fixed
-- `cb-ir/src/verify.rs:91-93`
-- Category: Oversight
-- The forward pass does `defined_regs.insert(r)` and discards the bool, although
-  the module doc frames the IR as SSA-like with a single def site per `Reg` that
-  the interpreter relies on. A `Reg` defined twice passes undetected.
-- Fix: `assert!(defined_regs.insert(r), "register {r} defined more than once")`,
-  or document that redefinition is intentionally permitted.
-
-#### II-V3 — Verifier never checks result-register presence vs instruction kind ✅ Fixed (subset; Call/signature cross-check deferred)
-- `cb-ir/src/verify.rs:83-94`
-- Category: Oversight
-- Value-producing instructions must have `result: Some`; pure-effect ones must
-  have `result: None`. The verifier asserts neither, so a `BinOp` with
-  `result: None` or a `StoreLocal` with a spurious result both pass.
-- Fix: classify each `InstKind` as value-producing vs void and assert
-  accordingly (Call's void-ness comes from the callee's `sig.ret`).
-
 #### II-V10 — Duplicated value→i64 / value→f64 coercion across `interp.rs` and `ffi.rs`
 - `interp.rs:1200-1231` (`value_to_i64`/`value_to_f64`) vs `ffi.rs:82-102` (`value_as_i64`/`value_as_f64`)
 - Category: Duplication
@@ -494,32 +365,6 @@ one-off:
   strings. A fix to one will likely miss the other.
 - Fix: extract a single coercion helper (methods on `Value`) used by both,
   documenting why the ffi path never legitimately sees strings (see II-V11).
-
-#### II-V20 — `default_value` returns `Value::Null` for an unknown `StructVal` name — silent ✅ Fixed
-- `value.rs:84-98` (fallback at 95-97)
-- Category: Bug / Oversight
-- If `StructVal(name)` references a struct missing from `struct_defs`,
-  `default_value` returns `Value::Null` instead of a `Struct`. Downstream
-  `GetField`/`StorePlace` then trap with `NullDeref`, producing a misleading
-  error far from the real cause (a missing struct def — a lowering bug). The
-  reference impl should fail loudly here.
-- Fix: `panic!`/`debug_assert!` on a missing struct def, or at minimum document
-  that `Null` here means "internal: unknown struct".
-
-#### II-V26 — Non-shift integer binops only handle same-width `(Int,Int)`/`(Long,Long)`
-- `interp.rs:930-936`; compare shift path `interp.rs:918-927` and `eval_unop` widening `interp.rs:1131-1152`
-- Category: Inconsistency
-- `eval_binop`'s arithmetic/comparison match has arms only for `(Int,Int)`,
-  `(Long,Long)`, Float, and String pairs; `(Byte,Byte)`, `(Short,Short)`, and any
-  mixed pair fall through to a generic "type mismatch". This relies entirely on
-  sema inserting `Convert` before every BinOp — yet the *shift* path and
-  `eval_unop` both directly widen Byte/Short. So shifts and unops tolerate
-  Byte/Short but other binops don't, an internal asymmetry that turns Byte/Short
-  arithmetic into a spurious type error if the coercion invariant ever slips (or
-  for hand-written IR).
-- Fix: document the "sema pre-converts all BinOp operands to Int/Long/Float"
-  invariant at the top of `eval_binop`, or widen Byte/Short to Int there for
-  consistency with `eval_unop` and the shift path.
 
 ### Low
 
@@ -574,8 +419,6 @@ one-off:
   the hot `is_truthy` path; undocumented per-call cost. `string_handle.rs:54-60`.
 - **II-V25** — Shift with Float/String LHS falls through to a generic "type
   mismatch" rather than "shift requires integer operand". `interp.rs:918-928`.
-- **II-V27** — ✅ Fixed. `push_frame` now `debug_assert_eq!`s `args.len()`
-  against the parameter count. `interp.rs:225-238`.
 - **II-V28** — `StorePlace`/`GetElement` index resolution wraps negative indices
   via `as usize`; caught later as out-of-bounds but with a less precise
   diagnostic than `resolve_dims`. `interp.rs:561-567, 688-710`.
@@ -590,46 +433,6 @@ one-off:
 ---
 
 ## Diagnostics + Runtime / Driver / LLVM
-
-### Medium
-
-#### DR-R1 — Runtime catalog (and sema) run before the dump-only short-circuit
-- `cb-driver/src/main.rs:187-193` (catalog load), `:196` (sema), `:214` (`dump_ast`)
-- Category: Bug / Inconsistency
-- `load_catalog()` and `cb_sema::analyze(..., &runtime_catalog)` both run *before*
-  the `if dump_ast` block. The crate doc and `CLAUDE.md` advertise a
-  `--no-default-features` "dump-only binary suitable for AST inspection," but a
-  catalog-load failure exits with `USAGE` before any AST prints — so `--dump-ast`
-  actually depends on a loadable runtime catalog. (Note: sema also consumes the
-  catalog, so it can't simply be skipped; pure AST printing needs only the arena.)
-- Fix: move the `--dump-ast` print ahead of catalog load + sema (it needs only
-  `arena`/`program`), or update the docs to state that even dump-only builds
-  require a loadable catalog. The former matches documented intent.
-
-#### DR-R2 — `string_api()` panics while `load_catalog()` returns `Err` on the same conditions
-- `cb-runtime-sys/src/lib.rs:183-200` (`string_api`) vs `:238-244` (`load_catalog`), `:256-262` (`decode_catalog`)
-- Category: Inconsistency / Duplication
-- Both call `cb_runtime_get_catalog()` and null-check it. On a null catalog or
-  version mismatch, `string_api` **panics** while `load_catalog` returns
-  `Err(String)` — same conditions, opposite handling. The version check is also
-  duplicated with two differently-worded messages (folds in DR-R3). FD-024
-  documents fatal-by-panic at init, so the divergence is partly intentional but
-  undocumented at the call site.
-- Fix: factor a private `fn catalog() -> Result<&'static CbCatalog, String>`
-  (fetch + null-check + version-check, one message) used by both; document at
-  `string_api` why startup failure is fatal-by-panic (cite FD-024) while
-  catalog-load returns an error.
-
-#### DR-D6 — `source.rs` test module is an empty stub; the crate's subtlest code is untested
-- `cb-diagnostics/src/source.rs:296-297` (`#[cfg(test)] mod tests {}`)
-- Category: Oversight
-- `LineIndex` (CRLF vs bare `\r` vs `\n`, `partition_point` lookup, clamping) and
-  `offset_to_line_char_col` (multi-byte columns, mid-codepoint flooring) are the
-  most off-by-one-prone code in the crate yet have no direct tests; `render.rs`
-  tests exercise emit paths but not the line/col arithmetic.
-- Fix: add unit tests — CRLF as one terminator, bare `\r`, empty file
-  (`line_count == 1`), offset-past-EOF clamping, char-column on a multi-byte
-  line, and the mid-codepoint flooring path.
 
 ### Low — Diagnostics
 
@@ -668,8 +471,6 @@ one-off:
 
 ### Low — Runtime / Driver / LLVM
 
-- **DR-R3** — Version mismatch validated twice with two different messages (folds
-  into DR-R2). `cb-runtime-sys/src/lib.rs:190-194, 257-262`.
 - **DR-R4** — `CbFuncDesc::flags` is decoded nowhere; the interp-specific "drains
   the trap channel after every call" rationale doesn't generalize, so an LLVM
   backend wanting `CB_FUNC_CAN_TRAP` would need catalog re-plumbing. Note this
@@ -713,3 +514,9 @@ were checked against the source and found to be correct as written:
   unrelated to these two functions.)
 - **`convert.rs` `(Null, RuntimeType)` arm is not dead** — `is_reference()`
   genuinely excludes `RuntimeType` (kept as the clarity note S-L6).
+- **`LineIndex` / `offset_to_line_char_col` are well-tested** (withdrawn DR-D6) —
+  the off-by-one-prone line/column arithmetic is covered by
+  `crates/cb-diagnostics/tests/line_index.rs` (CRLF / bare-`\r` / LF terminators,
+  past-EOF clamping, multi-byte char columns, FD-021 mid-codepoint flooring). The
+  empty `mod tests {}` stub `source.rs` once carried — the basis of the original
+  finding — was removed.
