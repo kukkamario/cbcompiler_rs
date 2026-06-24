@@ -2947,9 +2947,8 @@ mod tests {
     #[test]
     fn pass2_function_arg_widening_ok() {
         // Byte -> Integer is a widening conversion: accepted silently.
-        let result = analyze_src(
-            "Function takes(a As Integer)\nEndFunction\nDim b As Byte\ntakes(b)\n",
-        );
+        let result =
+            analyze_src("Function takes(a As Integer)\nEndFunction\nDim b As Byte\ntakes(b)\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 

@@ -15,6 +15,7 @@ interp = ["dep:cb-backend-interp"]
 llvm = ["dep:cb-backend-llvm"]
 
 [dependencies]
+cb-backend-api = { path = "../cb-backend-api" }
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-frontend = { path = "../cb-frontend" }
 cb-ir = { path = "../cb-ir" }

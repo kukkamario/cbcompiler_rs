@@ -1,16 +1,13 @@
 [package]
-name = "cb-backend-llvm"
+name = "cb-backend-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-cb-backend-api = { path = "../cb-backend-api" }
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-ir = { path = "../cb-ir" }
-# `inkwell` will be added once we wire up real codegen — kept out for now so
-# the workspace builds without an LLVM toolchain installed.
 
 [lints]
 workspace = true

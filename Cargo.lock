@@ -121,9 +121,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cb-backend-api"
+version = "0.1.0"
+dependencies = [
+ "cb-diagnostics",
+ "cb-ir",
+]
+
+[[package]]
 name = "cb-backend-interp"
 version = "0.1.0"
 dependencies = [
+ "cb-backend-api",
  "cb-diagnostics",
  "cb-frontend",
  "cb-ir",
@@ -136,6 +145,8 @@ dependencies = [
 name = "cb-backend-llvm"
 version = "0.1.0"
 dependencies = [
+ "cb-backend-api",
+ "cb-diagnostics",
  "cb-ir",
 ]
 
@@ -153,6 +164,7 @@ name = "cb-driver"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "cb-backend-api",
  "cb-backend-interp",
  "cb-backend-llvm",
  "cb-diagnostics",
