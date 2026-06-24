@@ -34,6 +34,9 @@ pub struct Declaration {
     pub kind: DeclKind,
     pub ty: Type,
     pub span: Span,
+    /// Meaningful only for `DeclKind::Variable`: marks a `Global` declaration
+    /// (visible inside functions). Other decl kinds are global by their kind
+    /// (see `lookup`), so this flag is not consulted for them.
     pub is_global: bool,
 }
 

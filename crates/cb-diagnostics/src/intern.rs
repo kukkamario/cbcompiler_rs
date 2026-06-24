@@ -89,8 +89,12 @@ impl Interner {
         if let Some(&sym) = self.map.get(&key) {
             return sym;
         }
+        // Two-stage exhaustion guard: `try_from` only fails once the vec holds
+        // more than `u32::MAX` strings (true overflow), while the `assert!`
+        // below catches the one-short boundary — `id == u32::MAX` — which is
+        // reserved as the `Symbol::DUMMY` sentinel.
         let id = u32::try_from(self.strings.len())
-            .expect("interner exhausted: more than u32::MAX names");
+            .expect("interner exhausted: name count exceeds u32::MAX");
         assert!(
             id != u32::MAX,
             "interner exhausted: cannot allocate Symbol({}) — reserved as DUMMY",

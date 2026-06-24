@@ -72,8 +72,8 @@ static KEYWORDS: phf::Map<&'static str, Kw> = phf_map! {
     "xor" => Kw::Xor,
 };
 
-/// The longest keyword in `KEYWORDS`, used to size on-stack ASCII-lowercase
-/// scratch buffers in the lexer. `endfunction` is 11 bytes.
+/// The longest keyword in `KEYWORDS`, used to size the on-stack ASCII-lowercase
+/// scratch buffer (`buf`) in [`lookup`]. `endfunction` is 11 bytes.
 pub(crate) const LONGEST_KEYWORD_LEN: usize = 11;
 
 /// Look up a candidate identifier (any ASCII case) as a keyword. Returns

@@ -43,7 +43,8 @@ impl Arena {
         id
     }
 
-    /// Span of the node with this id.
+    /// Span of the node with this id. `id` must come from this arena (see the
+    /// [`Index`](std::ops::Index) impl); an out-of-range id panics.
     pub fn span_of(&self, id: NodeId) -> Span {
         self.spans[id.0 as usize]
     }
@@ -59,6 +60,12 @@ impl Arena {
     }
 }
 
+/// A `NodeId` is valid only for the `Arena` that produced it (via [`alloc`]);
+/// indexing with an id from another arena or out of range panics. The AST is
+/// immutable after parsing, so a once-valid id stays valid for that arena's
+/// lifetime.
+///
+/// [`alloc`]: Arena::alloc
 impl std::ops::Index<NodeId> for Arena {
     type Output = Node;
 
@@ -80,6 +87,8 @@ pub enum Node {
 /// Expression nodes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
+    /// Integer literal stored as unsigned magnitude; sema range-checks it
+    /// against the inferred target type (mirrors `TokenKind::IntLit`).
     IntLit(u64),
     FloatLit(FloatBits),
     NullLit,
@@ -110,8 +119,11 @@ pub enum Expr {
     },
     Field {
         target: NodeId,
-        /// Bare-name span of the field (sigil byte excluded, if any). FD-004
-        /// #12: previously a full `Expr::Ident` node was allocated for this
+        /// Bare-name span of the field (sigil byte excluded, if any). A sigil
+        /// at the access site (`player\x$`) is accepted by the parser but
+        /// ignored — only its byte is trimmed from `name_span`; unlike
+        /// `Expr::Ident`/`FieldDecl`, no sigil is retained here. FD-004 #12:
+        /// previously a full `Expr::Ident` node was allocated for this
         /// position to share machinery with regular identifier exprs. The
         /// span-only form matches every other declaration site (e.g.
         /// `DimName::name_span`, `Stmt::FieldDecl::name_span`) and avoids an
@@ -135,7 +147,13 @@ pub enum Expr {
 #[derive(Clone, Debug, PartialEq)]
 pub enum NewKind {
     Type(NodeId),
-    Array { elem: NodeId, dims: Vec<NodeId> },
+    /// `dims` holds one size expression per dimension — a `New` allocates real
+    /// storage, so it needs the actual extents (contrast `TypeExpr::Array`,
+    /// which records only the arity as `rank: u8`).
+    Array {
+        elem: NodeId,
+        dims: Vec<NodeId>,
+    },
 }
 
 /// Statement nodes.
@@ -308,6 +326,8 @@ pub struct Param {
     pub name_span: Option<Span>,
     pub sigil: Option<Sigil>,
     pub ty: Option<NodeId>,
+    /// Default-value expression. Meaningful only for real function params; in
+    /// fn-ptr type position (`name_span` is `None`) a default is not allowed.
     pub default: Option<NodeId>,
 }
 
@@ -322,6 +342,8 @@ pub enum TypeExpr {
     },
     Array {
         elem: NodeId,
+        /// Number of dimensions only — a type fixes arity, not extents
+        /// (contrast `NewKind::Array`, which carries a size expr per dimension).
         rank: u8,
     },
     FnPtr {

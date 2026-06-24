@@ -428,9 +428,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Walk into statement bodies recursively to collect labels in the given scope.
-    /// Also records which For loop NodeIds contain each label for Goto-into-For checking.
-    /// Skips Function bodies (they have their own scope).
+    /// Hoist `Const` declarations out of nested statement bodies (If/loops/Select)
+    /// into the given scope, so references resolve regardless of block nesting
+    /// (§4.2 has no block scoping). Skips Function bodies (their own scope).
     fn collect_consts_recursive(&mut self, id: NodeId, scope: ScopeId) {
         match self.arena[id].clone() {
             Node::Stmt(Stmt::Const {

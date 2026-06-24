@@ -40,8 +40,11 @@ pub struct CbFuncDesc {
     pub return_type: u32,
     /// Catalog flag bits (`CB_FUNC_CAN_TRAP`, …). Intentionally **not** decoded
     /// into `FuncDesc`: the interpreter drains the trap channel after every call
-    /// regardless, so it has no consumer today. Kept in the `repr(C)` mirror so
-    /// the layout matches C exactly; the static layout assert below pins it.
+    /// regardless, so it has no consumer today. That rationale is interp-specific
+    /// — a future LLVM backend that wants to skip the trap check on calls without
+    /// `CB_FUNC_CAN_TRAP` (rather than draining unconditionally) will need to
+    /// decode `flags` here. Kept in the `repr(C)` mirror so the layout matches C
+    /// exactly; the static layout assert below pins it.
     pub flags: u32,
 }
 
@@ -265,7 +268,8 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
 }
 
 /// Decode a `CbCatalog` into a `RuntimeCatalog`, validating version, pointers,
-/// tags, UTF-8, and uniqueness. Split out from [`load_catalog`] so the
+/// tags, UTF-8, and type-tag uniqueness (function names, symbols, and constant
+/// names are deliberately allowed to collide). Split out from [`load_catalog`] so the
 /// defensive branches can be exercised by tests that build malformed catalogs
 /// directly (the real linked runtime always returns a valid one).
 ///

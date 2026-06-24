@@ -8,7 +8,9 @@ use cb_frontend::{Arena, BinOp, Kw, NodeId, Sigil, UnOp};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     // Primitives (§3.1)
+    /// 8-bit unsigned (0..=255); storage-only, widens to `Int` for arithmetic.
     Byte,
+    /// 16-bit unsigned (0..=65535); storage-only, widens to `Int` for arithmetic.
     Short,
     Int,
     Long,
@@ -114,7 +116,8 @@ pub fn is_reserved_type_kw(kw: Kw) -> bool {
 /// Named types are interned but NOT resolved against the symbol table here —
 /// that happens during pass 2 when all declarations are known. For now we
 /// return `TypeRef` for any `TypeExpr::Named`, which pass 2 may refine to
-/// `StructVal` once it knows the declaration kind.
+/// `StructVal` (user `Struct`) or `RuntimeType` (opaque runtime handle) once it
+/// knows the declaration kind.
 pub fn resolve_type_expr(arena: &Arena, id: NodeId, interner: &mut Interner, source: &str) -> Type {
     use cb_frontend::SpanExt;
 
@@ -320,7 +323,9 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
             }
         }
 
-        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035)
+        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035).
+        // Numeric-only: CB has no truthiness for strings or references — only
+        // numerics can be tested against 0 (§1.7).
         BinOp::And | BinOp::Or | BinOp::Xor => {
             if lhs.is_numeric() && rhs.is_numeric() {
                 Some(Type::Int)

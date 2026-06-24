@@ -23,6 +23,11 @@ impl Span {
     /// lexer's hot path. [`Span::len`] still returns `0` for an inverted
     /// span via `saturating_sub`, so release builds do not panic on bad
     /// data — they just produce a degenerate (empty) span.
+    ///
+    /// The same `end >= start` invariant is re-checked at render time by
+    /// `validate_label` (in `render.rs`) in *all* build modes, so an inverted
+    /// span that slips past this debug-only assert is still rejected before
+    /// reaching codespan.
     pub const fn new(start: u32, end: u32, file: FileId) -> Self {
         debug_assert!(end >= start, "Span::new: end < start");
         Self { start, end, file }

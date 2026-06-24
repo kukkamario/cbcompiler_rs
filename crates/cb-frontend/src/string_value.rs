@@ -292,6 +292,8 @@ fn sub_span(lit_span: Span, start: u32, end: u32) -> Span {
 ///   newline before it up to the `"""` is the closer's indent.
 /// - Each non-empty content line must begin with at least that indent; that
 ///   indent is stripped from every content line.
+/// - Whitespace-only lines are normalized to empty (their whitespace, which is
+///   at most the closer indent, is dropped) — only the line's newline survives.
 /// - The leading newline after the opening `"""` is dropped; the trailing
 ///   whitespace + `"""` (the closer line) is also dropped.
 fn decode_raw(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {

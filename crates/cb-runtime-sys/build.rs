@@ -223,9 +223,15 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
     }
 
     // Read the transitive link list emitted by runtime/CMakeLists.txt.
-    // Multi-config generators (MSVC) produce per-config files; we only ever
-    // build Release here. Single-config generators (Ninja) write the
-    // un-suffixed name when CMAKE_BUILD_TYPE is empty.
+    // Multi-config generators (MSVC) produce per-config files; we always build
+    // `--config Release`, so `..._Release.txt` is the expected name and the
+    // first candidate is what we actually hit.
+    //
+    // The remaining two are unverified fallbacks, not confirmed filenames:
+    // `..._.txt` is a *guess* at CMake's `$<CONFIG>` empty-string expansion for
+    // a single-config generator (Ninja) with an empty `CMAKE_BUILD_TYPE`, and
+    // `....txt` covers a generator that drops the suffix entirely. Neither has
+    // been observed in this build; keep them only as a cheap last resort.
     let link_list_candidates = [
         build_dir.join("cb_runtime_link_libs_Release.txt"),
         build_dir.join("cb_runtime_link_libs_.txt"),

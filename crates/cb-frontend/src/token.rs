@@ -78,7 +78,7 @@ impl Sigil {
 }
 
 /// Bit-pattern wrapper around an IEEE-754 `f64`. Used by
-/// [`TokenKind::FloatLit`] so [`Token`] can be `Eq` and `Hash` — equality is
+/// [`TokenKind::FloatLit`] so [`Token`] can be `Eq` — equality is
 /// raw-bit equality, which treats two NaNs with the same payload as equal
 /// (and two NaNs with different payloads as unequal). This is what callers
 /// comparing tokens actually want; the IEEE "NaN != NaN" rule is the wrong

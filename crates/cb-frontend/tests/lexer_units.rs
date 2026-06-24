@@ -1273,7 +1273,11 @@ mod errors {
             !has_diag_code(&diags, "E0106"),
             "expected no E0106 diagnostic; got {diags:?}"
         );
-        assert_eq!(diags.len(), 1, "expected exactly one diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic; got {diags:?}"
+        );
     }
 
     #[test]
@@ -1291,7 +1295,11 @@ mod errors {
             !has_diag_code(&diags, "E0106"),
             "expected no E0106 diagnostic; got {diags:?}"
         );
-        assert_eq!(diags.len(), 1, "expected exactly one diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic; got {diags:?}"
+        );
     }
 
     #[test]

@@ -169,6 +169,10 @@ pub fn default_value(
             }
         }
         IrType::FnPtr(_) => Value::FnPtr(None),
+        // Reference-like types default to Null per CB semantics: an
+        // uninitialized array, type instance, runtime handle, etc. is Null
+        // until assigned. This is the intended default, not a fallback —
+        // unlike the unknown-`StructVal` case above, which panics.
         IrType::RuntimeType(_) => Value::Null,
         IrType::Null | IrType::Void => Value::Null,
         IrType::TypeRef(_) => Value::Null,

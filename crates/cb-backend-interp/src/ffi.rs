@@ -162,6 +162,8 @@ pub unsafe fn call(
             let handle = if p.is_null() {
                 CbStringHandle::empty(string_api)
             } else {
+                // Take the returned handle by ownership (refcount already 1,
+                // per ABI) — no retain. Drop will release it.
                 CbStringHandle::from_raw(string_api, p)
             };
             Value::String(handle)

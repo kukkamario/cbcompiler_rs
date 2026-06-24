@@ -102,6 +102,9 @@ pub fn verify(program: &Program) {
             );
         }
 
+        // Single forward-pass use-before-def check; sound only under the RPO
+        // block ordering documented on this fn. See the "Block ordering &
+        // dominance contract" doc above.
         let mut defined_regs: HashSet<Reg> = HashSet::new();
 
         for block in &func.blocks {

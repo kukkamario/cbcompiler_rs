@@ -24,8 +24,9 @@ use crate::source::{FileId, SourceMap};
 /// surfaced to the caller instead of being silently swallowed. Mapping
 /// from typed codespan-reporting errors to [`io::Error`] uses
 /// [`io::ErrorKind::InvalidInput`] for label-validation failures
-/// (caller bug) and [`io::ErrorKind::InvalidData`] for downstream
-/// codespan-reporting failures.
+/// (caller bug; produced by `validate_label`, not `emit`) and
+/// [`io::ErrorKind::InvalidData`] for downstream codespan-reporting
+/// failures (produced by `emit`'s non-`Io` arm).
 pub trait Renderer {
     /// Emit a single diagnostic. Implementations resolve spans against the
     /// supplied [`SourceMap`].
@@ -105,6 +106,14 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
 /// otherwise-renderable real error (FD-027). Genuine caller bugs — an inverted
 /// span, or an unknown *non-synthetic* `FileId` — still fail hard.
 fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
+    // All-builds backstop for the same `end >= start` invariant that
+    // [`Span::new`](crate::Span::new) only debug-asserts. Spans constructed
+    // via direct field syntax (or in release builds) reach here unchecked.
+    //
+    // Note: we trust `start`/`end` to land on `char` boundaries — unlike
+    // [`Source::offset_to_line_char_col`](crate::Source::offset_to_line_char_col),
+    // which floors mid-codepoint offsets, this does *not* reject a span whose
+    // bounds split a UTF-8 sequence. codespan-reporting tolerates such ranges.
     if label.span.end < label.span.start {
         let msg = format!(
             "invalid Span: end ({}) < start ({})",

@@ -1835,9 +1835,10 @@ impl<'a> Lowerer<'a> {
             VarRef::Local(id) => self.locals[id.0 as usize].ty.clone(),
             VarRef::Global(id) => self.globals[id.0 as usize].ty.clone(),
         };
-        // Direction-test constants (default step, the `0` compared against) must
-        // be emitted in the loop-variable type so all `For` IR operands agree —
-        // `check_for` coerces from/to/step to this type, so the loaded regs match.
+        // Constants synthesised below — the default step `1` (when `Step` is
+        // omitted) and the `0` of the direction test — must be emitted in the
+        // loop-variable type so all `For` IR operands agree; `check_for` coerces
+        // from/to/step to this type, so the loaded regs match.
         let var_is_float = var_ty == IrType::Float;
         let to_local = self.alloc_temp("@for_to", var_ty.clone());
         self.emit_void(

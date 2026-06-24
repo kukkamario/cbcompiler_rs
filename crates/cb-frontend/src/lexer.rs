@@ -46,9 +46,9 @@ const E_INVALID_DIGIT_SEPARATOR: DiagnosticCode = DiagnosticCode::new("E0105");
 const E_UNEXPECTED_CHAR: DiagnosticCode = DiagnosticCode::new("E0106");
 const E_MALFORMED_NUMBER: DiagnosticCode = DiagnosticCode::new("E0107");
 
-/// Maximum decimal digits that can fit a signed `i64` without overflow check
-/// short-circuiting. We use a stack scratch buffer for digit-underscore stripping
-/// sized generously enough for any reasonable literal.
+/// Size of the on-stack scratch buffer used to strip digit separators (`_`)
+/// before parsing. 64 bytes comfortably holds any literal whose magnitude
+/// fits the `u64` the lexer parses into; longer runs yield [`Overflow`].
 const DIGIT_SCRATCH: usize = 64;
 
 /// Marker returned by [`Lexer::append_stripped`] when a digit run exceeds
@@ -92,6 +92,9 @@ impl<'src> Lexer<'src> {
         self.bytes.get(self.pos as usize + offset).copied()
     }
 
+    /// Peek the next char. Requires `pos` to sit on a char boundary (panics
+    /// otherwise); the cursor only advances by whole chars/ASCII bytes, so this
+    /// holds for every in-tree caller.
     fn peek_char(&self) -> Option<char> {
         self.src[self.pos as usize..].chars().next()
     }
@@ -549,6 +552,8 @@ impl<'src> Lexer<'src> {
         // it, treat the state as if we just saw an underscore so a second
         // adjacent `_` is not re-diagnosed as "doubled".
         let mut last_was_underscore = suppress_leading_diag;
+        // In suppress mode the caller's already-diagnosed leading `_` is itself
+        // a bad separator, so the run is bad from the start — seed `bad_sep`.
         let mut bad_sep = suppress_leading_diag;
         // Leading underscore check (only when not suppressed; in suppress mode
         // the caller already handled the bad leading `_`).

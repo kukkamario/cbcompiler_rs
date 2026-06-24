@@ -2053,10 +2053,9 @@ impl<'t> Parser<'t> {
                                         "`Select` has more than one `Default` arm",
                                         Label::new(default_kw_span),
                                     )
-                                    .with_secondary(Label::with_message(
-                                        prev_span,
-                                        "first `Default` arm here",
-                                    )),
+                                    .with_secondary(
+                                        Label::with_message(prev_span, "first `Default` arm here"),
+                                    ),
                                 );
                             } else {
                                 first_default_span = Some(default_kw_span);
@@ -2784,7 +2783,12 @@ fn is_block_end_marker(kw: Kw) -> bool {
             | Kw::Forever
             | Kw::Case
             | Kw::Default
-            // `While` here is the closer of a `Repeat … While` block.
+            // `While` here is the closer of a `Repeat … While` block — the
+            // only construct that consumes a trailing `While`. `parse_repeat`
+            // passes `Kw::While` in its `closers`, so `parse_block_until`'s
+            // `!closers.contains` guard already excludes it from the
+            // parent-decide list (which lists Wend|Forever|Next|Else|ElseIf but
+            // deliberately omits While).
             | Kw::While
     )
 }

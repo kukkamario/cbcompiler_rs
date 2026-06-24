@@ -193,6 +193,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     }
 
     fn find_main(&self) -> Result<FuncId, InterpError> {
+        // Lowering appends synthetic `@main` last, after all runtime and
+        // user functions, so scanning from the end finds it immediately
+        // (skipping the large runtime block). Last-wins also lets the
+        // synthetic entry win over any stray user-named `@main`.
         for (i, decl) in self.program.func_table.iter().enumerate().rev() {
             if self.interner.resolve(decl.name) == "@main" {
                 return Ok(FuncId(i as u32));
@@ -565,7 +569,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let new_val = frame.registers[value.0 as usize].clone();
                 // Resolve index registers up front: the in-place walk below
                 // holds a mutable borrow of the root slot and cannot also read
-                // registers.
+                // registers. Index regs are integer-typed by sema, so
+                // `to_i64` is exact (a Float would truncate; see `to_i64`).
                 let mut resolved: Vec<RProj> = Vec::with_capacity(path.len());
                 for proj in path {
                     match proj {
@@ -624,6 +629,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             Some(e) => e,
                             None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
                         };
+                        // No sentinel guard needed (unlike `Previous`): the
+                        // sentinel is only ever a `prev` target. The first
+                        // real node's `prev` is the sentinel, but no node's
+                        // `next` points to it — the tail terminates with None.
                         match entry.next {
                             Some(next_id) => Ok(Value::TypeInstance(next_id)),
                             None => Ok(Value::Null),
@@ -645,6 +654,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             Some(e) => e,
                             None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
                         };
+                        // The first real node's `prev` is the head sentinel;
+                        // skip it so backward traversal yields Null at the
+                        // start rather than exposing the sentinel.
                         match entry.prev {
                             Some(prev_id)
                                 if self.heap.get(prev_id).is_some_and(|e| !e.is_sentinel) =>
@@ -697,6 +709,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::GetElement { array, indices } => {
                 let frame = self.call_stack.last().unwrap();
                 let arr_val = frame.registers[array.0 as usize].clone();
+                // Index regs are integer-typed by sema, so `to_i64` is exact
+                // (a Float would truncate; see `Value::to_i64`). Same for the
+                // flat-index and `Len` dim sites below.
                 let idx_vals: Vec<usize> = indices
                     .iter()
                     .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
@@ -792,7 +807,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 // Codepoint count of a UTF-8 string: every byte that is not a
                 // UTF-8 continuation byte (0b10xxxxxx) begins a new codepoint.
                 // Computed here in Rust as the reference impl; the future LLVM
-                // backend will instead emit a runtime char-length call.
+                // backend will instead emit a runtime char-length call — that
+                // call must compute the identical count or the backends diverge.
                 let frame = self.call_stack.last().unwrap();
                 let val = frame.registers[s.0 as usize].clone();
                 match val {
@@ -862,6 +878,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         let frame = self.call_stack.last().unwrap();
         let mut sizes = Vec::with_capacity(dims.len());
         for r in dims {
+            // Sema types dim registers as integers, so `to_i64` is exact here;
+            // a Float would truncate toward zero (see `Value::to_i64`).
             let n = frame.registers[r.0 as usize].to_i64();
             if n < 0 {
                 return Err(self.error_at(
@@ -1191,6 +1209,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // `-1.5 → -2`), not truncated toward zero, and a String is parsed as a
         // leading integer after trimming. The raw `Value::to_i64` helper
         // (truncating) stays for internal, non-language uses.
+        //
+        // Note the String→numeric asymmetry (see `Value::to_i64`/`to_f64`):
+        // converting to int parses a leading prefix (`"3x"` → 3) while
+        // converting to float requires a full parse (`"3x"` → 0.0).
         let i = self.value_to_int_cb(v);
         let f = v.to_f64();
 

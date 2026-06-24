@@ -53,6 +53,10 @@ impl Source {
     /// O(line length) because of the char-count walk.
     pub fn offset_to_line_char_col(&self, offset: u32) -> (u32, u32) {
         let (line1, byte_col) = self.line_index.offset_to_line_byte_col(offset);
+        // `offset_to_line_byte_col` always yields a line in `1..=line_count`, so
+        // the 0-based `line1 - 1` is in range for `line_byte_range`, which
+        // therefore returns `Some`. The two helpers share the same `LineIndex`,
+        // so they cannot disagree.
         let (line_start, _) = self
             .line_index
             .line_byte_range((line1 as usize) - 1)
@@ -99,6 +103,11 @@ impl SourceMap {
     /// text would otherwise be silently dropped, leaving diagnostics to render
     /// against stale source with no signal. Callers that legitimately want a
     /// fresh slot for the same name should use [`SourceMap::add_anonymous`].
+    ///
+    /// Cost: each call does an O(n) linear name scan (no name→id map), plus a
+    /// full-text compare on a name hit, so populating `n` distinct files is
+    /// O(n²). Fine for the handful of files a compile loads; revisit with a map
+    /// if that ever stops holding.
     ///
     /// # Panics
     ///
@@ -170,10 +179,12 @@ impl SourceMap {
 
 /// Maps byte offsets to (line, column) coordinates within a single source.
 ///
-/// `newline_offsets[i]` is the byte offset where line `i + 2` starts — i.e.
-/// the position immediately after the `i`-th line terminator. Line 1 always
-/// starts at offset `0`. `\r\n` is treated as one terminator (length 2);
-/// `\n` and bare `\r` are each length 1 terminators.
+/// Numbering: line *numbers* are 1-based (line 1, line 2, …); `newline_offsets`
+/// is a 0-based array. `newline_offsets[i]` (0-based index `i`) is the byte
+/// offset where 1-based line number `i + 2` starts — i.e. the position
+/// immediately after the `i`-th line terminator. The 1-based line 1 always
+/// starts at offset `0` and has no entry in the array. `\r\n` is treated as one
+/// terminator (length 2); `\n` and bare `\r` are each length 1 terminators.
 ///
 /// # Bare `\r` vs codespan-reporting
 ///
