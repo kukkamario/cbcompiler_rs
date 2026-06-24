@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cb_diagnostics::{CliRenderer, Renderer, Severity, SourceMap};
+use cb_diagnostics::{CliRenderer, Diagnostic, Renderer, Severity, SourceMap};
 use cb_frontend::ast_print;
 use cb_frontend::parser::ParseResult;
 use cb_frontend::{LexerOptions, parse, tokenize};
@@ -141,6 +141,29 @@ fn clamp_exit(code: i32) -> u8 {
     code.clamp(0, 255) as u8
 }
 
+/// Emit a batch of diagnostics to `stderr`, OR-ing whether any was an error
+/// into `had_error`. A renderer I/O failure is fatal: it is reported and
+/// returned as `Err(USAGE)` for the caller to propagate. Factored out so the
+/// catalog-independent (lex/parse) and catalog-dependent (sema) batches share
+/// one emit path even though they are now reported at different points.
+fn emit_diagnostics<'a>(
+    stderr: &mut CliRenderer<StandardStream>,
+    sources: &SourceMap,
+    had_error: &mut bool,
+    diags: impl IntoIterator<Item = &'a Diagnostic>,
+) -> Result<(), ExitCode> {
+    for d in diags {
+        if matches!(d.severity, Severity::Error) {
+            *had_error = true;
+        }
+        if let Err(e) = stderr.emit(d, sources) {
+            eprintln!("cb: failed to render diagnostic: {e}");
+            return Err(ExitCode::from(exit::USAGE));
+        }
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let Cli {
         backend: backend_arg,
@@ -183,34 +206,13 @@ fn main() -> ExitCode {
         diagnostics: parse_diags,
     } = parse(&tokens, &text, file);
 
-    // Load runtime function catalog from the C runtime library.
-    let runtime_catalog = match cb_runtime_sys::load_catalog() {
-        Ok(c) => c,
-        Err(msg) => {
-            eprintln!("cb: failed to load runtime catalog: {msg}");
-            return ExitCode::from(exit::USAGE);
-        }
-    };
-
-    // Run semantic analysis.
-    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &runtime_catalog);
-
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;
-    let all_diags = lex_diags
-        .iter()
-        .chain(parse_diags.iter())
-        .chain(sema_result.diagnostics.iter());
-    for d in all_diags {
-        if matches!(d.severity, Severity::Error) {
-            had_error = true;
-        }
-        if let Err(e) = stderr.emit(d, &sources) {
-            eprintln!("cb: failed to render diagnostic: {e}");
-            return ExitCode::from(exit::USAGE);
-        }
-    }
 
+    // The AST dump needs only the parsed arena — never the runtime catalog or
+    // semantic analysis — so emit it up front. This lets a dump-only build
+    // (`--no-default-features`, no runtime linked) inspect the AST even when
+    // the runtime catalog cannot be loaded (DR-R1).
     if dump_ast {
         println!("Program ({} top-level statements):", program.len());
         let mut buf = String::new();
@@ -219,6 +221,48 @@ fn main() -> ExitCode {
             ast_print::debug_print(&mut buf, &arena, id).expect("writing to String never fails");
             print!("{buf}");
         }
+    }
+
+    // Lex and parse diagnostics never depend on the runtime catalog; emit them
+    // before attempting the catalog load so they survive a catalog failure on
+    // the dump-only path below.
+    if let Err(code) = emit_diagnostics(
+        &mut stderr,
+        &sources,
+        &mut had_error,
+        lex_diags.iter().chain(parse_diags.iter()),
+    ) {
+        return code;
+    }
+
+    // Semantic analysis needs the runtime function catalog. The catalog is
+    // required to lower/run the program or to dump IR, but a pure `--dump-ast`
+    // does not need it — so a catalog-load failure is only fatal when the
+    // lowered IR is actually required (DR-R1). The AST is already printed.
+    let runtime_catalog = match cb_runtime_sys::load_catalog() {
+        Ok(c) => c,
+        Err(msg) => {
+            if dump_ast && !dump_ir {
+                return if had_error {
+                    ExitCode::from(1)
+                } else {
+                    ExitCode::SUCCESS
+                };
+            }
+            eprintln!("cb: failed to load runtime catalog: {msg}");
+            return ExitCode::from(exit::USAGE);
+        }
+    };
+
+    // Run semantic analysis.
+    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &runtime_catalog);
+    if let Err(code) = emit_diagnostics(
+        &mut stderr,
+        &sources,
+        &mut had_error,
+        sema_result.diagnostics.iter(),
+    ) {
+        return code;
     }
 
     // Lower to IR (only if no errors).

@@ -29,6 +29,19 @@ fn lf_line_endings() {
     assert_eq!(li.line_count(), 3);
 }
 
+/// Pin the `partition_point` boundary: a byte offset landing *on* a terminator
+/// is attributed to the line that terminator ends, with its in-line column —
+/// not folded onto the next line. The other LF tests only probe line *starts*,
+/// so this guards the `start <= clamped` comparison against off-by-one drift.
+#[test]
+fn terminator_byte_belongs_to_the_line_it_ends() {
+    // "ab\ncd": a0 b1 \n2 c3 d4. The '\n' is byte 2, column 2 of line 1.
+    let li = LineIndex::new("ab\ncd");
+    assert_eq!(li.offset_to_line_byte_col(1), (1, 1)); // 'b'
+    assert_eq!(li.offset_to_line_byte_col(2), (1, 2)); // the '\n' itself — still line 1
+    assert_eq!(li.offset_to_line_byte_col(3), (2, 0)); // 'c' — first byte of line 2
+}
+
 #[test]
 fn crlf_line_endings() {
     let li = LineIndex::new("a\r\nb\r\nc");

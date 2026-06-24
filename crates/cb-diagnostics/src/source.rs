@@ -293,5 +293,7 @@ impl LineIndex {
     }
 }
 
-#[cfg(test)]
-mod tests {}
+// Unit tests for `LineIndex` and `Source::offset_to_line_char_col` live in the
+// `tests/line_index.rs` integration suite (CRLF / bare-`\r` / LF terminators,
+// past-EOF clamping, multi-byte char columns, and FD-021 mid-codepoint
+// flooring), exercised against the public crate API rather than from here.

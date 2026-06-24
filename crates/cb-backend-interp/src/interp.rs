@@ -917,6 +917,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
+    /// Evaluate a binary op on two already-evaluated operand values.
+    ///
+    /// Invariant: sema coerces every non-shift `BinOp`'s operands to a common
+    /// `Int`/`Long`/`Float` (or `String`) before lowering (FD-035 /
+    /// cb_syntax.md §3.4), so well-formed IR never reaches the arithmetic arms
+    /// with a `Byte`/`Short` operand. We still widen `Byte`/`Short` to `Int`
+    /// here — mirroring the shift path below and `eval_unop` — so hand-written
+    /// IR and any future coercion slip stay consistent instead of tripping the
+    /// generic "type mismatch" fall-through (II-V26).
     fn eval_binop(
         &self,
         op: IrBinOp,
@@ -940,7 +949,19 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
 
         match (lhs, rhs) {
-            (Value::Int(a), Value::Int(b)) => self.int_binop(op, *a as i64, *b as i64, span, false),
+            // Byte/Short/Int all compute in 32-bit (Int) width per the invariant
+            // above: value_to_i64 widens each operand to i64, int_binop with
+            // wide=false truncates the result back to Int (matching §3.4).
+            (
+                Value::Byte(_) | Value::Short(_) | Value::Int(_),
+                Value::Byte(_) | Value::Short(_) | Value::Int(_),
+            ) => self.int_binop(
+                op,
+                self.value_to_i64(lhs),
+                self.value_to_i64(rhs),
+                span,
+                false,
+            ),
             (Value::Long(a), Value::Long(b)) => self.int_binop(op, *a, *b, span, true),
 
             (Value::Float(a), Value::Float(b)) => self.float_binop(op, *a, *b, span),
