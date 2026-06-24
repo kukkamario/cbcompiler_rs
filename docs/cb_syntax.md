@@ -176,8 +176,21 @@ Single-line strings use `"…"` and process C-style escapes:
 | `\r`     | carriage return                  |
 | `\t`     | tab                              |
 | `\0`     | null character                   |
-| `\xNN`   | byte from 2 hex digits           |
+| `\xNN`   | code point U+0000–U+00FF (2 hex digits) |
 | `\uNNNN` | Unicode code point (4 hex digits)|
+
+> **String model — Unicode code points, not bytes.** CoolBasic-rs strings are
+> sequences of **Unicode code points**: from CB code's point of view a string
+> behaves like a UTF-32 array (one element per code point), while the
+> implementation stores it as **valid UTF-8** internally. `Len`, `Mid`, `Left`,
+> `Right`, `Asc`/`Chr`, indexing, and every other string operation count and
+> address **code points**, never bytes. Consequently `\xNN` denotes the *code
+> point* U+00NN (e.g. `\xFF` is U+00FF, "ÿ"), exactly like `\u00NN` — it is **not**
+> a raw byte. This is a deliberate divergence from the original CoolBasic
+> runtime, whose strings were 8-bit byte strings (there `Len(Chr(255))` was 1;
+> here it is also 1, but the single element is the code point U+00FF, and the
+> string serialises to two UTF-8 bytes). Choosing Unicode semantics up front
+> avoids byte-vs-character ambiguity across the whole language and runtime.
 
 A literal newline inside a `"…"` string is a compile error — use `\n` or a multi-line string.
 

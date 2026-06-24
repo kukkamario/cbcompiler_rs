@@ -138,11 +138,12 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                 i += 2;
             }
             b'x' => {
-                // `\xNN`: parse the two following hex digits as a Unicode code
-                // point in [0, 0xFF]. The §1.6 table says "byte from 2 hex
-                // digits"; we encode the resulting code point as UTF-8 so the
-                // output stays a valid Rust `String`. Strict byte semantics
-                // can be revisited in a future FD if needed.
+                // `\xNN`: parse the two following hex digits as the Unicode code
+                // point U+00NN (range [0, 0xFF]), encoded as UTF-8. CoolBasic-rs
+                // strings are sequences of Unicode code points, not bytes
+                // (cb_syntax.md §1.6 "String model"), so `\xFF` is U+00FF — the
+                // same code point as `ÿ`, not the raw byte 0xFF. This is a
+                // deliberate divergence from the original byte-string runtime.
                 let hex_start = i + 2;
                 let hex_end = hex_start + 2;
                 if hex_end > bytes.len()
