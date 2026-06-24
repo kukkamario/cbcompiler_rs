@@ -1093,6 +1093,18 @@ impl<'a> Checker<'a> {
                                 ),
                                 Label::new(span),
                             ));
+                        } else {
+                            // Coerce each supplied argument to its parameter type,
+                            // recording implicit conversions and reporting
+                            // E0317/E0318 on mismatch — the same path runtime
+                            // commands and overloads already use. `take` lines the
+                            // supplied args up with their params positionally; any
+                            // trailing defaulted params receive no argument here.
+                            for (i, param) in params.iter().enumerate().take(arg_types.len()) {
+                                if arg_types[i] != param.ty {
+                                    self.coerce(args[i], &arg_types[i], &param.ty);
+                                }
+                            }
                         }
                         self.resolved_calls
                             .insert(call_id, ResolvedCall::UserDefined { name });
@@ -2907,6 +2919,46 @@ mod tests {
     fn pass2_function_wrong_arg_count_e0305() {
         let result = analyze_src(
             "Function add(a As Integer, b As Integer) As Integer\nReturn a + b\nEndFunction\nadd(1)\n",
+        );
+        assert_eq!(error_codes(&result), vec!["E0305"]);
+    }
+
+    #[test]
+    fn pass2_function_arg_type_mismatch_e0317() {
+        // A String argument to an Integer parameter has no conversion path:
+        // user-defined functions type-check their arguments just like runtime
+        // commands do.
+        let result = analyze_src(
+            "Function add(a As Integer, b As Integer) As Integer\nReturn a + b\nEndFunction\nDim s As String\nadd(s, 2)\n",
+        );
+        assert_eq!(error_codes(&result), vec!["E0317"]);
+    }
+
+    #[test]
+    fn pass2_function_arg_narrowing_e0318() {
+        // Passing a (non-literal) Integer to a Byte parameter narrows: warning,
+        // not error, mirroring assignment and runtime-command coercion.
+        let result = analyze_src(
+            "Function takes(a As Byte)\nEndFunction\nDim n As Integer\nn = 300\ntakes(n)\n",
+        );
+        assert_eq!(warning_codes(&result), vec!["E0318"]);
+    }
+
+    #[test]
+    fn pass2_function_arg_widening_ok() {
+        // Byte -> Integer is a widening conversion: accepted silently.
+        let result = analyze_src(
+            "Function takes(a As Integer)\nEndFunction\nDim b As Byte\ntakes(b)\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn pass2_function_arg_count_mismatch_skips_type_check() {
+        // When the argument count is already wrong, only E0305 is reported — we
+        // do not also emit per-argument type errors against mismatched params.
+        let result = analyze_src(
+            "Function add(a As Integer, b As Integer) As Integer\nReturn a + b\nEndFunction\nDim s As String\nadd(s)\n",
         );
         assert_eq!(error_codes(&result), vec!["E0305"]);
     }
