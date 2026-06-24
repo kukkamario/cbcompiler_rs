@@ -46,9 +46,9 @@ const E_INVALID_DIGIT_SEPARATOR: DiagnosticCode = DiagnosticCode::new("E0105");
 const E_UNEXPECTED_CHAR: DiagnosticCode = DiagnosticCode::new("E0106");
 const E_MALFORMED_NUMBER: DiagnosticCode = DiagnosticCode::new("E0107");
 
-/// Maximum decimal digits that can fit a signed `i64` without overflow check
-/// short-circuiting. We use a stack scratch buffer for digit-underscore stripping
-/// sized generously enough for any reasonable literal.
+/// Size of the on-stack scratch buffer used to strip digit separators (`_`)
+/// before parsing. 64 bytes comfortably holds any literal whose magnitude
+/// fits the `u64` the lexer parses into; longer runs yield [`Overflow`].
 const DIGIT_SCRATCH: usize = 64;
 
 /// Marker returned by [`Lexer::append_stripped`] when a digit run exceeds
@@ -92,6 +92,9 @@ impl<'src> Lexer<'src> {
         self.bytes.get(self.pos as usize + offset).copied()
     }
 
+    /// Peek the next char. Requires `pos` to sit on a char boundary (panics
+    /// otherwise); the cursor only advances by whole chars/ASCII bytes, so this
+    /// holds for every in-tree caller.
     fn peek_char(&self) -> Option<char> {
         self.src[self.pos as usize..].chars().next()
     }
@@ -236,7 +239,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn scan_newline(&mut self, start: u32) {
+    /// Consume one line terminator (`\r`, `\n`, or `\r\n`) if present.
+    fn consume_line_terminator(&mut self) {
         match self.peek_byte() {
             Some(b'\r') => {
                 self.bump_byte();
@@ -249,6 +253,10 @@ impl<'src> Lexer<'src> {
             }
             _ => {}
         }
+    }
+
+    fn scan_newline(&mut self, start: u32) {
+        self.consume_line_terminator();
         let span = self.current_span(start);
         self.push_token(TokenKind::Newline, span);
     }
@@ -263,18 +271,7 @@ impl<'src> Lexer<'src> {
         let is_continuation = matches!(self.peek_byte(), Some(b'\n') | Some(b'\r'));
         if is_continuation {
             // Consume the line terminator.
-            match self.peek_byte() {
-                Some(b'\r') => {
-                    self.bump_byte();
-                    if self.peek_byte() == Some(b'\n') {
-                        self.bump_byte();
-                    }
-                }
-                Some(b'\n') => {
-                    self.bump_byte();
-                }
-                _ => {}
-            }
+            self.consume_line_terminator();
             if self.opts.preserve_trivia {
                 let span = self.current_span(start);
                 self.push_token(TokenKind::Continuation, span);
@@ -399,21 +396,19 @@ impl<'src> Lexer<'src> {
                     saw_backslash = true;
                     self.bump_byte();
                     // Consume the next char of the escape (any char), if any.
-                    if self.peek_byte().is_some() {
-                        // Don't validate; that's the parser's job. But stop
-                        // before newline so a stray `\` doesn't swallow it.
-                        match self.peek_byte() {
-                            Some(b'\n') | Some(b'\r') => {
-                                // Treat as backslash-followed-by-newline; do
-                                // not consume. Fall through to the
-                                // post-loop diagnostic (distinct message
-                                // from plain newline-in-string).
-                                break;
-                            }
-                            _ => {
-                                self.bump_char();
-                            }
+                    // Don't validate; that's the parser's job. But stop before
+                    // newline so a stray `\` doesn't swallow it.
+                    match self.peek_byte() {
+                        Some(b'\n') | Some(b'\r') => {
+                            // Treat as backslash-followed-by-newline; do not
+                            // consume. Fall through to the post-loop diagnostic
+                            // (distinct message from plain newline-in-string).
+                            break;
                         }
+                        Some(_) => {
+                            self.bump_char();
+                        }
+                        None => {}
                     }
                 }
                 Some(b'"') => {
@@ -549,6 +544,8 @@ impl<'src> Lexer<'src> {
         // it, treat the state as if we just saw an underscore so a second
         // adjacent `_` is not re-diagnosed as "doubled".
         let mut last_was_underscore = suppress_leading_diag;
+        // In suppress mode the caller's already-diagnosed leading `_` is itself
+        // a bad separator, so the run is bad from the start — seed `bad_sep`.
         let mut bad_sep = suppress_leading_diag;
         // Leading underscore check (only when not suppressed; in suppress mode
         // the caller already handled the bad leading `_`).
@@ -582,8 +579,12 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
-        if last_was_underscore {
-            // Trailing underscore.
+        if last_was_underscore && self.pos > run_start {
+            // Trailing underscore — but only if this run actually consumed
+            // bytes. An empty run in suppress mode (e.g. `$_`) has
+            // `last_was_underscore` seeded `true` from the caller's already-
+            // diagnosed leading `_`; reporting it again as "trailing" would be a
+            // spurious second diagnostic for the same separator.
             let bad_span = Span::new(self.pos - 1, self.pos, self.file);
             self.diagnostics.push(Diagnostic::error(
                 E_INVALID_DIGIT_SEPARATOR,
@@ -639,6 +640,11 @@ impl<'src> Lexer<'src> {
         let mut is_float = false;
         let mut frac_lo = int_hi;
         let mut frac_hi = int_hi;
+        // `exp_marker_lo` is the offset of the `e`/`E`; captured during the
+        // forward scan so the float rebuild can slice `e[sign]<digits>` directly
+        // instead of back-scanning to relocate the marker. Only read when
+        // `exp_hi > exp_lo` (i.e. a complete exponent was scanned).
+        let mut exp_marker_lo = int_hi;
         let mut exp_lo = int_hi;
         let mut exp_hi = int_hi;
 
@@ -657,6 +663,7 @@ impl<'src> Lexer<'src> {
         }
         if matches!(self.peek_byte(), Some(b'e') | Some(b'E')) {
             is_float = true;
+            exp_marker_lo = self.pos; // offset of the `e`/`E`, before consuming it
             self.bump_byte(); // 'e'/'E'
             // Optional sign.
             if matches!(self.peek_byte(), Some(b'+') | Some(b'-')) {
@@ -723,27 +730,17 @@ impl<'src> Lexer<'src> {
                 }
             }
             if exp_hi > exp_lo {
-                // Find the 'e'/'E' and optional sign in the raw span — emit them as-is.
-                // The exponent region in source starts after 'e' (and sign). We
-                // need the original `e`/`E` and sign for `f64::from_str`. We
-                // know the exponent in source begins one byte before exp_lo
-                // (the sign) or two (e + sign), but simpler: look back in
-                // `self.bytes` from `exp_lo` to find the `e`/`E`.
-                let mut p = exp_lo as usize;
-                while p > 0 {
-                    let b = self.bytes[p - 1];
-                    if b == b'+' || b == b'-' {
-                        p -= 1;
-                        continue;
-                    }
-                    if b == b'e' || b == b'E' {
-                        p -= 1;
-                        break;
-                    }
-                    break;
-                }
-                // Append `e[sign]<digits>` from `p` to `exp_hi`, stripping underscores.
-                if Self::append_stripped(&mut buf, &mut n, &self.bytes[p..exp_hi as usize]).is_err()
+                // `f64::from_str` needs the original `e`/`E` and optional sign.
+                // The exponent's source bytes are contiguous from the marker
+                // captured during the forward scan (`e[sign]<digits>`), so slice
+                // straight from there — no back-scan needed. Underscores in the
+                // digit run are stripped by `append_stripped`.
+                if Self::append_stripped(
+                    &mut buf,
+                    &mut n,
+                    &self.bytes[exp_marker_lo as usize..exp_hi as usize],
+                )
+                .is_err()
                 {
                     self.report_malformed_number(span);
                     return;
@@ -833,22 +830,17 @@ impl<'src> Lexer<'src> {
         let span = self.current_span(start);
         let raw = &self.bytes[run_lo as usize..run_hi as usize];
         if raw.is_empty() {
-            // `$_` / `%_` form — the separator was diagnosed at the pre-check,
-            // but the deeper problem is that the literal has no digits at all.
-            // Emit the "expected digits" diagnostic too so the user doesn't
-            // have to guess what's wrong.
-            self.diagnostics.push(Diagnostic::error(
-                E_UNEXPECTED_CHAR,
-                format!("expected {label} digits after `{prefix_char}`"),
-                Label::new(span),
-            ));
+            // `$_` / `%_` form — a leading separator with no digits. The
+            // pre-check already emitted the single primary diagnostic (E0105,
+            // `InvalidDigitSeparator`), consistent with `$_ff`; just push the
+            // matching error token here (no second diagnostic).
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }
-        // Treat any separator issue (reported either by the caller pre-check
-        // or by `scan_digit_run`) as a signal to emit an error token.
-        let bad_sep_real = bad_sep_from_run || Self::has_separator_issue(raw);
-        if bad_sep_real {
+        // `scan_digit_run` already diagnosed (E0105) and flagged any
+        // leading/doubled/trailing separator in this run via `bad_sep_from_run`
+        // (the pre-check handles the pre-consumed leading `_`). Trust that flag.
+        if bad_sep_from_run {
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }
@@ -878,29 +870,6 @@ impl<'src> Lexer<'src> {
             Label::new(span),
         ));
         self.push_token(TokenKind::Error(LexErrorKind::MalformedNumber), span);
-    }
-
-    /// Returns true if `raw` (a digit run without prefix) has any separator
-    /// issue: leading, trailing, or doubled underscore.
-    fn has_separator_issue(raw: &[u8]) -> bool {
-        if raw.first() == Some(&b'_') {
-            return true;
-        }
-        if raw.last() == Some(&b'_') {
-            return true;
-        }
-        let mut prev_was_us = false;
-        for &b in raw {
-            if b == b'_' {
-                if prev_was_us {
-                    return true;
-                }
-                prev_was_us = true;
-            } else {
-                prev_was_us = false;
-            }
-        }
-        false
     }
 
     // ---------- identifiers / keywords / REM ----------
@@ -953,23 +922,11 @@ impl<'src> Lexer<'src> {
     fn scan_operator_or_punct(&mut self, start: u32) {
         let b = self.peek_byte().expect("scan_operator_or_punct: at EOF");
         match b {
-            b'+' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Plus), span);
-            }
-            b'-' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Minus), span);
-            }
+            b'+' => self.emit_single(start, TokenKind::Op(Op::Plus)),
+            b'-' => self.emit_single(start, TokenKind::Op(Op::Minus)),
             b'*' => self.emit_single(start, TokenKind::Op(Op::Star)),
             b'^' => self.emit_single(start, TokenKind::Op(Op::Caret)),
-            b'=' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Eq), span);
-            }
+            b'=' => self.emit_single(start, TokenKind::Op(Op::Eq)),
             b'<' => {
                 self.bump_byte();
                 match self.peek_byte() {

@@ -16,6 +16,7 @@ pub use ast::{
     Arena, BinOp, CaseArm, DimName, ElseIf, Expr, IfForm, NewKind, Node, NodeId, Param, Stmt,
     TypeExpr, UnOp,
 };
+pub use ast_print::debug_print;
 pub use lexer::{LexerOptions, tokenize};
 pub use parser::{ParseResult, parse};
 pub use span::{FileId, Span, SpanExt};

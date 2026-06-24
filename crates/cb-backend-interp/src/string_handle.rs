@@ -55,6 +55,8 @@ impl CbStringHandle {
         unsafe { (self.api.len)(self.ptr) }
     }
 
+    /// Note: `len()` is an FFI call, so this costs a runtime round-trip per
+    /// invocation — and it sits on the hot `Value::is_truthy` path.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

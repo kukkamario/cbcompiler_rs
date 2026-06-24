@@ -193,6 +193,8 @@ pub struct BasicBlock {
     pub id: BlockId,
     pub insts: Vec<Inst>,
     pub terminator: Option<Terminator>,
+    /// Source span of the terminator. Meaningful only once `terminator` is
+    /// `Some`; ignore it while the block is still open (terminator `None`).
     pub terminator_span: Span,
 }
 

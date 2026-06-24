@@ -1,8 +1,8 @@
 //! Main analysis engine — declaration collection (pass 1) and type checking (pass 2).
 
-use cb_diagnostics::{Diagnostic, FileId, Interner, Label, Span, Symbol};
+use cb_diagnostics::{Diagnostic, DiagnosticCode, FileId, Interner, Label, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt, TypeDeclKind};
-use cb_frontend::{Arena, BinOp, NodeId, Sigil, SpanExt, UnOp};
+use cb_frontend::{Arena, BinOp, DimName, NodeId, Sigil, SpanExt, UnOp};
 
 use crate::convert::{self, ConversionTable};
 use crate::diagnostics::*;
@@ -28,8 +28,6 @@ const INTRINSIC_PREVIOUS: &str = "previous";
 pub(crate) struct Checker<'a> {
     arena: &'a Arena,
     source: &'a str,
-    #[allow(dead_code)]
-    file_id: FileId,
     interner: Interner,
     symbols: SymbolTable,
     types: TypeTable,
@@ -62,7 +60,6 @@ impl<'a> Checker<'a> {
         arena: &'a Arena,
         program: &[NodeId],
         source: &'a str,
-        file_id: FileId,
         runtime_catalog: &RuntimeCatalog,
     ) -> SemaResult {
         let mut symbols = SymbolTable::new();
@@ -71,7 +68,6 @@ impl<'a> Checker<'a> {
         let mut checker = Checker {
             arena,
             source,
-            file_id,
             interner: Interner::new(),
             symbols,
             types: TypeTable::new(),
@@ -107,6 +103,55 @@ impl<'a> Checker<'a> {
     fn intern_span(&mut self, span: Span) -> Symbol {
         let text = span.slice(self.source);
         self.interner.intern(text)
+    }
+
+    /// Push an error diagnostic with a single primary label at `span`.
+    fn err(&mut self, code: DiagnosticCode, message: impl Into<String>, span: Span) {
+        self.diagnostics
+            .push(Diagnostic::error(code, message, Label::new(span)));
+    }
+
+    /// Emit an `E_TYPE_MISMATCH` "<what> must be an integer" diagnostic at `span`
+    /// unless `ty` is already integer or an error type (errors don't cascade).
+    fn expect_integer(&mut self, ty: &Type, span: Span, what: &str) {
+        if !ty.is_integer() && !ty.is_error() {
+            self.err(E_TYPE_MISMATCH, format!("{what} must be an integer"), span);
+        }
+    }
+
+    /// Render a `Type` as a human-readable, interner-aware name for diagnostics.
+    ///
+    /// `Type` stores `Symbol`s for named types, so a bare `Display`/`Debug`
+    /// would leak `Symbol(n)`. This resolves those symbols against the interner
+    /// instead: primitives print as `Int`/`String`/etc., named types as their
+    /// source name, and arrays as `Elem[]` (one bracket pair per rank).
+    fn type_name(&self, ty: &Type) -> String {
+        match ty {
+            Type::Byte => "Byte".to_string(),
+            Type::Short => "Short".to_string(),
+            Type::Int => "Int".to_string(),
+            Type::Long => "Long".to_string(),
+            Type::Float => "Float".to_string(),
+            Type::String => "String".to_string(),
+            Type::Array { elem, rank } => {
+                // `Int[]`, `Int[,]`, `Int[,,]`, … — one comma fewer than rank.
+                let brackets = format!("[{}]", ",".repeat((*rank).saturating_sub(1) as usize));
+                format!("{}{brackets}", self.type_name(elem))
+            }
+            Type::TypeRef { name } | Type::StructVal { name } | Type::RuntimeType { name } => {
+                self.interner.resolve(*name).to_string()
+            }
+            Type::FnPtr { params, ret } => {
+                let params: Vec<String> = params.iter().map(|p| self.type_name(p)).collect();
+                match ret {
+                    Some(r) => format!("({}) -> {}", params.join(", "), self.type_name(r)),
+                    None => format!("({})", params.join(", ")),
+                }
+            }
+            Type::Null => "Null".to_string(),
+            Type::Void => "Void".to_string(),
+            Type::Error => "<error>".to_string(),
+        }
     }
 
     fn intern_ident(&mut self, name_span: Span, _sigil: Option<Sigil>) -> Symbol {
@@ -267,7 +312,10 @@ impl<'a> Checker<'a> {
             cb_ir::types::IrType::String => Type::String,
             cb_ir::types::IrType::Void => Type::Void,
             cb_ir::types::IrType::RuntimeType(name) => {
-                let sym = self.interner.intern(&name.to_lowercase());
+                // Intern the catalog's original spelling. The interner folds
+                // case-insensitively (FD-026), so lowercasing is redundant for
+                // matching and would make diagnostics echo a lowercased name.
+                let sym = self.interner.intern(name);
                 Type::RuntimeType { name: sym }
             }
             _ => Type::Error,
@@ -293,7 +341,8 @@ impl<'a> Checker<'a> {
         let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
 
         for td in &catalog.types {
-            let sym = self.interner.intern(&td.name.to_lowercase());
+            // Original spelling, not lowercased — see `ir_type_to_sema`.
+            let sym = self.interner.intern(&td.name);
             let decl = Declaration {
                 kind: DeclKind::RuntimeTypeDef,
                 ty: Type::RuntimeType { name: sym },
@@ -428,14 +477,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Walk into statement bodies recursively to collect labels in the given scope.
-    /// Also records which For loop NodeIds contain each label for Goto-into-For checking.
-    /// Skips Function bodies (they have their own scope).
+    /// Hoist `Const` declarations out of nested statement bodies (If/loops/Select)
+    /// into the given scope, so references resolve regardless of block nesting
+    /// (§4.2 has no block scoping). Skips Function bodies (their own scope).
     fn collect_consts_recursive(&mut self, id: NodeId, scope: ScopeId) {
         match self.arena[id].clone() {
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 is_global,
                 ..
@@ -667,8 +715,11 @@ impl<'a> Checker<'a> {
         let mut field_infos = Vec::with_capacity(fields.len());
         for &fid in fields {
             if let Node::Stmt(Stmt::FieldDecl {
-                name_span: fname_span,
-                sigil,
+                name:
+                    DimName {
+                        name_span: fname_span,
+                        sigil,
+                    },
                 ty,
             }) = &self.arena[fid]
             {
@@ -941,17 +992,18 @@ impl<'a> Checker<'a> {
         if lty.is_error() || rty.is_error() {
             return Type::Error;
         }
-        let result_ty = types::binary_result_type(op, &lty, &rty).unwrap_or_else(|| {
-            self.diagnostics.push(Diagnostic::error(
-                E_TYPE_MISMATCH,
-                format!(
-                    "operator `{:?}` cannot be applied to `{:?}` and `{:?}`",
-                    op, lty, rty
-                ),
-                Label::new(span),
-            ));
-            Type::Error
-        });
+        let result_ty = match types::binary_result_type(op, &lty, &rty) {
+            Some(t) => t,
+            None => {
+                let (lname, rname) = (self.type_name(&lty), self.type_name(&rty));
+                self.err(
+                    E_TYPE_MISMATCH,
+                    format!("operator `{op:?}` cannot be applied to `{lname}` and `{rname}`"),
+                    span,
+                );
+                Type::Error
+            }
+        };
         if !result_ty.is_error() && !matches!(op, BinOp::Shl | BinOp::Shr | BinOp::Sar) {
             let operand_ty = match op {
                 BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
@@ -979,14 +1031,18 @@ impl<'a> Checker<'a> {
         if oty.is_error() {
             return Type::Error;
         }
-        types::unary_result_type(op, &oty).unwrap_or_else(|| {
-            self.diagnostics.push(Diagnostic::error(
-                E_TYPE_MISMATCH,
-                format!("operator `{op:?}` cannot be applied to `{oty:?}`"),
-                Label::new(span),
-            ));
-            Type::Error
-        })
+        match types::unary_result_type(op, &oty) {
+            Some(t) => t,
+            None => {
+                let oname = self.type_name(&oty);
+                self.err(
+                    E_TYPE_MISMATCH,
+                    format!("operator `{op:?}` cannot be applied to `{oname}`"),
+                    span,
+                );
+                Type::Error
+            }
+        }
     }
 
     fn check_call(&mut self, call_id: NodeId, callee: NodeId, args: &[NodeId], span: Span) -> Type {
@@ -1108,11 +1164,12 @@ impl<'a> Checker<'a> {
         }
 
         // Not a callable type.
-        self.diagnostics.push(Diagnostic::error(
+        let ty_name = self.type_name(&callee_ty);
+        self.err(
             E_CALL_NON_FUNCTION,
-            format!("cannot call value of type `{callee_ty:?}`"),
-            Label::new(span),
-        ));
+            format!("cannot call value of type `{ty_name}`"),
+            span,
+        );
         Type::Error
     }
 
@@ -1202,40 +1259,38 @@ impl<'a> Checker<'a> {
         match cb_diagnostics::fold(name).as_str() {
             INTRINSIC_LEN => {
                 if args.is_empty() || args.len() > 2 {
-                    self.diagnostics.push(Diagnostic::error(
+                    self.err(
                         E_WRONG_ARG_COUNT,
                         format!("Len expects 1 or 2 arguments, got {}", args.len()),
-                        Label::new(span),
-                    ));
+                        span,
+                    );
                     return Some(Type::Error);
                 }
                 let arg0_ty = self.check_expr(args[0]);
                 if matches!(arg0_ty, Type::String) {
                     // Len(s$) — codepoint length of a string. No dimension arg.
                     if args.len() == 2 {
-                        self.diagnostics.push(Diagnostic::error(
+                        self.err(
                             E_WRONG_ARG_COUNT,
                             "Len of a string takes exactly 1 argument",
-                            Label::new(span),
-                        ));
+                            span,
+                        );
                     }
                 } else {
                     if !matches!(arg0_ty, Type::Array { .. }) && !arg0_ty.is_error() {
-                        self.diagnostics.push(Diagnostic::error(
+                        self.err(
                             E_TYPE_MISMATCH,
                             "first argument to Len must be an array or a string",
-                            Label::new(self.arena.span_of(args[0])),
-                        ));
+                            self.arena.span_of(args[0]),
+                        );
                     }
                     if args.len() == 2 {
                         let dim_ty = self.check_expr(args[1]);
-                        if !dim_ty.is_integer() && !dim_ty.is_error() {
-                            self.diagnostics.push(Diagnostic::error(
-                                E_TYPE_MISMATCH,
-                                "second argument to Len must be an integer",
-                                Label::new(self.arena.span_of(args[1])),
-                            ));
-                        }
+                        self.expect_integer(
+                            &dim_ty,
+                            self.arena.span_of(args[1]),
+                            "second argument to Len",
+                        );
                     }
                 }
                 Some(Type::Int)
@@ -1342,13 +1397,7 @@ impl<'a> Checker<'a> {
         // Index operands must be integers (matching `check_new`/`check_redim`).
         for &i in indices {
             let idx_ty = self.check_expr(i);
-            if !idx_ty.is_integer() && !idx_ty.is_error() {
-                self.diagnostics.push(Diagnostic::error(
-                    E_TYPE_MISMATCH,
-                    "array index must be an integer",
-                    Label::new(self.arena.span_of(i)),
-                ));
-            }
+            self.expect_integer(&idx_ty, self.arena.span_of(i), "array index");
         }
 
         if arr_ty.is_error() {
@@ -1357,23 +1406,24 @@ impl<'a> Checker<'a> {
 
         if let Type::Array { elem, rank } = &arr_ty {
             if indices.len() != *rank as usize {
-                self.diagnostics.push(Diagnostic::error(
+                self.err(
                     E_RANK_MISMATCH,
                     format!(
                         "array has {} dimension(s), but {} index/indices provided",
                         rank,
                         indices.len()
                     ),
-                    Label::new(span),
-                ));
+                    span,
+                );
             }
             *elem.clone()
         } else {
-            self.diagnostics.push(Diagnostic::error(
+            let ty_name = self.type_name(&arr_ty);
+            self.err(
                 E_INDEX_NON_ARRAY,
-                format!("cannot index value of type `{arr_ty:?}`"),
-                Label::new(span),
-            ));
+                format!("cannot index value of type `{ty_name}`"),
+                span,
+            );
             Type::Error
         }
     }
@@ -1397,11 +1447,12 @@ impl<'a> Checker<'a> {
                     _ => None,
                 }),
             _ => {
-                self.diagnostics.push(Diagnostic::error(
+                let ty_name = self.type_name(&target_ty);
+                self.err(
                     E_FIELD_ON_NON_TYPE,
-                    format!("cannot access fields on `{target_ty:?}`"),
-                    Label::new(span),
-                ));
+                    format!("cannot access fields on `{ty_name}`"),
+                    span,
+                );
                 return Type::Error;
             }
         };
@@ -1412,11 +1463,11 @@ impl<'a> Checker<'a> {
                     return f.ty.clone();
                 }
             }
-            self.diagnostics.push(Diagnostic::error(
+            self.err(
                 E_NO_SUCH_FIELD,
                 format!("no field `{}` on type", self.interner.resolve(field_name)),
-                Label::new(name_span),
-            ));
+                name_span,
+            );
             Type::Error
         } else {
             Type::Error
@@ -1427,30 +1478,57 @@ impl<'a> Checker<'a> {
         match kind {
             cb_frontend::NewKind::Type(type_expr_id) => {
                 let ty = self.resolve_type_expr(*type_expr_id);
-                if let Type::TypeRef { .. } = &ty {
-                    ty
-                } else if ty.is_error() {
-                    Type::Error
-                } else {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_TYPE_MISMATCH,
-                        "New requires a Type name",
-                        Label::new(span),
-                    ));
-                    Type::Error
+                match &ty {
+                    // `New T` allocates a heap `Type` node and threads it into
+                    // T's linked list — only user-defined `Type … EndType`
+                    // records qualify (cb_syntax.md §3.2/§7.4).
+                    Type::TypeRef { .. } => ty,
+                    Type::Error => Type::Error,
+                    // A value-type `Struct` is allocated in place on
+                    // declaration; it has no `New`/`Delete` and is never heap
+                    // allocated (cb_syntax.md §3.3 "Struct … EndStruct").
+                    Type::StructVal { .. } => {
+                        let name = self.type_name(&ty);
+                        self.err(
+                            E_TYPE_MISMATCH,
+                            format!(
+                                "`New` requires a user-defined Type; `{name}` is a Struct, \
+                                 which is a value type allocated in place (it has no `New`)"
+                            ),
+                            span,
+                        );
+                        Type::Error
+                    }
+                    // Opaque runtime handles are created and destroyed by the
+                    // runtime library, never with `New` (cb_syntax.md §3.5).
+                    Type::RuntimeType { .. } => {
+                        let name = self.type_name(&ty);
+                        self.err(
+                            E_TYPE_MISMATCH,
+                            format!(
+                                "`New` requires a user-defined Type; `{name}` is a built-in \
+                                 runtime type whose handles are managed by the runtime library"
+                            ),
+                            span,
+                        );
+                        Type::Error
+                    }
+                    _ => {
+                        let name = self.type_name(&ty);
+                        self.err(
+                            E_TYPE_MISMATCH,
+                            format!("`New` requires a user-defined Type name, got `{name}`"),
+                            span,
+                        );
+                        Type::Error
+                    }
                 }
             }
             cb_frontend::NewKind::Array { elem, dims } => {
                 let elem_ty = self.resolve_type_expr(*elem);
                 for &d in dims {
                     let dty = self.check_expr(d);
-                    if !dty.is_integer() && !dty.is_error() {
-                        self.diagnostics.push(Diagnostic::error(
-                            E_TYPE_MISMATCH,
-                            "array dimension must be an integer",
-                            Label::new(self.arena.span_of(d)),
-                        ));
-                    }
+                    self.expect_integer(&dty, self.arena.span_of(d), "array dimension");
                 }
                 Type::Array {
                     elem: Box::new(elem_ty),
@@ -1516,8 +1594,7 @@ impl<'a> Checker<'a> {
                 is_global: true, ..
             }) => {}
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 value,
                 ..
             }) => {
@@ -1611,8 +1688,8 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Return { value }) => {
                 self.check_return(value, self.arena.span_of(id));
             }
-            Node::Stmt(Stmt::Goto { label_span }) => {
-                self.check_goto(label_span);
+            Node::Stmt(Stmt::Goto { name_span }) => {
+                self.check_goto(name_span);
             }
             Node::Stmt(Stmt::Delete { operand }) => {
                 self.check_delete(id, operand);
@@ -1633,7 +1710,7 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Break { count }) => {
                 // `Break N` must have at least N enclosing loops; a `Select`
                 // does not count (Break never targets a Select).
-                let n = count.unwrap_or(1).max(1) as usize;
+                let n = count.map_or(1, |c| c.get()) as usize;
                 let loops = self
                     .control_stack
                     .iter()
@@ -1691,28 +1768,31 @@ impl<'a> Checker<'a> {
                     if let Some((min, max)) = convert::int_range(to)
                         && (val < min || val > max)
                     {
-                        self.diagnostics.push(Diagnostic::error(
+                        let to_name = self.type_name(to);
+                        self.err(
                             E_LITERAL_OVERFLOW,
-                            format!("integer literal {val} is out of range for type `{to:?}`"),
-                            Label::new(self.arena.span_of(value_node)),
-                        ));
+                            format!("integer literal {val} is out of range for type `{to_name}`"),
+                            self.arena.span_of(value_node),
+                        );
                         return false;
                     }
                     return true;
                 }
+                let (from_name, to_name) = (self.type_name(from), self.type_name(to));
                 self.diagnostics.push(Diagnostic::warning(
                     E_NARROWING_CONVERSION,
-                    format!("implicit narrowing conversion from `{from:?}` to `{to:?}`"),
+                    format!("implicit narrowing conversion from `{from_name}` to `{to_name}`"),
                     Label::new(self.arena.span_of(value_node)),
                 ));
             }
             true
         } else {
-            self.diagnostics.push(Diagnostic::error(
+            let (from_name, to_name) = (self.type_name(from), self.type_name(to));
+            self.err(
                 E_CANNOT_CONVERT,
-                format!("cannot implicitly convert `{from:?}` to `{to:?}`"),
-                Label::new(self.arena.span_of(value_node)),
-            ));
+                format!("cannot implicitly convert `{from_name}` to `{to_name}`"),
+                self.arena.span_of(value_node),
+            );
             false
         }
     }
@@ -1996,11 +2076,12 @@ impl<'a> Checker<'a> {
     fn check_condition(&mut self, cond: NodeId) {
         let cty = self.check_expr(cond);
         if !cty.is_error() && !cty.is_numeric() {
-            self.diagnostics.push(Diagnostic::error(
+            let ty_name = self.type_name(&cty);
+            self.err(
                 E_TYPE_MISMATCH,
-                format!("condition must be numeric, got `{cty:?}`"),
-                Label::new(self.arena.span_of(cond)),
-            ));
+                format!("condition must be numeric, got `{ty_name}`"),
+                self.arena.span_of(cond),
+            );
         }
     }
 
@@ -2329,11 +2410,12 @@ impl<'a> Checker<'a> {
     fn check_delete(&mut self, stmt_id: NodeId, operand: NodeId) {
         let op_ty = self.check_expr(operand);
         if !op_ty.is_error() && !matches!(op_ty, Type::TypeRef { .. }) {
-            self.diagnostics.push(Diagnostic::error(
+            let ty_name = self.type_name(&op_ty);
+            self.err(
                 E_DELETE_NON_TYPEREF,
-                format!("Delete requires a Type reference, got `{op_ty:?}`"),
-                Label::new(self.arena.span_of(operand)),
-            ));
+                format!("Delete requires a Type reference, got `{ty_name}`"),
+                self.arena.span_of(operand),
+            );
         }
         // Classify lvalue vs rvalue. Only a plain variable is an lvalue delete:
         // it has a slot to rewind to `prev` and mark deleted (cb_syntax.md
@@ -2355,13 +2437,7 @@ impl<'a> Checker<'a> {
         self.resolve_type_expr(elem_ty_node);
         for &d in dims {
             let dty = self.check_expr(d);
-            if !dty.is_integer() && !dty.is_error() {
-                self.diagnostics.push(Diagnostic::error(
-                    E_TYPE_MISMATCH,
-                    "Redim dimension must be an integer",
-                    Label::new(self.arena.span_of(d)),
-                ));
-            }
+            self.expect_integer(&dty, self.arena.span_of(d), "Redim dimension");
         }
     }
 }
@@ -4137,5 +4213,91 @@ mod tests {
             "Dim x As Int\nx = 1\nSelect x\n  Case 1\n    Continue\n  Case 2\n    x = 2\nEnd Select\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // ── diagnostic type-name rendering (Bundle 6: S-L5 / S-L4) ──────────
+
+    /// Return the message of the first diagnostic carrying `code`, if any.
+    fn message_for(result: &crate::SemaResult, code: &str) -> Option<String> {
+        result
+            .diagnostics
+            .iter()
+            .find(|d| d.code.as_ref().map(|c| c.as_str()) == Some(code))
+            .map(|d| d.message.clone())
+    }
+
+    #[test]
+    fn field_access_on_non_type_renders_resolved_name_no_symbol() {
+        // S-L5: field access on a non-Type value (an Int here) must report the
+        // human type name ("Int"), never the debug `Symbol(n)` form.
+        let result = analyze_src("Dim x As Int\nx = 1\nx.foo = 2\n");
+        let msg = message_for(&result, "E0309")
+            .unwrap_or_else(|| panic!("expected E0309, got {:?}", error_codes(&result)));
+        assert!(msg.contains("Int"), "message should name the type: {msg}");
+        assert!(
+            !msg.contains("Symbol("),
+            "message must not leak Symbol(n): {msg}"
+        );
+    }
+
+    #[test]
+    fn index_on_non_array_renders_resolved_name_no_symbol() {
+        // S-L5: indexing a non-array value reports the human type name.
+        let result = analyze_src("Dim x As Int\nx = 1\nPrint x[0]\n");
+        let msg = message_for(&result, "E0306")
+            .unwrap_or_else(|| panic!("expected E0306, got {:?}", error_codes(&result)));
+        assert!(msg.contains("Int"), "message should name the type: {msg}");
+        assert!(
+            !msg.contains("Symbol("),
+            "message must not leak Symbol(n): {msg}"
+        );
+    }
+
+    #[test]
+    fn new_on_struct_is_specific() {
+        // S-L4: `New` on a value-type Struct names it as a Struct, not a generic
+        // "requires a Type name", and renders the resolved name (no Symbol(n)).
+        let result = analyze_src("Struct Vec2\nField x As Float\nEndStruct\nDim v\nv = New Vec2\n");
+        let msg = message_for(&result, "E0301")
+            .unwrap_or_else(|| panic!("expected E0301, got {:?}", error_codes(&result)));
+        assert!(
+            msg.contains("Vec2"),
+            "message should name the struct: {msg}"
+        );
+        assert!(msg.contains("Struct"), "message should say Struct: {msg}");
+        assert!(
+            !msg.contains("Symbol("),
+            "message must not leak Symbol(n): {msg}"
+        );
+    }
+
+    #[test]
+    fn new_on_runtime_type_is_specific() {
+        // S-L4: `New` on an opaque runtime handle type reports that it is a
+        // built-in runtime type, using the resolved name.
+        let file = FileId(0);
+        let src = "Dim h\nh = New Image\n";
+        let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
+        let parsed = parse(&tokens, src, file);
+        let catalog = crate::RuntimeCatalog {
+            types: vec![crate::RuntimeTypeDesc {
+                name: "Image".to_string(),
+                tag: 7,
+            }],
+            functions: Vec::new(),
+            constants: Vec::new(),
+        };
+        let result = analyze(&parsed.arena, &parsed.program, src, file, &catalog);
+        let msg = message_for(&result, "E0301")
+            .unwrap_or_else(|| panic!("expected E0301, got {:?}", error_codes(&result)));
+        assert!(msg.contains("Image"), "message should name the type: {msg}");
+        assert!(
+            msg.contains("runtime type"),
+            "message should say runtime type: {msg}"
+        );
+        assert!(
+            !msg.contains("Symbol("),
+            "message must not leak Symbol(n): {msg}"
+        );
     }
 }

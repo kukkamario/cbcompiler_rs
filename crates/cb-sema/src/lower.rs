@@ -286,6 +286,9 @@ impl<'a> Lowerer<'a> {
         self.context_stack.clear();
         self.label_blocks.clear();
         self.next_temp = 0;
+        // `blocks` is now empty; clear the stale id. Callers must `fresh_block()`
+        // + `switch_to()` before emitting into `current_block`.
+        self.current_block = BlockId(0);
     }
 
     fn current_block_is_terminated(&self) -> bool {
@@ -525,11 +528,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_function_def(&mut self, id: NodeId) {
         let Node::Stmt(Stmt::Function {
-            name_span,
-            return_sigil: _,
-            params: _,
-            return_ty: _,
-            body,
+            name_span, body, ..
         }) = self.arena[id].clone()
         else {
             return;
@@ -833,9 +832,8 @@ impl<'a> Lowerer<'a> {
 
             Node::Expr(Expr::New(kind)) => match kind {
                 NewKind::Type(_type_expr_id) => {
-                    let ty = self.types.get(id).cloned().unwrap_or(Type::Void);
-                    let type_def = match &ty {
-                        Type::TypeRef { name } => self.type_def_map.get(name).copied(),
+                    let type_def = match self.types.get(id) {
+                        Some(Type::TypeRef { name }) => self.type_def_map.get(name).copied(),
                         _ => None,
                     };
                     match type_def {
@@ -844,7 +842,11 @@ impl<'a> Lowerer<'a> {
                             // Sema resolves `New T` to a known TypeRef; this only
                             // fires on degenerate/already-errored input. Emit a
                             // null rather than indexing a fabricated key.
-                            debug_assert!(false, "New Type lowered with unresolved type {ty:?}");
+                            debug_assert!(
+                                false,
+                                "New Type lowered with unresolved type {:?}",
+                                self.types.get(id)
+                            );
                             self.emit(InstKind::ConstNull, span)
                         }
                     }
@@ -1282,6 +1284,11 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::ExprStmt { expr }) => {
                 // A bare identifier in statement position that resolves to a
                 // function is a 0-arg call (CoolBasic subroutine call syntax).
+                // Callee resolution is duplicated here rather than delegated to
+                // `lower_call`: for an ambiguous `OverloadSet` (multiple zero-arg
+                // variants) sema records no `resolved_calls` entry, so `lower_call`
+                // would fall through to its `func_id_map[&name]` lookup and panic.
+                // This arm instead picks the first zero-param variant.
                 if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
                     let name = self.intern_ident(*name_span, *sigil);
                     if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
@@ -1447,8 +1454,8 @@ impl<'a> Lowerer<'a> {
                 }
                 self.switch_to(label_bb);
             }
-            Node::Stmt(Stmt::Goto { label_span }) => {
-                let name = self.intern_span(label_span);
+            Node::Stmt(Stmt::Goto { name_span }) => {
+                let name = self.intern_span(name_span);
                 let target = self.label_blocks.get(&name).copied().unwrap_or_else(|| {
                     let bb = self.fresh_block();
                     self.label_blocks.insert(name, bb);
@@ -1457,7 +1464,7 @@ impl<'a> Lowerer<'a> {
                 self.terminate(Terminator::Goto(target), self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Break { count }) => {
-                let n = count.unwrap_or(1) as usize;
+                let n = count.map_or(1, |c| c.get()) as usize;
                 let mut loops_found = 0usize;
                 let mut exit_block = None;
                 for ctx in self.context_stack.iter().rev() {
@@ -1835,9 +1842,10 @@ impl<'a> Lowerer<'a> {
             VarRef::Local(id) => self.locals[id.0 as usize].ty.clone(),
             VarRef::Global(id) => self.globals[id.0 as usize].ty.clone(),
         };
-        // Direction-test constants (default step, the `0` compared against) must
-        // be emitted in the loop-variable type so all `For` IR operands agree —
-        // `check_for` coerces from/to/step to this type, so the loaded regs match.
+        // Constants synthesised below — the default step `1` (when `Step` is
+        // omitted) and the `0` of the direction test — must be emitted in the
+        // loop-variable type so all `For` IR operands agree; `check_for` coerces
+        // from/to/step to this type, so the loaded regs match.
         let var_is_float = var_ty == IrType::Float;
         let to_local = self.alloc_temp("@for_to", var_ty.clone());
         self.emit_void(

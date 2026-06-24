@@ -9,6 +9,8 @@
 //!   could derive `Eq` if a use case ever wants it. `Eq` is not currently
 //!   derived because no caller needs it and `PartialEq` is sufficient.
 
+use std::num::NonZeroU32;
+
 use crate::span::Span;
 use crate::token::{FloatBits, Kw, Sigil, StrLitKind};
 
@@ -43,7 +45,8 @@ impl Arena {
         id
     }
 
-    /// Span of the node with this id.
+    /// Span of the node with this id. `id` must come from this arena (see the
+    /// [`Index`](std::ops::Index) impl); an out-of-range id panics.
     pub fn span_of(&self, id: NodeId) -> Span {
         self.spans[id.0 as usize]
     }
@@ -59,6 +62,12 @@ impl Arena {
     }
 }
 
+/// A `NodeId` is valid only for the `Arena` that produced it (via [`alloc`]);
+/// indexing with an id from another arena or out of range panics. The AST is
+/// immutable after parsing, so a once-valid id stays valid for that arena's
+/// lifetime.
+///
+/// [`alloc`]: Arena::alloc
 impl std::ops::Index<NodeId> for Arena {
     type Output = Node;
 
@@ -80,6 +89,8 @@ pub enum Node {
 /// Expression nodes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
+    /// Integer literal stored as unsigned magnitude; sema range-checks it
+    /// against the inferred target type (mirrors `TokenKind::IntLit`).
     IntLit(u64),
     FloatLit(FloatBits),
     NullLit,
@@ -110,14 +121,23 @@ pub enum Expr {
     },
     Field {
         target: NodeId,
-        /// Bare-name span of the field (sigil byte excluded, if any). FD-004
-        /// #12: previously a full `Expr::Ident` node was allocated for this
+        /// Bare-name span of the field (sigil byte excluded, if any). A sigil
+        /// at the access site (`player\x$`) is accepted by the parser but
+        /// ignored — only its byte is trimmed from `name_span`; unlike
+        /// `Expr::Ident`/`FieldDecl`, no sigil is retained here. FD-004 #12:
+        /// previously a full `Expr::Ident` node was allocated for this
         /// position to share machinery with regular identifier exprs. The
         /// span-only form matches every other declaration site (e.g.
         /// `DimName::name_span`, `Stmt::FieldDecl::name_span`) and avoids an
         /// allocation per `.field` access in deep chains.
         name_span: Span,
     },
+    /// A parenthesized expression `(inner)`. Kept as an explicit node for span
+    /// and round-trip fidelity (it surfaces in `ast_print`); it carries no
+    /// semantic information — `(e)` has the same type and value as `e`. Every
+    /// consumer must therefore unwrap it: value/place lowering
+    /// (`cb-sema/src/lower.rs`), type checking, const-eval, and lvalue checks
+    /// (`cb-sema/src/check.rs`) all delegate straight to `inner`.
     Paren {
         inner: NodeId,
     },
@@ -129,7 +149,13 @@ pub enum Expr {
 #[derive(Clone, Debug, PartialEq)]
 pub enum NewKind {
     Type(NodeId),
-    Array { elem: NodeId, dims: Vec<NodeId> },
+    /// `dims` holds one size expression per dimension — a `New` allocates real
+    /// storage, so it needs the actual extents (contrast `TypeExpr::Array`,
+    /// which records only the arity as `rank: u8`).
+    Array {
+        elem: NodeId,
+        dims: Vec<NodeId>,
+    },
 }
 
 /// Statement nodes.
@@ -154,8 +180,7 @@ pub enum Stmt {
         init: Option<NodeId>,
     },
     Const {
-        name_span: Span,
-        sigil: Option<Sigil>,
+        name: DimName,
         ty: Option<NodeId>,
         value: NodeId,
         is_global: bool,
@@ -218,21 +243,22 @@ pub enum Stmt {
         fields: Vec<NodeId>,
     },
     FieldDecl {
-        name_span: Span,
-        sigil: Option<Sigil>,
+        name: DimName,
         ty: Option<NodeId>,
     },
     Return {
         value: Option<NodeId>,
     },
     Goto {
-        label_span: Span,
+        name_span: Span,
     },
     Label {
         name_span: Span,
     },
+    /// `Break [n]` — exit `n` enclosing loops (`None` means 1). The parser
+    /// guarantees `n > 0`, so the count is a [`NonZeroU32`].
     Break {
-        count: Option<u32>,
+        count: Option<NonZeroU32>,
     },
     Continue,
     /// `End` — terminate the whole program (`cb_runtime.md` §System). Lowered
@@ -302,6 +328,8 @@ pub struct Param {
     pub name_span: Option<Span>,
     pub sigil: Option<Sigil>,
     pub ty: Option<NodeId>,
+    /// Default-value expression. Meaningful only for real function params; in
+    /// fn-ptr type position (`name_span` is `None`) a default is not allowed.
     pub default: Option<NodeId>,
 }
 
@@ -316,12 +344,18 @@ pub enum TypeExpr {
     },
     Array {
         elem: NodeId,
+        /// Number of dimensions only — a type fixes arity, not extents
+        /// (contrast `NewKind::Array`, which carries a size expr per dimension).
         rank: u8,
     },
     FnPtr {
         params: Vec<NodeId>,
         ret: Option<NodeId>,
     },
+    /// A parenthesized type `(inner)`. Like [`Expr::Paren`], kept only for span
+    /// and round-trip fidelity and transparent to meaning — `(T)` resolves to
+    /// the same type as `T` (§5.4). `resolve_type_expr` in `cb-sema/src/types.rs`
+    /// unwraps it.
     Paren {
         inner: NodeId,
     },

@@ -1256,10 +1256,10 @@ mod errors {
     }
 
     #[test]
-    fn hex_underscore_only_emits_both_diagnostics() {
-        // `$_` with no following hex digits is two distinct problems: a
-        // misplaced digit separator AND a literal with no hex digits at all.
-        // The user should hear about both.
+    fn hex_underscore_only_emits_single_separator_diagnostic() {
+        // `$_` (a leading separator with no hex digits) reports one primary
+        // error: the misplaced digit separator (E0105), consistent with `$_ff`.
+        // The token kind matches that sole diagnostic; no second E0106 fires.
         let (toks, diags) = lex_with_diags("$_");
         assert!(
             has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
@@ -1270,13 +1270,18 @@ mod errors {
             "expected E0105 (separator) diagnostic; got {diags:?}"
         );
         assert!(
-            has_diag_code(&diags, "E0106"),
-            "expected E0106 (expected hex digits) diagnostic; got {diags:?}"
+            !has_diag_code(&diags, "E0106"),
+            "expected no E0106 diagnostic; got {diags:?}"
+        );
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic; got {diags:?}"
         );
     }
 
     #[test]
-    fn binary_underscore_only_emits_both_diagnostics() {
+    fn binary_underscore_only_emits_single_separator_diagnostic() {
         let (toks, diags) = lex_with_diags("%_");
         assert!(
             has_error_kind(&toks, LexErrorKind::InvalidDigitSeparator),
@@ -1287,8 +1292,13 @@ mod errors {
             "expected E0105 (separator) diagnostic; got {diags:?}"
         );
         assert!(
-            has_diag_code(&diags, "E0106"),
-            "expected E0106 (expected binary digits) diagnostic; got {diags:?}"
+            !has_diag_code(&diags, "E0106"),
+            "expected no E0106 diagnostic; got {diags:?}"
+        );
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic; got {diags:?}"
         );
     }
 

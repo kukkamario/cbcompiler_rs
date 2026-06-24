@@ -8,7 +8,9 @@ use cb_frontend::{Arena, BinOp, Kw, NodeId, Sigil, UnOp};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     // Primitives (§3.1)
+    /// 8-bit unsigned (0..=255); storage-only, widens to `Int` for arithmetic.
     Byte,
+    /// 16-bit unsigned (0..=65535); storage-only, widens to `Int` for arithmetic.
     Short,
     Int,
     Long,
@@ -57,6 +59,18 @@ impl Type {
         matches!(self, Type::Byte | Type::Short | Type::Int | Type::Long)
     }
 
+    /// Reference types that support the full reference comparison/conversion
+    /// surface: `Null` coercion (`Conversion::NullToRef`), `=`/`<>` against any
+    /// other reference or `Null`, **and** ordering (`<`, `>`, …).
+    ///
+    /// `Type::RuntimeType` is deliberately **excluded** even though it is
+    /// reference-like (defaults to `Null`, cb_syntax.md §3.5). Opaque runtime
+    /// handles have identity-only equality and *no ordering*: `img1 < img2` is a
+    /// compile error (§3.5). Folding `RuntimeType` in here would make ordering
+    /// type-check. Equality and `Null`-conversion contexts that *do* accept
+    /// `RuntimeType` therefore special-case it next to this predicate rather than
+    /// through it — see `binary_result_type`'s `Eq`/`NotEq` arm and
+    /// `find_implicit_conversion`'s `Null` arms.
     pub fn is_reference(&self) -> bool {
         matches!(
             self,
@@ -102,7 +116,8 @@ pub fn is_reserved_type_kw(kw: Kw) -> bool {
 /// Named types are interned but NOT resolved against the symbol table here —
 /// that happens during pass 2 when all declarations are known. For now we
 /// return `TypeRef` for any `TypeExpr::Named`, which pass 2 may refine to
-/// `StructVal` once it knows the declaration kind.
+/// `StructVal` (user `Struct`) or `RuntimeType` (opaque runtime handle) once it
+/// knows the declaration kind.
 pub fn resolve_type_expr(arena: &Arena, id: NodeId, interner: &mut Interner, source: &str) -> Type {
     use cb_frontend::SpanExt;
 
@@ -205,7 +220,7 @@ pub(crate) fn widen_storage(t: &Type) -> Type {
 /// types, floored at `Int` for integers. `Byte`/`Short` are storage-only and
 /// widen to `Int` for all arithmetic (FD-035 / cb_syntax.md §3.4); `Float`
 /// beats every integer.
-pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
+pub fn numeric_promote(a: &Type, b: &Type) -> Type {
     fn rank(t: &Type) -> u8 {
         match t {
             Type::Byte => 1,
@@ -272,6 +287,10 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
 
         // Equality — result is Int (1/0); there is no Bool type (FD-035)
         BinOp::Eq | BinOp::NotEq => {
+            // `RuntimeType` is excluded from `is_reference()` (no ordering, see
+            // its doc), so equality against opaque handles is spelled out here:
+            // identity only between the *same* opaque type (`a == b`), plus
+            // comparison with `Null`.
             if (lhs.is_numeric() && rhs.is_numeric())
                 || (*lhs == Type::String && *rhs == Type::String)
                 || (lhs.is_reference() && rhs.is_reference())
@@ -287,7 +306,9 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
                 None
             }
         }
-        // Ordering — no RuntimeType support
+        // Ordering — `RuntimeType` is intentionally absent: opaque runtime
+        // handles have no ordering (`img1 < img2` is a compile error, §3.5), so
+        // only `is_reference()` types (which do order) and `Null` appear here.
         BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
             if (lhs.is_numeric() && rhs.is_numeric())
                 || (*lhs == Type::String && *rhs == Type::String)
@@ -302,7 +323,9 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
             }
         }
 
-        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035)
+        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035).
+        // Numeric-only: CB has no truthiness for strings or references — only
+        // numerics can be tested against 0 (§1.7).
         BinOp::And | BinOp::Or | BinOp::Xor => {
             if lhs.is_numeric() && rhs.is_numeric() {
                 Some(Type::Int)

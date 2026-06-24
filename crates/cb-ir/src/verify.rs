@@ -102,6 +102,9 @@ pub fn verify(program: &Program) {
             );
         }
 
+        // Single forward-pass use-before-def check; sound only under the RPO
+        // block ordering documented on this fn. See the "Block ordering &
+        // dominance contract" doc above.
         let mut defined_regs: HashSet<Reg> = HashSet::new();
 
         for block in &func.blocks {
@@ -119,6 +122,7 @@ pub fn verify(program: &Program) {
                 verify_inst_func_ids(&inst.kind, func_table_len);
                 verify_inst_type_defs(&inst.kind, num_type_defs);
                 verify_inst_globals(&inst.kind, num_globals);
+                verify_inst_consts(&inst.kind);
                 // (II-V3) Result-register presence must match the instruction
                 // kind: a value-producing instruction defines exactly one
                 // register, a pure-effect one defines none. `Call`/`CallIndirect`
@@ -153,12 +157,19 @@ pub fn verify(program: &Program) {
     }
 }
 
+/// Shared bounds check for index-like IR references. `label` is the already-
+/// rendered "<thing> out of range" prefix; `context` the parenthetical suffix.
+fn check_index(value: u32, limit: u32, label: &str, context: &str) {
+    assert!(value < limit, "{label} out of range ({context})");
+}
+
 fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
     let check = |local: crate::LocalId| {
-        assert!(
-            local.0 < num_locals,
-            "local{} out of range (function has {num_locals} locals)",
+        check_index(
             local.0,
+            num_locals,
+            &format!("local{}", local.0),
+            &format!("function has {num_locals} locals"),
         );
     };
 
@@ -176,10 +187,11 @@ fn verify_inst_locals(kind: &InstKind, num_locals: u32) {
 
 fn verify_inst_func_ids(kind: &InstKind, func_table_len: u32) {
     let check = |id: crate::FuncId| {
-        assert!(
-            id.0 < func_table_len,
-            "FuncId({}) out of range (func_table has {func_table_len} entries)",
+        check_index(
             id.0,
+            func_table_len,
+            &format!("FuncId({})", id.0),
+            &format!("func_table has {func_table_len} entries"),
         );
     };
 
@@ -192,10 +204,11 @@ fn verify_inst_func_ids(kind: &InstKind, func_table_len: u32) {
 
 fn verify_inst_type_defs(kind: &InstKind, num_type_defs: u32) {
     let check = |id: crate::TypeDefId| {
-        assert!(
-            id.0 < num_type_defs,
-            "TypeDefId({}) out of range (program has {num_type_defs} type defs)",
+        check_index(
             id.0,
+            num_type_defs,
+            &format!("TypeDefId({})", id.0),
+            &format!("program has {num_type_defs} type defs"),
         );
     };
 
@@ -211,10 +224,11 @@ fn verify_inst_type_defs(kind: &InstKind, num_type_defs: u32) {
 
 fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
     let check = |id: crate::GlobalId| {
-        assert!(
-            id.0 < num_globals,
-            "GlobalId({}) out of range (program has {num_globals} globals)",
+        check_index(
             id.0,
+            num_globals,
+            &format!("GlobalId({})", id.0),
+            &format!("program has {num_globals} globals"),
         );
     };
 
@@ -228,6 +242,18 @@ fn verify_inst_globals(kind: &InstKind, num_globals: u32) {
             ..
         } => check(*global),
         _ => {}
+    }
+}
+
+/// (II-V7) A `ConstInt` carries an `Int`-range (`i32`) value; the interpreter
+/// truncates with `as i32`, so an out-of-range payload would silently lose
+/// bits. `ConstLong` may use the full `i64` range and is unchecked.
+fn verify_inst_consts(kind: &InstKind) {
+    if let InstKind::ConstInt(v) = kind {
+        assert!(
+            i32::try_from(*v).is_ok(),
+            "ConstInt({v}) out of Int (i32) range",
+        );
     }
 }
 

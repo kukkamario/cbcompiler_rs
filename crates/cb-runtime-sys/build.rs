@@ -4,16 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn strip_unc(path: PathBuf) -> PathBuf {
-    // Strip the \\?\ UNC prefix that confuses MSVC on Windows. Only relevant
-    // on Windows; on a non-UTF-8 path we can't string-manipulate it, so leave
-    // it untouched rather than panicking (FD-024).
+    // Strip the \\?\ UNC prefix that confuses MSVC on Windows. Only relevant on
+    // Windows. Requires a UTF-8 path; `build_full` later unwraps `to_str()` on
+    // this path anyway, so demanding UTF-8 here changes no valid-path behavior
+    // (FD-024).
     if !cfg!(windows) {
         return path;
     }
-    match path.to_str() {
-        Some(s) => PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s)),
-        None => path,
-    }
+    let s = path.to_str().expect("runtime path is not valid UTF-8");
+    PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s))
 }
 
 /// Translation units with zero Allegro dependency: the FD-016 "core" (string
@@ -223,9 +222,15 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
     }
 
     // Read the transitive link list emitted by runtime/CMakeLists.txt.
-    // Multi-config generators (MSVC) produce per-config files; we only ever
-    // build Release here. Single-config generators (Ninja) write the
-    // un-suffixed name when CMAKE_BUILD_TYPE is empty.
+    // Multi-config generators (MSVC) produce per-config files; we always build
+    // `--config Release`, so `..._Release.txt` is the expected name and the
+    // first candidate is what we actually hit.
+    //
+    // The remaining two are unverified fallbacks, not confirmed filenames:
+    // `..._.txt` is a *guess* at CMake's `$<CONFIG>` empty-string expansion for
+    // a single-config generator (Ninja) with an empty `CMAKE_BUILD_TYPE`, and
+    // `....txt` covers a generator that drops the suffix entirely. Neither has
+    // been observed in this build; keep them only as a cheap last resort.
     let link_list_candidates = [
         build_dir.join("cb_runtime_link_libs_Release.txt"),
         build_dir.join("cb_runtime_link_libs_.txt"),

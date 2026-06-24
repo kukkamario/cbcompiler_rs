@@ -34,6 +34,9 @@ pub struct Declaration {
     pub kind: DeclKind,
     pub ty: Type,
     pub span: Span,
+    /// Meaningful only for `DeclKind::Variable`: marks a `Global` declaration
+    /// (visible inside functions). Other decl kinds are global by their kind
+    /// (see `lookup`), so this flag is not consulted for them.
     pub is_global: bool,
 }
 
@@ -66,6 +69,28 @@ pub enum DeclKind {
         variants: Vec<OverloadVariant>,
     },
     RuntimeTypeDef,
+}
+
+impl DeclKind {
+    /// Whether a top-level declaration of this kind is visible inside function
+    /// bodies regardless of the `is_global` flag — the "hoisted" kinds. Only
+    /// `Variable` is *not* hoisted (it needs an explicit `Global`). Drives the
+    /// visibility filter in [`SymbolTable::lookup`].
+    pub(crate) fn is_hoisted(&self) -> bool {
+        matches!(
+            self,
+            DeclKind::Function { .. }
+                | DeclKind::TypeDef { .. }
+                | DeclKind::StructDef { .. }
+                | DeclKind::Constant { .. }
+                | DeclKind::Label
+                | DeclKind::RuntimeFn { .. }
+                | DeclKind::OverloadSet { .. }
+                // Runtime opaque types (e.g. `Object`) are global like runtime
+                // functions, so a function body using `As Object` resolves them.
+                | DeclKind::RuntimeTypeDef
+        )
+    }
 }
 
 /// One variant of an overloaded runtime function.
@@ -140,6 +165,10 @@ impl SymbolTable {
     /// runtime-seeded command of the same name (FD-027) — the catalog entry is
     /// overwritten so the name now resolves to the user's declaration.
     pub(crate) fn force_declare(&mut self, scope: ScopeId, name: Symbol, decl: Declaration) {
+        debug_assert!(
+            self.local_is_runtime_command(scope, name),
+            "force_declare is only for shadowing runtime commands"
+        );
         self.scopes[scope.0 as usize].symbols.insert(name, decl);
     }
 
@@ -169,8 +198,17 @@ impl SymbolTable {
     /// From a function scope:
     /// - Local symbols (this scope)
     /// - Globals (top-level symbols with `is_global == true`)
-    /// - Hoisted items: Functions, TypeDefs, StructDefs from the top-level scope
+    /// - Hoisted items from the top-level scope (see [`DeclKind::is_hoisted`])
     /// - NOT ordinary top-level variables
+    ///
+    /// Load-bearing invariant: the scope tree is at most two levels deep —
+    /// exactly one `TopLevel` root with `Function` children (functions cannot
+    /// nest, §7.1; block constructs do not open scopes). Because of this,
+    /// `from_function` is computed once from the *leaf* scope and the visibility
+    /// filter only ever sees `TopLevel` parents. If a `Function` scope could
+    /// appear as a parent, the `else` branch below would leak that intermediate
+    /// function's locals into the inner one. The `debug_assert!` in the walk
+    /// guards the invariant.
     pub(crate) fn lookup(&self, scope: ScopeId, name: Symbol) -> Option<&Declaration> {
         let s = &self.scopes[scope.0 as usize];
 
@@ -185,26 +223,17 @@ impl SymbolTable {
 
         while let Some(pid) = parent {
             let ps = &self.scopes[pid.0 as usize];
+            // Every parent must be the TopLevel root (tree depth ≤ 2); see the
+            // doc above for why the visibility filter relies on this.
+            debug_assert!(
+                ps.kind == ScopeKind::TopLevel,
+                "scope tree deeper than TopLevel→Function: parent scope is a Function"
+            );
             if let Some(decl) = ps.symbols.get(&name) {
                 if from_function && ps.kind == ScopeKind::TopLevel {
                     // From a function scope looking into top-level:
                     // only globals and hoisted items are visible.
-                    let visible = decl.is_global
-                        || matches!(
-                            decl.kind,
-                            DeclKind::Function { .. }
-                                | DeclKind::TypeDef { .. }
-                                | DeclKind::StructDef { .. }
-                                | DeclKind::Constant { .. }
-                                | DeclKind::Label
-                                | DeclKind::RuntimeFn { .. }
-                                | DeclKind::OverloadSet { .. }
-                                // Runtime opaque types (e.g. `Object`) are
-                                // global like runtime functions, so a function
-                                // body using `As Object` resolves them too.
-                                | DeclKind::RuntimeTypeDef
-                        );
-                    if visible {
+                    if decl.is_global || decl.kind.is_hoisted() {
                         return Some(decl);
                     }
                 } else {
@@ -236,22 +265,31 @@ impl SymbolTable {
         fn_scope: ScopeId,
     ) {
         let s = &mut self.scopes[scope.0 as usize];
+        let mut found = false;
         if let Some(decl) = s.symbols.get_mut(&name)
             && let DeclKind::Function {
                 scope: ref mut s, ..
             } = decl.kind
         {
             *s = Some(fn_scope);
+            found = true;
         }
+        debug_assert!(
+            found,
+            "update_function_scope found no Function decl to update"
+        );
     }
 
     /// Update the ConstValue of an existing Constant declaration.
     pub(crate) fn update_const_value(&mut self, scope: ScopeId, name: Symbol, value: ConstValue) {
         let s = &mut self.scopes[scope.0 as usize];
+        let mut found = false;
         if let Some(decl) = s.symbols.get_mut(&name)
             && let DeclKind::Constant { value: ref mut v } = decl.kind
         {
             *v = value;
+            found = true;
         }
+        debug_assert!(found, "update_const_value found no Constant decl to update");
     }
 }

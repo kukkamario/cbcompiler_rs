@@ -36,8 +36,24 @@ thread_local! {
     static PENDING_TRAP: Cell<Option<PendingTrap>> = const { Cell::new(None) };
 }
 
+/// Record a pending trap, asserting the single slot is empty first. The
+/// interpreter drains the slot after every FFI dispatch, so a non-empty slot
+/// here means a nested FFI call is about to clobber an undelivered trap.
+fn set_pending_trap(trap: PendingTrap) {
+    PENDING_TRAP.with(|slot| {
+        // `take()` to inspect without requiring `Copy`; in debug we assert it
+        // was empty, in release we proceed (matching the prior overwrite).
+        let prev = slot.take();
+        debug_assert!(
+            prev.is_none(),
+            "PENDING_TRAP overwritten — nested FFI trap lost",
+        );
+        slot.set(Some(trap));
+    });
+}
+
 extern "C" fn host_request_exit(code: i32) {
-    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Exit(code))));
+    set_pending_trap(PendingTrap::Exit(code));
 }
 
 #[allow(unsafe_code)]
@@ -57,7 +73,7 @@ extern "C" fn host_raise_error(msg: *const CbString) {
             String::from_utf8_lossy(bytes).into_owned()
         }
     };
-    PENDING_TRAP.with(|slot| slot.set(Some(PendingTrap::Error(text))));
+    set_pending_trap(PendingTrap::Error(text));
 }
 
 /// The host API handed to the runtime via `cb_runtime_init` at startup.
@@ -193,6 +209,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     }
 
     fn find_main(&self) -> Result<FuncId, InterpError> {
+        // Lowering appends synthetic `@main` last, after all runtime and
+        // user functions, so scanning from the end finds it immediately
+        // (skipping the large runtime block). Last-wins also lets the
+        // synthetic entry win over any stray user-named `@main`.
         for (i, decl) in self.program.func_table.iter().enumerate().rev() {
             if self.interner.resolve(decl.name) == "@main" {
                 return Ok(FuncId(i as u32));
@@ -369,6 +389,16 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             .checked_sub(1)
                             .and_then(|i| caller_block.insts.get(i))
                         {
+                            // The deferral mechanism assumes the originating
+                            // call sits at pc-1; assert it really is a call so a
+                            // future change to deferral is caught here.
+                            debug_assert!(
+                                matches!(
+                                    call_inst.kind,
+                                    InstKind::Call { .. } | InstKind::CallIndirect { .. }
+                                ),
+                                "deferred after_inst: instruction at pc-1 is not a Call/CallIndirect",
+                            );
                             self.observer.after_inst(
                                 caller,
                                 &call_inst.kind,
@@ -394,6 +424,43 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// Snapshot the argument registers of the current frame into values.
+    fn read_args(&self, args: &[Reg]) -> Vec<Value> {
+        let frame = self.call_stack.last().unwrap();
+        args.iter()
+            .map(|r| frame.registers[r.0 as usize].clone())
+            .collect()
+    }
+
+    /// Shared call tail for `Call`/`CallIndirect`: notify the observer, then
+    /// dispatch to a user-defined body (push a frame) or a runtime function.
+    /// The two callers differ only in how `callee` is resolved.
+    fn dispatch_call(
+        &mut self,
+        callee: FuncId,
+        arg_vals: &[Value],
+        result_reg: Option<Reg>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        self.observer
+            .on_call(self.call_stack.last().unwrap(), callee, arg_vals);
+
+        let decl = &self.program.func_table[callee.0 as usize];
+        match &decl.kind {
+            FuncKind::UserDefined { body_index } => {
+                let body_index = *body_index;
+                self.push_frame(callee, body_index, arg_vals, result_reg)?;
+                Ok(Value::Void)
+            }
+            FuncKind::Runtime { symbol, fn_ptr } => {
+                let symbol = symbol.clone();
+                let fn_ptr = *fn_ptr;
+                let sig = decl.sig.clone();
+                self.call_runtime(&symbol, fn_ptr, &sig, arg_vals, span)
             }
         }
     }
@@ -470,29 +537,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // ── Function calls ─────────────────────────────────────
             InstKind::Call { callee, args } => {
-                let frame = self.call_stack.last().unwrap();
-                let arg_vals: Vec<Value> = args
-                    .iter()
-                    .map(|r| frame.registers[r.0 as usize].clone())
-                    .collect();
-
-                self.observer
-                    .on_call(self.call_stack.last().unwrap(), *callee, &arg_vals);
-
-                let decl = &self.program.func_table[callee.0 as usize];
-                match &decl.kind {
-                    FuncKind::UserDefined { body_index } => {
-                        let body_index = *body_index;
-                        self.push_frame(*callee, body_index, &arg_vals, result_reg)?;
-                        Ok(Value::Void)
-                    }
-                    FuncKind::Runtime { symbol, fn_ptr } => {
-                        let symbol = symbol.clone();
-                        let fn_ptr = *fn_ptr;
-                        let sig = decl.sig.clone();
-                        self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
-                    }
-                }
+                let arg_vals = self.read_args(args);
+                self.dispatch_call(*callee, &arg_vals, result_reg, span)
             }
 
             // ── Type instance operations ────────────────────────────
@@ -565,7 +611,11 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let new_val = frame.registers[value.0 as usize].clone();
                 // Resolve index registers up front: the in-place walk below
                 // holds a mutable borrow of the root slot and cannot also read
-                // registers.
+                // registers. Index regs are integer-typed by sema, so
+                // `to_i64` is exact (a Float would truncate; see `to_i64`).
+                // A negative index is rejected here (II-V28) so it yields a
+                // precise message instead of wrapping to a huge usize and
+                // surfacing as a generic out-of-bounds trap.
                 let mut resolved: Vec<RProj> = Vec::with_capacity(path.len());
                 for proj in path {
                     match proj {
@@ -573,8 +623,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                         Projection::Index(idxs) => {
                             let vals = idxs
                                 .iter()
-                                .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
-                                .collect();
+                                .map(|r| {
+                                    self.resolve_index(frame.registers[r.0 as usize].to_i64(), span)
+                                })
+                                .collect::<Result<Vec<usize>, _>>()?;
                             resolved.push(RProj::Index(vals));
                         }
                     }
@@ -624,6 +676,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             Some(e) => e,
                             None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
                         };
+                        // No sentinel guard needed (unlike `Previous`): the
+                        // sentinel is only ever a `prev` target. The first
+                        // real node's `prev` is the sentinel, but no node's
+                        // `next` points to it — the tail terminates with None.
                         match entry.next {
                             Some(next_id) => Ok(Value::TypeInstance(next_id)),
                             None => Ok(Value::Null),
@@ -645,6 +701,9 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                             Some(e) => e,
                             None => return Err(self.trap_error(TrapKind::DeletedAccess, span)),
                         };
+                        // The first real node's `prev` is the head sentinel;
+                        // skip it so backward traversal yields Null at the
+                        // start rather than exposing the sentinel.
                         match entry.prev {
                             Some(prev_id)
                                 if self.heap.get(prev_id).is_some_and(|e| !e.is_sentinel) =>
@@ -697,10 +756,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             InstKind::GetElement { array, indices } => {
                 let frame = self.call_stack.last().unwrap();
                 let arr_val = frame.registers[array.0 as usize].clone();
+                // Index regs are integer-typed by sema, so `to_i64` is exact
+                // (a Float would truncate; see `Value::to_i64`). Same for the
+                // flat-index and `Len` dim sites below. A negative index is
+                // rejected here (II-V28) for a precise message rather than a
+                // wrapped huge usize surfacing as a generic out-of-bounds trap.
                 let idx_vals: Vec<usize> = indices
                     .iter()
-                    .map(|r| frame.registers[r.0 as usize].to_i64() as usize)
-                    .collect();
+                    .map(|r| self.resolve_index(frame.registers[r.0 as usize].to_i64(), span))
+                    .collect::<Result<Vec<usize>, _>>()?;
                 match arr_val {
                     Value::Array(rc) => {
                         let arr = rc.borrow();
@@ -792,7 +856,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 // Codepoint count of a UTF-8 string: every byte that is not a
                 // UTF-8 continuation byte (0b10xxxxxx) begins a new codepoint.
                 // Computed here in Rust as the reference impl; the future LLVM
-                // backend will instead emit a runtime char-length call.
+                // backend will instead emit a runtime char-length call — that
+                // call must compute the identical count or the backends diverge.
                 let frame = self.call_stack.last().unwrap();
                 let val = frame.registers[s.0 as usize].clone();
                 match val {
@@ -817,28 +882,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let callee_val = frame.registers[callee.0 as usize].clone();
                 match callee_val {
                     Value::FnPtr(Some(func_id)) => {
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|r| frame.registers[r.0 as usize].clone())
-                            .collect();
-
-                        self.observer
-                            .on_call(self.call_stack.last().unwrap(), func_id, &arg_vals);
-
-                        let decl = &self.program.func_table[func_id.0 as usize];
-                        match &decl.kind {
-                            FuncKind::UserDefined { body_index } => {
-                                let body_index = *body_index;
-                                self.push_frame(func_id, body_index, &arg_vals, result_reg)?;
-                                Ok(Value::Void)
-                            }
-                            FuncKind::Runtime { symbol, fn_ptr } => {
-                                let symbol = symbol.clone();
-                                let fn_ptr = *fn_ptr;
-                                let sig = decl.sig.clone();
-                                self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
-                            }
-                        }
+                        // Callee resolution differs from `Call` (register/value
+                        // vs direct FuncId); the dispatch tail is shared.
+                        let arg_vals = self.read_args(args);
+                        self.dispatch_call(func_id, &arg_vals, result_reg, span)
                     }
                     Value::FnPtr(None) | Value::Null => {
                         Err(self.trap_error(TrapKind::NullFnPtr, span))
@@ -862,6 +909,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         let frame = self.call_stack.last().unwrap();
         let mut sizes = Vec::with_capacity(dims.len());
         for r in dims {
+            // Sema types dim registers as integers, so `to_i64` is exact here;
+            // a Float would truncate toward zero (see `Value::to_i64`).
             let n = frame.registers[r.0 as usize].to_i64();
             if n < 0 {
                 return Err(self.error_at(
@@ -872,6 +921,20 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             sizes.push(n as usize);
         }
         Ok(sizes)
+    }
+
+    /// Resolve an array-index register to a concrete `usize`, rejecting a
+    /// negative index with a clean error. Without this a negative index would
+    /// wrap to a huge `usize` and surface as a generic out-of-bounds trap
+    /// (II-V28); this mirrors `resolve_dims`'s negative-dimension guard.
+    fn resolve_index(&self, idx: i64, span: Span) -> Result<usize, InterpError> {
+        if idx < 0 {
+            return Err(self.error_at(
+                InterpErrorKind::RuntimeError(format!("negative array index: {idx}")),
+                span,
+            ));
+        }
+        Ok(idx as usize)
     }
 
     /// Map a deferred place-walk error to a concrete interpreter error/trap,
@@ -1005,6 +1068,17 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 )),
             },
 
+            // A shift that fell past the integer fast path above has a
+            // non-integer LHS (the count RHS is read via `to_i64`, so only the
+            // LHS type matters). Sema rejects this for compiled programs; the
+            // precise message is for hand-written IR. Checked before the
+            // generic fall-through so the diagnostic names the real problem.
+            (_, _) if matches!(op, IrBinOp::Shl | IrBinOp::Shr | IrBinOp::Sar) => Err(self
+                .error_at(
+                    InterpErrorKind::RuntimeError("shift requires integer operands".into()),
+                    span,
+                )),
+
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!(
                     "type mismatch in binop: {lhs:?} {op:?} {rhs:?}"
@@ -1048,12 +1122,12 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             }
             IrBinOp::Pow => {
                 if b < 0 {
-                    match a {
-                        0 => Err(self.trap_error(TrapKind::DivisionByZero, span)),
-                        1 => Ok(wrap(1)),
-                        -1 => Ok(wrap(if b % 2 == 0 { 1 } else { -1 })),
-                        _ => Ok(wrap(0)),
-                    }
+                    // `^` always lowers to a Float Pow: sema coerces both
+                    // operands of Pow to Float (check_binary), so the IR never
+                    // produces an integer Pow — let alone a negative exponent.
+                    unreachable!(
+                        "integer Pow with negative exponent: `^` always lowers to float (§1.7)"
+                    )
                 } else {
                     Ok(wrap(a.wrapping_pow(b as u32)))
                 }
@@ -1191,19 +1265,23 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // `-1.5 → -2`), not truncated toward zero, and a String is parsed as a
         // leading integer after trimming. The raw `Value::to_i64` helper
         // (truncating) stays for internal, non-language uses.
-        let i = self.value_to_int_cb(v);
-        let f = v.to_f64();
-
+        //
+        // Note the String→numeric asymmetry (see `Value::to_i64`/`to_f64`):
+        // converting to int parses a leading prefix (`"3x"` → 3) while
+        // converting to float requires a full parse (`"3x"` → 0.0).
+        //
+        // Each coercion is computed only in the arm that needs it, so a String
+        // source is parsed once (not via both `value_to_int_cb` and `to_f64`).
         match to {
-            IrType::Byte => Ok(Value::Byte(i as u8)),
-            IrType::Short => Ok(Value::Short(i as u16)),
-            IrType::Int => Ok(Value::Int(i as i32)),
-            IrType::Long => Ok(Value::Long(i)),
+            IrType::Byte => Ok(Value::Byte(self.value_to_int_cb(v) as u8)),
+            IrType::Short => Ok(Value::Short(self.value_to_int_cb(v) as u16)),
+            IrType::Int => Ok(Value::Int(self.value_to_int_cb(v) as i32)),
+            IrType::Long => Ok(Value::Long(self.value_to_int_cb(v))),
             IrType::Float => {
                 if from.is_integer() {
-                    Ok(Value::Float(i as f64))
+                    Ok(Value::Float(self.value_to_int_cb(v) as f64))
                 } else {
-                    Ok(Value::Float(f))
+                    Ok(Value::Float(v.to_f64()))
                 }
             }
             IrType::String => Ok(Value::String(v.as_cb_string(self.string_api))),
@@ -1476,5 +1554,62 @@ fn store_walk(
             Value::Null => Err(StoreErr::Null),
             _ => Err(StoreErr::NotArray),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cb_diagnostics::source::FileId;
+
+    const SPAN: Span = Span::new(0, 0, FileId::SYNTHETIC);
+
+    fn empty_program() -> Program {
+        Program {
+            func_table: Vec::new(),
+            functions: Vec::new(),
+            globals: Vec::new(),
+            type_defs: Vec::new(),
+            struct_defs: Vec::new(),
+        }
+    }
+
+    // II-V25: a shift whose LHS is non-integer (here, Float) falls past the
+    // integer fast path in `eval_binop`. It must surface the precise
+    // "shift requires integer operands" message rather than the generic
+    // "type mismatch in binop" fall-through. Unreachable from well-typed
+    // compiled IR (sema rejects it) — this guards the hand-written-IR message.
+    #[test]
+    fn shift_with_non_integer_lhs_reports_precise_error() {
+        let program = empty_program();
+        let interner = Interner::new();
+        let interp = Interpreter::new(&program, &interner);
+
+        for op in [IrBinOp::Shl, IrBinOp::Shr, IrBinOp::Sar] {
+            let err = interp
+                .eval_binop(op, &Value::Float(1.0), &Value::Int(1), SPAN)
+                .expect_err("non-integer shift LHS should error");
+            assert!(
+                matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m == "shift requires integer operands"),
+                "op {op:?}: expected precise shift error, got {err:?}"
+            );
+        }
+    }
+
+    // A non-shift binop type mismatch must still use the generic message, so
+    // the new arm does not swallow unrelated mismatches.
+    #[test]
+    fn non_shift_type_mismatch_keeps_generic_error() {
+        let program = empty_program();
+        let interner = Interner::new();
+        let interp = Interpreter::new(&program, &interner);
+
+        let err = interp
+            .eval_binop(IrBinOp::Add, &Value::Float(1.0), &Value::Int(1), SPAN)
+            .expect_err("Float + Int (uncoerced) should error");
+        assert!(
+            matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("type mismatch in binop")),
+            "expected generic mismatch, got {err:?}"
+        );
     }
 }

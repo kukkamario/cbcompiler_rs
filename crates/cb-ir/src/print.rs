@@ -2,7 +2,7 @@
 
 use cb_diagnostics::Interner;
 
-use crate::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
+use crate::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
 use crate::types::IrType;
 use crate::{FuncDecl, Function, Global, Program, TypeDefInfo};
 
@@ -205,7 +205,7 @@ fn print_inst_kind(
             write!(out, "delete_lvalue {local}").unwrap();
         }
         InstKind::DeleteLvalueGlobal { global } => {
-            write!(out, "delete_lvalue {global}").unwrap();
+            write!(out, "delete_lvalue_global {global}").unwrap();
         }
         InstKind::DeleteRvalue { value } => {
             write!(out, "delete_rvalue {value}").unwrap();
@@ -289,7 +289,12 @@ fn print_inst_kind(
             elem_type,
             dims,
         } => {
-            write!(out, "redim {global}, {}", format_type(elem_type, interner)).unwrap();
+            write!(
+                out,
+                "redim_global {global}, {}",
+                format_type(elem_type, interner)
+            )
+            .unwrap();
             for d in dims {
                 write!(out, ", {d}").unwrap();
             }
@@ -327,15 +332,7 @@ fn print_terminator(out: &mut String, term: &Terminator) {
             write!(out, "halt {code}").unwrap();
         }
         Terminator::Trap(kind) => {
-            let name = match kind {
-                TrapKind::NullDeref => "null_deref",
-                TrapKind::DeletedAccess => "deleted_access",
-                TrapKind::DivisionByZero => "division_by_zero",
-                TrapKind::IndexOutOfBounds => "index_out_of_bounds",
-                TrapKind::NullFnPtr => "null_fn_ptr",
-                TrapKind::DoubleDelete => "double_delete",
-            };
-            write!(out, "trap {name}").unwrap();
+            write!(out, "trap {}", kind.mnemonic()).unwrap();
         }
     }
 }

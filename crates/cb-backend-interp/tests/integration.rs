@@ -805,6 +805,37 @@ fn redim_negative_dimension_is_clean_error() {
     );
 }
 
+// II-V28: a negative array index must surface the precise "negative array
+// index" RuntimeError rather than wrapping to a huge usize and degrading into
+// a generic IndexOutOfBounds trap.
+#[test]
+fn negative_array_index_read_is_clean_error() {
+    // GetElement path: reading arr[-1].
+    let err = run_err(
+        "Dim arr As Int[] = New Int[3]\n\
+         Dim n As Int = -1\n\
+         Print Str(arr[n])",
+    );
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array index")),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn negative_array_index_write_is_clean_error() {
+    // StorePlace path: writing arr[-1] = 10.
+    let err = run_err(
+        "Dim arr As Int[] = New Int[3]\n\
+         Dim n As Int = -1\n\
+         arr[n] = 10",
+    );
+    assert!(
+        matches!(err.kind, InterpErrorKind::RuntimeError(ref m) if m.contains("negative array index")),
+        "unexpected error: {err:?}"
+    );
+}
+
 // ── FD-032: first-class functions (address-of + indirect call) ─────────
 
 #[test]

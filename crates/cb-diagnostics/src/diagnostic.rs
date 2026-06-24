@@ -23,17 +23,31 @@ impl Span {
     /// lexer's hot path. [`Span::len`] still returns `0` for an inverted
     /// span via `saturating_sub`, so release builds do not panic on bad
     /// data — they just produce a degenerate (empty) span.
+    ///
+    /// The same `end >= start` invariant is re-checked at render time by
+    /// `validate_label` (in `render.rs`) in *all* build modes, so an inverted
+    /// span that slips past this debug-only assert is still rejected before
+    /// reaching codespan.
     pub const fn new(start: u32, end: u32, file: FileId) -> Self {
         debug_assert!(end >= start, "Span::new: end < start");
         Self { start, end, file }
     }
 
     /// Span length in bytes.
+    ///
+    /// `len` and `is_empty` disagree on an inverted span (`end < start`),
+    /// which `Span::new` forbids in debug builds: `len()` saturates to `0`
+    /// but `is_empty()` is `false` (since `start != end`). Valid spans never
+    /// hit this, so the contradiction is unreachable in practice.
+    #[must_use]
     pub const fn len(self) -> u32 {
         self.end.saturating_sub(self.start)
     }
 
     /// Whether the span is empty (`start == end`).
+    ///
+    /// See [`Span::len`] for how this disagrees with `len` on an inverted span.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
     }

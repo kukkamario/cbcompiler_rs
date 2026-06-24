@@ -134,7 +134,11 @@ pub enum InstKind {
     },
 
     // ── Constants ───────────────────────────────────────────────────
+    /// 32-bit `Int` constant. The payload is `i64` for uniformity but must hold
+    /// an `i32`-range value (the verifier enforces this; the interpreter
+    /// truncates with `as i32`).
     ConstInt(i64),
+    /// 64-bit `Long` constant — full `i64` range.
     ConstLong(i64),
     ConstFloat(f64),
     ConstString(String),
@@ -267,4 +271,30 @@ pub enum TrapKind {
     IndexOutOfBounds,
     NullFnPtr,
     DoubleDelete,
+}
+
+impl TrapKind {
+    /// Short name used in IR-dump (`--dump-ir`) output.
+    pub fn mnemonic(&self) -> &'static str {
+        match self {
+            TrapKind::NullDeref => "null_deref",
+            TrapKind::DeletedAccess => "deleted_access",
+            TrapKind::DivisionByZero => "division_by_zero",
+            TrapKind::IndexOutOfBounds => "index_out_of_bounds",
+            TrapKind::NullFnPtr => "null_fn_ptr",
+            TrapKind::DoubleDelete => "double_delete",
+        }
+    }
+
+    /// Human-readable message used in interpreter trap errors.
+    pub fn message(&self) -> &'static str {
+        match self {
+            TrapKind::NullDeref => "null pointer dereference",
+            TrapKind::DeletedAccess => "access to deleted object",
+            TrapKind::DivisionByZero => "division by zero",
+            TrapKind::IndexOutOfBounds => "array index out of bounds",
+            TrapKind::NullFnPtr => "null function pointer call",
+            TrapKind::DoubleDelete => "double delete",
+        }
+    }
 }

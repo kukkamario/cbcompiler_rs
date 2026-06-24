@@ -72,8 +72,8 @@ static KEYWORDS: phf::Map<&'static str, Kw> = phf_map! {
     "xor" => Kw::Xor,
 };
 
-/// The longest keyword in `KEYWORDS`, used to size on-stack ASCII-lowercase
-/// scratch buffers in the lexer. `endfunction` is 11 bytes.
+/// The longest keyword in `KEYWORDS`, used to size the on-stack ASCII-lowercase
+/// scratch buffer (`buf`) in [`lookup`]. `endfunction` is 11 bytes.
 pub(crate) const LONGEST_KEYWORD_LEN: usize = 11;
 
 /// Look up a candidate identifier (any ASCII case) as a keyword. Returns
@@ -95,7 +95,8 @@ pub fn lookup(candidate: &str) -> Option<Kw> {
 
 #[cfg(test)]
 mod tests {
-    use super::{KEYWORDS, LONGEST_KEYWORD_LEN};
+    use super::{KEYWORDS, LONGEST_KEYWORD_LEN, lookup};
+    use crate::token::Kw;
 
     /// `LONGEST_KEYWORD_LEN` sizes the on-stack lowercase scratch buffer in
     /// [`super::lookup`]; if a longer keyword is ever added without bumping
@@ -112,5 +113,23 @@ mod tests {
             actual, LONGEST_KEYWORD_LEN,
             "LONGEST_KEYWORD_LEN ({LONGEST_KEYWORD_LEN}) is out of sync with the table (longest entry is {actual} bytes)",
         );
+    }
+
+    /// `Kw::as_str` and the `KEYWORDS` map are hand-maintained parallel lists;
+    /// without this they can silently drift. Iterating `KEYWORDS.entries()`
+    /// covers every keyword without a hand-written variant list: for each
+    /// `(s, kw)` the spelling must look up to `kw`, and `as_str(kw)` must look
+    /// back to the same `kw` (so `as_str` agrees with the table).
+    #[test]
+    fn as_str_round_trips_through_keywords() {
+        for (&s, &kw) in KEYWORDS.entries() {
+            assert_eq!(lookup(s), Some(kw), "table spelling {s:?} did not look up");
+            let spelling = Kw::as_str(kw);
+            assert_eq!(
+                lookup(spelling),
+                Some(kw),
+                "as_str({kw:?}) = {spelling:?} did not look up to the same Kw",
+            );
+        }
     }
 }

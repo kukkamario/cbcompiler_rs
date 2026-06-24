@@ -8,6 +8,8 @@
 //! is currently coarse — errors bubble to statement boundary. Refine in a
 //! future FD when concrete cases motivate it.
 
+use std::num::NonZeroU32;
+
 use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::ast::{
@@ -688,7 +690,21 @@ impl<'t> Parser<'t> {
             let expr = self.parse_expr_bp(0)?;
             args.push(expr);
             if self.cursor.at_punct(Punct::Comma) {
-                self.cursor.bump();
+                let comma = self.cursor.bump();
+                // Trailing comma / empty list element: a `,` immediately
+                // followed by the closer (or another `,`). Targeted message
+                // rather than the generic "expected expression" the recursive
+                // `parse_expr_bp` would otherwise produce (F-P6).
+                if self.cursor.at_punct(close) || self.cursor.at_punct(Punct::Comma) {
+                    return Err(ParseError {
+                        diag: Box::new(Diagnostic::error(
+                            E_BAD_STATEMENT,
+                            "expected expression after `,`",
+                            Label::new(comma.span),
+                        )),
+                        span: comma.span,
+                    });
+                }
                 continue;
             }
             break;
@@ -1340,10 +1356,10 @@ impl<'t> Parser<'t> {
         };
         self.cursor.bump();
         // Parser is permissive on label sigils; sema enforces no-sigil.
-        let label_span = bare_name_span(label_tok.span, sigil);
+        let name_span = bare_name_span(label_tok.span, sigil);
         let span = start.merge(label_tok.span);
         self.consume_stmt_sep_or_terminator()?;
-        Ok(self.alloc(Node::Stmt(Stmt::Goto { label_span }), span))
+        Ok(self.alloc(Node::Stmt(Stmt::Goto { name_span }), span))
     }
 
     fn parse_include(&mut self) -> Result<NodeId, ParseError> {
@@ -1370,7 +1386,7 @@ impl<'t> Parser<'t> {
 
     fn parse_break(&mut self) -> Result<NodeId, ParseError> {
         let start = self.cursor.bump().span;
-        let mut count: Option<u32> = None;
+        let mut count: Option<NonZeroU32> = None;
         let mut span = start;
         if !self.cursor.is_stmt_terminator() {
             // Must be a positive integer literal (§6.3). Anything else → E0213.
@@ -1378,7 +1394,19 @@ impl<'t> Parser<'t> {
             match n_tok.kind {
                 TokenKind::IntLit(v) if v > 0 && v <= u32::MAX as u64 => {
                     self.cursor.bump();
-                    count = Some(v as u32);
+                    count = Some(NonZeroU32::new(v as u32).expect("guard ensures v > 0"));
+                    span = start.merge(n_tok.span);
+                }
+                TokenKind::IntLit(v) if v > u32::MAX as u64 => {
+                    // A positive integer literal, but too large for the u32
+                    // loop-break depth. Distinct message from the generic
+                    // non-positive / non-literal case (F-P8).
+                    self.cursor.bump();
+                    self.diagnostics.push(Diagnostic::error(
+                        E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL,
+                        format!("`Break` count {v} exceeds the maximum ({})", u32::MAX),
+                        Label::new(n_tok.span),
+                    ));
                     span = start.merge(n_tok.span);
                 }
                 _ => {
@@ -1514,9 +1542,9 @@ impl<'t> Parser<'t> {
                 start.merge(end)
             }
             // Mismatched split: `End <other>`.
-            TokenKind::Keyword(Kw::End) if split_end_to_joined(self.cursor.peek_n(1)).is_some() => {
-                let actual_kw = split_end_to_joined(self.cursor.peek_n(1))
-                    .expect("split_end_to_joined was Some above");
+            TokenKind::Keyword(Kw::End)
+                if let Some(actual_kw) = split_end_to_joined(self.cursor.peek_n(1)) =>
+            {
                 let start = self.cursor.bump().span;
                 let end = self.cursor.bump().span;
                 let span = start.merge(end);
@@ -1584,10 +1612,17 @@ impl<'t> Parser<'t> {
         let cond = self.parse_expr_bp(0)?;
         self.cursor.expect_kw(Kw::Then, "after `If` condition")?;
 
-        // Single-line vs block: peek ONE token (no eat_newlines).
+        // Single-line vs block: peek exactly ONE token (no `eat_newlines`).
+        // Unlike While/For/Repeat/ElseIf — which call `eat_newlines()` after
+        // their header — the leading `If` cannot eat newlines here, because
+        // *seeing* a newline is precisely what selects the block form over the
+        // single-line `If … Then <stmt>` form. So we bump only the one
+        // discriminating newline; any further blank lines before the first body
+        // statement are absorbed by `parse_block_until`, which calls
+        // `eat_newlines()` at the top of every iteration.
         if matches!(self.cursor.peek(), TokenKind::Newline) {
             // Block form.
-            self.cursor.bump(); // consume the newline
+            self.cursor.bump(); // consume the discriminating newline
             let then_body =
                 self.parse_block_until(&[Kw::ElseIf, Kw::Else, Kw::EndIf], opener, "If");
             let (elseifs, else_body) = self.parse_if_block_tail(opener)?;
@@ -1859,9 +1894,15 @@ impl<'t> Parser<'t> {
                 Ok(self.alloc(Node::Stmt(Stmt::RepeatWhile { body, cond }), span))
             }
             _ => {
-                // Missing closer (likely EOF — E0203 already emitted by
-                // parse_block_until). Fall back to RepeatForever so the AST
-                // is usable.
+                // Wrong closer (or EOF). At EOF, `parse_block_until` already
+                // emitted E0203 — don't double-report. Otherwise the block was
+                // closed by a token that isn't `Forever`/`While`, so report it
+                // via `consume_block_closer` like While/For do through
+                // `close_loop_block` (F-P4). Fall back to RepeatForever so the
+                // AST is usable.
+                if !matches!(self.cursor.peek(), TokenKind::Eof) {
+                    let _ = self.consume_block_closer(Kw::Forever, opener, "Repeat");
+                }
                 Ok(self.alloc(Node::Stmt(Stmt::RepeatForever { body }), opener))
             }
         }
@@ -2022,26 +2063,44 @@ impl<'t> Parser<'t> {
                     );
                     break;
                 }
-                TokenKind::Keyword(Kw::Case) => arms.push(self.parse_case_arm()?),
+                // Per-arm error recovery (mirrors `parse_record_body`): a bad
+                // arm records its diagnostic and resyncs to the next statement
+                // boundary instead of `?`-propagating out and discarding every
+                // arm parsed so far. `sync_to_stmt_boundary` stops at the next
+                // `Case`/`Default`/`EndSelect` (all `is_block_end_marker`s), so
+                // the loop picks up cleanly on the following arm.
+                TokenKind::Keyword(Kw::Case) => match self.parse_case_arm() {
+                    Ok(id) => arms.push(id),
+                    Err(err) => {
+                        self.diagnostics.push(*err.diag);
+                        self.sync_to_stmt_boundary();
+                    }
+                },
                 TokenKind::Keyword(Kw::Default) => {
                     let default_kw_span = self.cursor.peek_tok().span;
-                    let arm_id = self.parse_default_arm()?;
-                    if let Some(prev_span) = first_default_span {
-                        self.diagnostics.push(
-                            Diagnostic::error(
-                                E_DUPLICATE_DEFAULT,
-                                "`Select` has more than one `Default` arm",
-                                Label::new(default_kw_span),
-                            )
-                            .with_secondary(Label::with_message(
-                                prev_span,
-                                "first `Default` arm here",
-                            )),
-                        );
-                    } else {
-                        first_default_span = Some(default_kw_span);
+                    match self.parse_default_arm() {
+                        Ok(arm_id) => {
+                            if let Some(prev_span) = first_default_span {
+                                self.diagnostics.push(
+                                    Diagnostic::error(
+                                        E_DUPLICATE_DEFAULT,
+                                        "`Select` has more than one `Default` arm",
+                                        Label::new(default_kw_span),
+                                    )
+                                    .with_secondary(
+                                        Label::with_message(prev_span, "first `Default` arm here"),
+                                    ),
+                                );
+                            } else {
+                                first_default_span = Some(default_kw_span);
+                            }
+                            arms.push(arm_id);
+                        }
+                        Err(err) => {
+                            self.diagnostics.push(*err.diag);
+                            self.sync_to_stmt_boundary();
+                        }
                     }
-                    arms.push(arm_id);
                 }
                 _ => {
                     // Stray token — emit a diagnostic and consume one to
@@ -2384,8 +2443,7 @@ impl<'t> Parser<'t> {
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(
             Node::Stmt(Stmt::FieldDecl {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
             }),
             span,
@@ -2553,8 +2611,7 @@ impl<'t> Parser<'t> {
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 value,
                 is_global: global,
@@ -2758,7 +2815,12 @@ fn is_block_end_marker(kw: Kw) -> bool {
             | Kw::Forever
             | Kw::Case
             | Kw::Default
-            // `While` here is the closer of a `Repeat … While` block.
+            // `While` here is the closer of a `Repeat … While` block — the
+            // only construct that consumes a trailing `While`. `parse_repeat`
+            // passes `Kw::While` in its `closers`, so `parse_block_until`'s
+            // `!closers.contains` guard already excludes it from the
+            // parent-decide list (which lists Wend|Forever|Next|Else|ElseIf but
+            // deliberately omits While).
             | Kw::While
     )
 }
@@ -3601,8 +3663,8 @@ mod stmt_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Goto { label_span } => {
-                assert_eq!(label_span.slice(src), "cleanup");
+            Stmt::Goto { name_span } => {
+                assert_eq!(name_span.slice(src), "cleanup");
             }
             other => panic!("expected Goto, got {other:?}"),
         }
@@ -3642,7 +3704,7 @@ mod stmt_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Break { count } => assert_eq!(*count, Some(2)),
+            Stmt::Break { count } => assert_eq!(*count, NonZeroU32::new(2)),
             other => panic!("expected Break, got {other:?}"),
         }
     }
@@ -3676,6 +3738,44 @@ mod stmt_tests {
                 .any(|d| d.code == Some(E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL)),
             "expected E0213 diagnostic, got {:?}",
             r.diagnostics
+        );
+        assert_eq!(r.program.len(), 1);
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::Break { count } => assert!(count.is_none()),
+            other => panic!("expected Break, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arg_list_trailing_comma_reports() {
+        // F-P6: a trailing comma in a call argument list gets a targeted
+        // "expected expression after `,`" message (E0206) instead of the
+        // generic "expected expression, found ...".
+        let src = "f(1,)\n";
+        let r = parse_src(src);
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.message == "expected expression after `,`")
+            .expect("expected trailing-comma diagnostic");
+        assert_eq!(diag.code, Some(E_BAD_STATEMENT));
+    }
+
+    #[test]
+    fn break_count_overflow() {
+        // F-P8: a positive integer literal that exceeds u32::MAX gets a
+        // distinct "exceeds the maximum" message (still E0213), not the
+        // misleading "must be a positive integer literal".
+        let src = "Break 5000000000\n";
+        let r = parse_src(src);
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == Some(E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL))
+            .expect("expected E0213 diagnostic");
+        assert_eq!(
+            diag.message,
+            "`Break` count 5000000000 exceeds the maximum (4294967295)"
         );
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
@@ -4188,6 +4288,49 @@ mod block_tests {
         }
     }
 
+    #[test]
+    fn repeat_wrong_closer_reports() {
+        // F-P4: a non-EOF wrong closer (here `EndIf`) used to fabricate
+        // RepeatForever with NO diagnostic. Now it routes through
+        // `consume_block_closer` like While/For, emitting E0204.
+        let src = "Repeat\n  a\nEndIf\n";
+        let r = parse_src(src);
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_MISMATCHED_END_KEYWORD)),
+            "expected E0204 mismatched-closer diagnostic, got {:?}",
+            r.diagnostics
+        );
+        // Still recovers to a usable RepeatForever node.
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::RepeatForever { body } => assert_eq!(body.len(), 1),
+            other => panic!("expected RepeatForever, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repeat_eof_no_double_report() {
+        // F-P4: at EOF, parse_block_until already emits E0203 — don't add a
+        // second mismatched-closer diagnostic.
+        let src = "Repeat\n  a\n";
+        let r = parse_src(src);
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_MISMATCHED_END_KEYWORD)),
+            "EOF should not produce a mismatched-closer diagnostic, got {:?}",
+            r.diagnostics
+        );
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == Some(E_UNTERMINATED_BLOCK)),
+            "expected E0203 at EOF, got {:?}",
+            r.diagnostics
+        );
+    }
+
     // ─── For ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -4386,6 +4529,31 @@ mod block_tests {
                         assert_eq!(body.len(), 2);
                         assert!(matches!(stmt_of(&r.arena, body[1]), Stmt::Continue));
                     }
+                    other => panic!("expected Case arm, got {other:?}"),
+                }
+            }
+            other => panic!("expected Select, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_recovers_from_bad_case_arm() {
+        // A malformed `Case` value (`*` cannot start an expression) must not
+        // discard the rest of the block: the parser records the diagnostic,
+        // resyncs to the next arm, and the well-formed `Case 2` survives.
+        // (Mirrors `parse_record_body`'s per-item recovery — finding F-P3.)
+        let src = "Select x\n  Case *\n  Case 2\n    a\nEndSelect\n";
+        let r = parse_src(src);
+        assert!(
+            !r.diagnostics.is_empty(),
+            "expected a diagnostic for the malformed `Case *` arm"
+        );
+        assert_eq!(r.program.len(), 1);
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::Select { arms, .. } => {
+                assert_eq!(arms.len(), 1, "well-formed `Case 2` arm should survive");
+                match case_arm_of(&r.arena, arms[0]) {
+                    CaseArm::Case { body, .. } => assert_eq!(body.len(), 1),
                     other => panic!("expected Case arm, got {other:?}"),
                 }
             }
@@ -4956,8 +5124,7 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 value,
                 is_global,
@@ -4982,8 +5149,7 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 is_global,
                 value,
                 ..

@@ -64,12 +64,14 @@ fn strip_single_quotes(raw: &str) -> &str {
 /// parser can keep going.
 fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
     let body = strip_single_quotes(raw);
-    // Offset of `body` inside the original literal (1 byte past the leading `"`).
-    let body_offset_in_lit: u32 = if raw.len() >= 2 && raw.starts_with('"') {
-        1
-    } else {
-        0
-    };
+    // Offset of `body` inside the original literal (1 byte past the leading
+    // `"`). This MUST use the same predicate as `strip_single_quotes`: if it
+    // didn't strip (e.g. a start quote but no end quote), `body == raw` starts
+    // at offset 0, and a `1` here would misalign every escape span by one byte
+    // (F-L14). `core::ptr` comparison can't span the borrow cleanly, so re-test
+    // the identical condition.
+    let stripped = raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"');
+    let body_offset_in_lit: u32 = if stripped { 1 } else { 0 };
 
     let mut out = String::with_capacity(body.len());
     let mut diags = Vec::new();
@@ -78,16 +80,11 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
     while i < bytes.len() {
         let b = bytes[i];
         if b != b'\\' {
-            // Push one UTF-8 character. `body` is valid UTF-8, so find the
-            // next character boundary using char_indices.
-            // Simpler: push as bytes via from_utf8_unchecked? No unsafe.
-            // Instead, scan to the next char boundary by checking high bits.
-            let ch_len = utf8_char_len(b);
-            // Bounds-check defensively in case of truncated UTF-8 (shouldn't
-            // happen — input is &str — but stay safe).
-            let end = (i + ch_len).min(bytes.len());
-            out.push_str(&body[i..end]);
-            i = end;
+            // Push one UTF-8 character. `i` is at a char boundary in the valid
+            // `&str`, so read the char there and advance by its encoded length.
+            let ch = body[i..].chars().next().expect("byte index in bounds");
+            out.push(ch);
+            i += ch.len_utf8();
             continue;
         }
 
@@ -218,15 +215,21 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                             "`\\u` value is not a valid Unicode scalar (surrogate or out of range)",
                             Label::new(span),
                         ));
-                        // Best-effort: skip the escape entirely.
+                        // Recovery: copy the offending source verbatim (`\uNNNN`),
+                        // matching the `\x` invalid-digits and unknown-escape arms
+                        // (F-L13). `body[i..hex_end]` is the `\u` plus four hex
+                        // digits, all ASCII, so this is a valid `&str` slice.
+                        out.push_str(&body[i..hex_end]);
                     }
                     i = hex_end;
                 }
             }
             _ => {
                 // Unknown escape character. Copy the offending characters
-                // verbatim ('\\' + the next char) and emit a diagnostic.
-                let ch_len = utf8_char_len(next);
+                // verbatim ('\\' + the next char) and emit a diagnostic. The
+                // escaped char begins at `i + 1`, a char boundary in `body`.
+                let ch = body[i + 1..].chars().next().expect("byte after `\\`");
+                let ch_len = ch.len_utf8();
                 let escape_end_in_lit = escape_start_in_lit + 1 + ch_len as u32;
                 let span = sub_span(lit_span, escape_start_in_lit, escape_end_in_lit);
                 diags.push(Diagnostic::error(
@@ -237,30 +240,13 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                 // Friendly recovery: drop the backslash and keep the literal
                 // character — `"a\qb"` → `"aqb"`. This matches the choice
                 // documented in the FD-002 plan.
-                let end = (i + 1 + ch_len).min(bytes.len());
-                out.push_str(&body[i + 1..end]);
-                i = end;
+                out.push(ch);
+                i += 1 + ch_len;
             }
         }
     }
 
     (out, diags)
-}
-
-fn utf8_char_len(first_byte: u8) -> usize {
-    if first_byte < 0x80 {
-        1
-    } else if first_byte < 0xC0 {
-        // Continuation byte appearing standalone — shouldn't happen in valid
-        // UTF-8 input, but stay defensive.
-        1
-    } else if first_byte < 0xE0 {
-        2
-    } else if first_byte < 0xF0 {
-        3
-    } else {
-        4
-    }
 }
 
 fn is_hex(b: u8) -> bool {
@@ -292,6 +278,8 @@ fn sub_span(lit_span: Span, start: u32, end: u32) -> Span {
 ///   newline before it up to the `"""` is the closer's indent.
 /// - Each non-empty content line must begin with at least that indent; that
 ///   indent is stripped from every content line.
+/// - Whitespace-only lines are normalized to empty (their whitespace, which is
+///   at most the closer indent, is dropped) — only the line's newline survives.
 /// - The leading newline after the opening `"""` is dropped; the trailing
 ///   whitespace + `"""` (the closer line) is also dropped.
 fn decode_raw(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
@@ -499,6 +487,36 @@ mod tests {
         let (_s, d) = decode_at(StrLitKind::Escaped, "\"\\uD83D\"");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
+    }
+
+    #[test]
+    fn escaped_unicode_surrogate_recovers_verbatim() {
+        // F-L13: an invalid-scalar `\u` escape now copies the source verbatim
+        // (like `\x` invalid-digits and the unknown-escape arm), rather than
+        // dropping the escape entirely.
+        let (s, d) = decode_at(StrLitKind::Escaped, "\"\\uD83D\"");
+        assert_eq!(s, "\\uD83D");
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
+    }
+
+    #[test]
+    fn escaped_body_offset_with_unterminated_literal() {
+        // F-L14: a token with a leading `"` but NO trailing `"` must not strip,
+        // so the body offset is 0 and the escape span aligns with the `\`.
+        // `"\q` (no closing quote): `\` is at literal byte index 1.
+        let lit = "\"\\q";
+        let span = Span::new(0, lit.len() as u32, FileId(0));
+        let (s, d) = decode(StrLitKind::Escaped, lit, span);
+        // strip_single_quotes returns the input verbatim (no trailing quote),
+        // so the leading `"` stays in the body and the unknown escape `\q`
+        // recovers to `q` → `"q`.
+        assert_eq!(s, "\"q");
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
+        // `\` is at index 1; span covers `\q` (2 bytes): 1..3, NOT 2..4.
+        assert_eq!(d[0].primary.span.start, 1);
+        assert_eq!(d[0].primary.span.end, 3);
     }
 
     #[test]

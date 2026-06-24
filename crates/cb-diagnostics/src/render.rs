@@ -24,8 +24,9 @@ use crate::source::{FileId, SourceMap};
 /// surfaced to the caller instead of being silently swallowed. Mapping
 /// from typed codespan-reporting errors to [`io::Error`] uses
 /// [`io::ErrorKind::InvalidInput`] for label-validation failures
-/// (caller bug) and [`io::ErrorKind::InvalidData`] for downstream
-/// codespan-reporting failures.
+/// (caller bug; produced by `validate_label`, not `emit`) and
+/// [`io::ErrorKind::InvalidData`] for downstream codespan-reporting
+/// failures (produced by `emit`'s non-`Io` arm).
 pub trait Renderer {
     /// Emit a single diagnostic. Implementations resolve spans against the
     /// supplied [`SourceMap`].
@@ -81,13 +82,10 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
         match term::emit(&mut self.writer, &self.config, &files, &cs) {
             Ok(()) => Ok(()),
             Err(FilesError::Io(e)) => Err(e),
-            Err(other) => {
-                eprintln!("cb-diagnostics: internal renderer error: {other}");
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    other.to_string(),
-                ))
-            }
+            Err(other) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                other.to_string(),
+            )),
         }
     }
 }
@@ -105,12 +103,19 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
 /// otherwise-renderable real error (FD-027). Genuine caller bugs — an inverted
 /// span, or an unknown *non-synthetic* `FileId` — still fail hard.
 fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
+    // All-builds backstop for the same `end >= start` invariant that
+    // [`Span::new`](crate::Span::new) only debug-asserts. Spans constructed
+    // via direct field syntax (or in release builds) reach here unchecked.
+    //
+    // Note: we trust `start`/`end` to land on `char` boundaries — unlike
+    // [`Source::offset_to_line_char_col`](crate::Source::offset_to_line_char_col),
+    // which floors mid-codepoint offsets, this does *not* reject a span whose
+    // bounds split a UTF-8 sequence. codespan-reporting tolerates such ranges.
     if label.span.end < label.span.start {
         let msg = format!(
             "invalid Span: end ({}) < start ({})",
             label.span.end, label.span.start
         );
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
     if label.span.file == FileId::SYNTHETIC {
@@ -118,17 +123,15 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
     }
     let Some(src) = sources.get(label.span.file) else {
         let msg = format!("Span references unknown FileId({})", label.span.file.0);
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     };
-    let text_len = u32::try_from(src.text.len())
-        .expect("source longer than u32::MAX bytes — Source builders forbid this");
+    // Reuse the byte length the `LineIndex` already stored at build time.
+    let text_len = src.line_index().text_len();
     if label.span.end > text_len {
         let msg = format!(
             "Span end ({}) exceeds source length ({}) of file '{}'",
             label.span.end, text_len, src.name
         );
-        eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     }
     Ok(())

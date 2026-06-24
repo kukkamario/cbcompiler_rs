@@ -15,7 +15,7 @@ fn lists() -> Void {
     r2 = next r0
     r3 = previous r1
     delete_lvalue local0
-    delete_lvalue global0
+    delete_lvalue_global global0
     delete_rvalue r0
     return
 }

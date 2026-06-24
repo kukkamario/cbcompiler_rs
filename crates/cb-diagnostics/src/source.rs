@@ -4,6 +4,25 @@
 //! [`Source`] precomputes a [`LineIndex`] so diagnostics can translate byte
 //! offsets to (line, column) coordinates lazily and cheaply.
 
+/// Allocate the next `u32` id for a collection of length `len`.
+///
+/// Two-stage exhaustion guard, shared by [`SourceMap`] and
+/// [`crate::Interner`]: `try_from` only fails once `len` exceeds `u32::MAX`
+/// (true overflow), while the `assert!` catches the one-short boundary —
+/// `id == u32::MAX` — which both collections reserve as a sentinel
+/// (`FileId::SYNTHETIC` / `Symbol::DUMMY`). `what` names the caller so the
+/// panic message identifies which collection exhausted.
+pub(crate) fn alloc_id(len: usize, what: &str) -> u32 {
+    let id =
+        u32::try_from(len).unwrap_or_else(|_| panic!("{what} exhausted: count exceeds u32::MAX"));
+    assert!(
+        id != u32::MAX,
+        "{what} exhausted: cannot allocate id {} — reserved as sentinel",
+        u32::MAX
+    );
+    id
+}
+
 /// Opaque identifier for a source file inside a [`SourceMap`].
 ///
 /// `FileId(u32::MAX)` is reserved as [`FileId::SYNTHETIC`] for tests and
@@ -53,6 +72,10 @@ impl Source {
     /// O(line length) because of the char-count walk.
     pub fn offset_to_line_char_col(&self, offset: u32) -> (u32, u32) {
         let (line1, byte_col) = self.line_index.offset_to_line_byte_col(offset);
+        // `offset_to_line_byte_col` always yields a line in `1..=line_count`, so
+        // the 0-based `line1 - 1` is in range for `line_byte_range`, which
+        // therefore returns `Some`. The two helpers share the same `LineIndex`,
+        // so they cannot disagree.
         let (line_start, _) = self
             .line_index
             .line_byte_range((line1 as usize) - 1)
@@ -100,6 +123,11 @@ impl SourceMap {
     /// against stale source with no signal. Callers that legitimately want a
     /// fresh slot for the same name should use [`SourceMap::add_anonymous`].
     ///
+    /// Cost: each call does an O(n) linear name scan (no name→id map), plus a
+    /// full-text compare on a name hit, so populating `n` distinct files is
+    /// O(n²). Fine for the handful of files a compile loads; revisit with a map
+    /// if that ever stops holding.
+    ///
     /// # Panics
     ///
     /// Panics if a source with the same `name` but different `text` is added,
@@ -140,13 +168,7 @@ impl SourceMap {
     }
 
     fn push_source(&mut self, name: String, text: String) -> FileId {
-        let idx = self.sources.len();
-        let id = u32::try_from(idx).expect("source map index overflowed u32");
-        assert!(
-            id != u32::MAX,
-            "source map exhausted: cannot allocate FileId({}) — reserved as SYNTHETIC",
-            u32::MAX
-        );
+        let id = alloc_id(self.sources.len(), "source map");
         self.sources.push(Source::new(name, text));
         FileId(id)
     }
@@ -170,10 +192,12 @@ impl SourceMap {
 
 /// Maps byte offsets to (line, column) coordinates within a single source.
 ///
-/// `newline_offsets[i]` is the byte offset where line `i + 2` starts — i.e.
-/// the position immediately after the `i`-th line terminator. Line 1 always
-/// starts at offset `0`. `\r\n` is treated as one terminator (length 2);
-/// `\n` and bare `\r` are each length 1 terminators.
+/// Numbering: line *numbers* are 1-based (line 1, line 2, …); `newline_offsets`
+/// is a 0-based array. `newline_offsets[i]` (0-based index `i`) is the byte
+/// offset where 1-based line number `i + 2` starts — i.e. the position
+/// immediately after the `i`-th line terminator. The 1-based line 1 always
+/// starts at offset `0` and has no entry in the array. `\r\n` is treated as one
+/// terminator (length 2); `\n` and bare `\r` are each length 1 terminators.
 ///
 /// # Bare `\r` vs codespan-reporting
 ///

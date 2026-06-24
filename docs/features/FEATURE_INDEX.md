@@ -6,11 +6,12 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 ## Active Features
 
-The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, FD-039 (memory blocks) completed 2026-06-21, FD-040 (File I/O) completed 2026-06-21, FD-041 (Sound) completed 2026-06-23, and FD-042 (default type inference — frontend QoL) completed 2026-06-23. **No active features** — remaining Backlog: Video (unblocked by Sound), then DATA / Encrypt / System / `CallDLL`.
+The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object runtime cluster completed 2026-06-20, the FD-037 runtime code-cleanup pass closed 2026-06-20, FD-038 (particle system) completed 2026-06-20, FD-039 (memory blocks) completed 2026-06-21, FD-040 (File I/O) completed 2026-06-21, FD-041 (Sound) completed 2026-06-23, and FD-042 (default type inference — frontend QoL) completed 2026-06-23. The **Bundle 6 code-review cleanup** (final Low-severity sweep) landed two **Planned** follow-ups for work deferred out of that pass. Remaining Backlog: Video (unblocked by Sound), then DATA / Encrypt / System / `CallDLL`.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| _(none active)_ | | | | |
+| [FD-044](FD-044_BACKEND_TRAIT_SEAM.md) | Backend Trait Seam | Planned | Medium | Medium |
+| [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Planned | Low–Medium | Low |
 
 ## Completed
 

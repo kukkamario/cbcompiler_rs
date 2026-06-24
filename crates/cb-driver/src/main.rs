@@ -28,6 +28,9 @@ use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 ///   these), an unreadable input file, a runtime-catalog load failure, or an
 ///   unknown / not-compiled-in `--backend`.
 /// * `3` — the requested backend is recognised but not yet implemented.
+///   Only reachable in builds with the `llvm` feature; the constant is
+///   `#[cfg(feature = "llvm")]`, so this code does not exist in an
+///   interp-only build.
 mod exit {
     /// Driver or usage error. Matches clap's own exit code for argument errors.
     pub const USAGE: u8 = 2;
@@ -295,6 +298,12 @@ fn main() -> ExitCode {
                 }
                 #[cfg(feature = "llvm")]
                 Some(Backend::Llvm) => {
+                    // The `cb-backend-llvm` dependency is intentionally pre-wired
+                    // (Cargo.toml `dep:cb-backend-llvm`) ahead of codegen: the
+                    // `llvm` feature flips `HAS_LLVM` and adds this enum variant,
+                    // but nothing here calls into the crate yet. Until codegen
+                    // lands we report the gap explicitly (FD-025) rather than
+                    // silently doing nothing.
                     eprintln!(
                         "cb: the llvm backend is not yet implemented; \
                          run with --backend interp to execute programs"
