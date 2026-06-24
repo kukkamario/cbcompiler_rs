@@ -1,6 +1,6 @@
 # FD-044: Backend Trait Seam
 
-**Status:** In Progress
+**Status:** Pending Verification
 **Created:** 2026-06-24
 **Priority:** Medium (blocking for LLVM codegen)
 **Effort:** Medium (a load-bearing structural decision — trait shape, crate placement)
@@ -211,6 +211,27 @@ impl cb_backend_api::Backend for LlvmBackend {
 - `cargo clippy --workspace --all-targets -- -D warnings` clean across all four combos (watch for newly-dead `#[cfg]` gates on `clamp_exit` / `BACKEND_UNIMPLEMENTED`); `cargo fmt --all` clean.
 - Manual smoke: `cb --backend llvm <file>` (llvm build) still exits 3 with "not yet implemented"; `cb <file>` (interp) runs and returns the program exit code; `cb --dump-ast <file>` works under `--no-default-features`.
 - Confirms the architectural goal: a hypothetical third backend would need a new crate implementing `Backend` + one line in `make_backend`, with **no** new arms in the driver's run logic.
+
+## Implementation status
+
+All five migration steps landed on branch `claude/fd-044-backend-trait-seam`:
+
+- **Trait seam** (steps 1–4): new `cb-backend-api` crate (`Backend` trait,
+  `BackendOutcome::{Ran, Produced}`, `BackendError{kind, message}`); `InterpBackend`
+  wrapping `interpret`; `LlvmBackend` stub returning `unimplemented`; driver
+  rewired to a `make_backend` factory + single backend-agnostic call site, with
+  `clamp_exit` / `exit::BACKEND_UNIMPLEMENTED` now compiled unconditionally.
+- **Lib extraction** (step 5): `cb-driver/src/lib.rs` holds the backend-free
+  `compile(path, &PipelineOptions) -> Compilation` pipeline + the exit-code
+  contract; `main.rs` is now a thin shell. A future second binary reuses the lib.
+
+**Verified** (Windows, SDK-free + interp): no observable behavior change across
+the FD-025 four-feature matrix (interp / interp+llvm / none / llvm-only) —
+`cargo test --workspace` and per-combo `cb-driver` tests green; `clippy
+--all-targets -D warnings` clean in every combo; `cargo fmt --all --check` clean;
+smoke: interp run → exit 0, `--backend llvm` → exit 3 (identical message),
+`--dump-ast` under `--no-default-features` → exit 0, no-backend valid program →
+exit 2. Awaiting `/fd-verify` sign-off.
 
 ## References
 

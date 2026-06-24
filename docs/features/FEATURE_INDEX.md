@@ -11,7 +11,7 @@ The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object r
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-045](FD-045_CATALOG_METADATA_DECOUPLING.md) | Catalog Metadata Decoupling | Planned | High | Medium |
-| [FD-044](FD-044_BACKEND_TRAIT_SEAM.md) | Backend Trait Seam | In Progress | Medium | Medium |
+| [FD-044](FD-044_BACKEND_TRAIT_SEAM.md) | Backend Trait Seam | Pending Verification | Medium | Medium |
 | [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Planned | Low–Medium | Low |
 
 ## Completed
