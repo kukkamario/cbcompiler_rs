@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cb-backend-api",
     "crates/cb-backend-interp",
     "crates/cb-backend-llvm",
     "crates/cb-diagnostics",
@@ -34,6 +35,7 @@ unicode-case-mapping = "1"
 unicode-ident = "1"
 
 # Internal crates (path entries so other crates can switch to `workspace = true`)
+cb-backend-api = { path = "crates/cb-backend-api" }
 cb-backend-interp = { path = "crates/cb-backend-interp" }
 cb-backend-llvm = { path = "crates/cb-backend-llvm" }
 cb-diagnostics = { path = "crates/cb-diagnostics" }

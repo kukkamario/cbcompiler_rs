@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+cb-backend-api = { path = "../cb-backend-api" }
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-ir = { path = "../cb-ir" }
 cb-runtime-sys = { path = "../cb-runtime-sys" }

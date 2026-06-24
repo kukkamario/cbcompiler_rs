@@ -1,6 +1,6 @@
 # FD-044: Backend Trait Seam
 
-**Status:** Open
+**Status:** In Progress
 **Created:** 2026-06-24
 **Priority:** Medium (blocking for LLVM codegen)
 **Effort:** Medium (a load-bearing structural decision — trait shape, crate placement)

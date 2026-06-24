@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use cb_backend_api::{BackendErrorKind, BackendOutcome};
 use cb_diagnostics::{CliRenderer, Diagnostic, Renderer, Severity, SourceMap};
 use cb_frontend::ast_print;
 use cb_frontend::parser::ParseResult;
@@ -27,16 +28,15 @@ use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 /// * `2` — driver/usage error: bad CLI arguments (clap also exits `2` for
 ///   these), an unreadable input file, a runtime-catalog load failure, or an
 ///   unknown / not-compiled-in `--backend`.
-/// * `3` — the requested backend is recognised but not yet implemented.
-///   Only reachable in builds with the `llvm` feature; the constant is
-///   `#[cfg(feature = "llvm")]`, so this code does not exist in an
-///   interp-only build.
+/// * `3` — the requested backend is recognised but not yet implemented
+///   (today: `llvm`). The driver maps a [`BackendErrorKind::Unimplemented`]
+///   here. Only actually produced when such a backend is compiled in and
+///   selected, but the mapping is compiled unconditionally so the dispatch
+///   site stays backend-agnostic.
 mod exit {
     /// Driver or usage error. Matches clap's own exit code for argument errors.
     pub const USAGE: u8 = 2;
     /// Backend selected is recognised but has no codegen yet (e.g. `llvm`).
-    /// Only referenced when an unimplemented backend is compiled in.
-    #[cfg(feature = "llvm")]
     pub const BACKEND_UNIMPLEMENTED: u8 = 3;
 }
 
@@ -105,6 +105,20 @@ fn default_backend() -> Option<Backend> {
     }
 }
 
+/// Instantiate the selected backend as a `Box<dyn Backend>` (FD-044). This is
+/// the single feature-gated dispatch point: the run site downstream calls
+/// `backend.execute(...)` with no backend-specific `match`. In a no-backend
+/// build `Backend` is uninhabited, so the body is an empty (diverging) match
+/// and this is never reached.
+fn make_backend(sel: Backend) -> Box<dyn cb_backend_api::Backend> {
+    match sel {
+        #[cfg(feature = "interp")]
+        Backend::Interp => Box::new(cb_backend_interp::InterpBackend),
+        #[cfg(feature = "llvm")]
+        Backend::Llvm => Box::new(cb_backend_llvm::LlvmBackend),
+    }
+}
+
 fn parse_backend(name: &str) -> Result<Backend, String> {
     match name {
         #[cfg(feature = "interp")]
@@ -138,8 +152,9 @@ fn parse_backend(name: &str) -> Result<Backend, String> {
 /// success. Values above `255` saturate to `255` (still non-zero, still a
 /// failure); negative values clamp to `0`.
 ///
-/// Only the interpreter backend produces a program-level exit code today.
-#[cfg(feature = "interp")]
+/// Only a backend that *runs* the program ([`BackendOutcome::Ran`]) produces a
+/// program-level exit code; today that is the interpreter. Compiled
+/// unconditionally because the dispatch site references it for any backend.
 fn clamp_exit(code: i32) -> u8 {
     code.clamp(0, 255) as u8
 }
@@ -180,15 +195,15 @@ fn main() -> ExitCode {
     // `--dump-ir`. The "no backend compiled in" error is deferred to the point
     // where we would actually run a program (see the run dispatch below). An
     // explicitly named but invalid/unavailable backend still fails fast.
-    let backend: Option<Backend> = match backend_arg {
+    let backend: Option<Box<dyn cb_backend_api::Backend>> = match backend_arg {
         Some(name) => match parse_backend(&name) {
-            Ok(b) => Some(b),
+            Ok(b) => Some(make_backend(b)),
             Err(msg) => {
                 eprintln!("cb: {msg}");
                 return ExitCode::from(exit::USAGE);
             }
         },
-        None => default_backend(),
+        None => default_backend().map(make_backend),
     };
 
     let text = match std::fs::read_to_string(&path) {
@@ -282,33 +297,30 @@ fn main() -> ExitCode {
 
         if !dump_ast && !dump_ir {
             match backend {
-                #[cfg(feature = "interp")]
-                Some(Backend::Interp) => {
-                    // `Ok(code)` is the program's own exit code (`End` → 0,
-                    // `MakeError` → 1, `request_exit(n)` → n); `Err` is an
-                    // interpreter trap / internal error, which always maps to
-                    // exit 1 with a diagnostic.
-                    match cb_backend_interp::interpret(&ir_program, &sema_result.interner) {
-                        Ok(code) => return ExitCode::from(clamp_exit(code)),
+                Some(backend) => {
+                    // Backend-agnostic dispatch (FD-044): the backend either ran
+                    // the program — returning its own exit code, which we clamp
+                    // to an OS code — or produced an artifact. On `Err`, the
+                    // `kind` selects the exit code, keeping all OS-exit policy
+                    // here in the driver (FD-025): `Unimplemented` (e.g. the
+                    // llvm stub) → 3, any other failure (an interpreter trap /
+                    // internal error) → 1, each with a diagnostic.
+                    match backend.execute(&ir_program, &sema_result.interner) {
+                        Ok(BackendOutcome::Ran { exit_code }) => {
+                            return ExitCode::from(clamp_exit(exit_code));
+                        }
+                        Ok(BackendOutcome::Produced { artifact }) => {
+                            println!("cb: wrote {}", artifact.display());
+                            return ExitCode::SUCCESS;
+                        }
                         Err(e) => {
-                            eprintln!("cb: {e}");
-                            return ExitCode::from(1);
+                            eprintln!("cb: {}", e.message);
+                            return ExitCode::from(match e.kind {
+                                BackendErrorKind::Unimplemented => exit::BACKEND_UNIMPLEMENTED,
+                                BackendErrorKind::Failed => 1,
+                            });
                         }
                     }
-                }
-                #[cfg(feature = "llvm")]
-                Some(Backend::Llvm) => {
-                    // The `cb-backend-llvm` dependency is intentionally pre-wired
-                    // (Cargo.toml `dep:cb-backend-llvm`) ahead of codegen: the
-                    // `llvm` feature flips `HAS_LLVM` and adds this enum variant,
-                    // but nothing here calls into the crate yet. Until codegen
-                    // lands we report the gap explicitly (FD-025) rather than
-                    // silently doing nothing.
-                    eprintln!(
-                        "cb: the llvm backend is not yet implemented; \
-                         run with --backend interp to execute programs"
-                    );
-                    return ExitCode::from(exit::BACKEND_UNIMPLEMENTED);
                 }
                 None => {
                     eprintln!(
