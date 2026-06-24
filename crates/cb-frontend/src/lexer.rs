@@ -51,6 +51,10 @@ const E_MALFORMED_NUMBER: DiagnosticCode = DiagnosticCode::new("E0107");
 /// sized generously enough for any reasonable literal.
 const DIGIT_SCRATCH: usize = 64;
 
+/// Marker returned by [`Lexer::append_stripped`] when a digit run exceeds
+/// [`DIGIT_SCRATCH`]; the caller turns it into a malformed-number diagnostic.
+struct Overflow;
+
 struct Lexer<'src> {
     src: &'src str,
     bytes: &'src [u8],
@@ -172,8 +176,10 @@ impl<'src> Lexer<'src> {
                     self.scan_string(start);
                 }
             }
-            b'$' => self.scan_number_hex(start),
-            b'%' => self.scan_number_binary(start),
+            b'$' => {
+                self.scan_radix_number(start, b'$', |b| b.is_ascii_hexdigit(), 16, "hexadecimal")
+            }
+            b'%' => self.scan_radix_number(start, b'%', |b| matches!(b, b'0' | b'1'), 2, "binary"),
             b'0'..=b'9' => self.scan_number_decimal_or_float(start),
             // Operators and punctuation handled in a dedicated path.
             b'+' | b'-' | b'*' | b'^' | b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b','
@@ -589,6 +595,28 @@ impl<'src> Lexer<'src> {
         (run_start, self.pos, bad_sep)
     }
 
+    /// Append `src` into `buf` starting at `*n`, skipping `_` separators.
+    /// Returns `Err(Overflow)` if the digit run doesn't fit; the caller then
+    /// reports a malformed-number diagnostic. Shared by the float
+    /// int/frac/exponent sub-parts and by `strip_underscores`.
+    fn append_stripped(
+        buf: &mut [u8; DIGIT_SCRATCH],
+        n: &mut usize,
+        src: &[u8],
+    ) -> Result<(), Overflow> {
+        for &b in src {
+            if b == b'_' {
+                continue;
+            }
+            if *n >= buf.len() {
+                return Err(Overflow);
+            }
+            buf[*n] = b;
+            *n += 1;
+        }
+        Ok(())
+    }
+
     /// Strip underscores from `src_bytes` into `scratch`, returning the slice
     /// of `scratch` actually filled. If the digit run doesn't fit, returns
     /// `None` (signal for overflow handling).
@@ -597,16 +625,7 @@ impl<'src> Lexer<'src> {
         scratch: &'a mut [u8; DIGIT_SCRATCH],
     ) -> Option<&'a str> {
         let mut n = 0usize;
-        for &b in src_bytes {
-            if b == b'_' {
-                continue;
-            }
-            if n >= scratch.len() {
-                return None;
-            }
-            scratch[n] = b;
-            n += 1;
-        }
+        Self::append_stripped(scratch, &mut n, src_bytes).ok()?;
         // Safe — only ASCII digits/letters reach scratch.
         std::str::from_utf8(&scratch[..n]).ok()
     }
@@ -675,16 +694,15 @@ impl<'src> Lexer<'src> {
             let mut buf = [0u8; DIGIT_SCRATCH];
             let mut n = 0usize;
             // int part
-            for &b in &self.bytes[int_lo as usize..int_hi as usize] {
-                if b == b'_' {
-                    continue;
-                }
-                if n >= buf.len() {
-                    self.report_malformed_number(span);
-                    return;
-                }
-                buf[n] = b;
-                n += 1;
+            if Self::append_stripped(
+                &mut buf,
+                &mut n,
+                &self.bytes[int_lo as usize..int_hi as usize],
+            )
+            .is_err()
+            {
+                self.report_malformed_number(span);
+                return;
             }
             if frac_hi > frac_lo {
                 if n >= buf.len() {
@@ -693,16 +711,15 @@ impl<'src> Lexer<'src> {
                 }
                 buf[n] = b'.';
                 n += 1;
-                for &b in &self.bytes[frac_lo as usize..frac_hi as usize] {
-                    if b == b'_' {
-                        continue;
-                    }
-                    if n >= buf.len() {
-                        self.report_malformed_number(span);
-                        return;
-                    }
-                    buf[n] = b;
-                    n += 1;
+                if Self::append_stripped(
+                    &mut buf,
+                    &mut n,
+                    &self.bytes[frac_lo as usize..frac_hi as usize],
+                )
+                .is_err()
+                {
+                    self.report_malformed_number(span);
+                    return;
                 }
             }
             if exp_hi > exp_lo {
@@ -726,16 +743,10 @@ impl<'src> Lexer<'src> {
                     break;
                 }
                 // Append `e[sign]<digits>` from `p` to `exp_hi`, stripping underscores.
-                for &b in &self.bytes[p..exp_hi as usize] {
-                    if b == b'_' {
-                        continue;
-                    }
-                    if n >= buf.len() {
-                        self.report_malformed_number(span);
-                        return;
-                    }
-                    buf[n] = b;
-                    n += 1;
+                if Self::append_stripped(&mut buf, &mut n, &self.bytes[p..exp_hi as usize]).is_err()
+                {
+                    self.report_malformed_number(span);
+                    return;
                 }
             }
             let s = match std::str::from_utf8(&buf[..n]) {
@@ -772,18 +783,30 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn scan_number_hex(&mut self, start: u32) {
-        debug_assert_eq!(self.peek_byte(), Some(b'$'));
-        self.bump_byte(); // '$'
-        // Must be followed by a hex digit; if next is '_' or absent/non-hex, report.
+    /// Scan a radix-prefixed integer literal (`$..` hex, `%..` binary). The two
+    /// forms differ only in the prefix byte, digit predicate, parse radix, and
+    /// the noun used in diagnostics; everything else — leading-`_` pre-check,
+    /// empty-run handling, separator validation, and overflow — is shared.
+    fn scan_radix_number(
+        &mut self,
+        start: u32,
+        prefix: u8,
+        is_digit: fn(u8) -> bool,
+        radix: u32,
+        label: &'static str,
+    ) {
+        let prefix_char = prefix as char;
+        debug_assert_eq!(self.peek_byte(), Some(prefix));
+        self.bump_byte(); // prefix
+        // Must be followed by a digit; if next is '_' or absent/non-digit, report.
         let mut pre_consumed_underscore = false;
         match self.peek_byte() {
-            Some(b) if b.is_ascii_hexdigit() => {}
+            Some(b) if is_digit(b) => {}
             Some(b'_') => {
                 let bad_span = Span::new(self.pos, self.pos + 1, self.file);
                 self.diagnostics.push(Diagnostic::error(
                     E_INVALID_DIGIT_SEPARATOR,
-                    "digit separator cannot appear before any hexadecimal digit",
+                    format!("digit separator cannot appear before any {label} digit"),
                     Label::new(bad_span),
                 ));
                 // Pre-consume the offending `_` so `scan_digit_run` does not
@@ -795,7 +818,7 @@ impl<'src> Lexer<'src> {
                 let span = self.current_span(start);
                 self.diagnostics.push(Diagnostic::error(
                     E_UNEXPECTED_CHAR,
-                    "expected hexadecimal digits after `$`",
+                    format!("expected {label} digits after `{prefix_char}`"),
                     Label::new(span),
                 ));
                 self.push_token(TokenKind::Error(LexErrorKind::UnexpectedChar), span);
@@ -803,20 +826,20 @@ impl<'src> Lexer<'src> {
             }
         }
         let (run_lo, run_hi, bad_sep_from_run) = if pre_consumed_underscore {
-            self.scan_digit_run_no_leading_diag(|b| b.is_ascii_hexdigit(), "hexadecimal")
+            self.scan_digit_run_no_leading_diag(is_digit, label)
         } else {
-            self.scan_digit_run(|b| b.is_ascii_hexdigit(), "hexadecimal")
+            self.scan_digit_run(is_digit, label)
         };
         let span = self.current_span(start);
         let raw = &self.bytes[run_lo as usize..run_hi as usize];
         if raw.is_empty() {
-            // `$_` form — separator was diagnosed at the pre-check, but the
-            // deeper problem is that the literal has no hex digits at all.
-            // Emit the "expected hex digits" diagnostic too so the user
-            // doesn't have to guess what's wrong.
+            // `$_` / `%_` form — the separator was diagnosed at the pre-check,
+            // but the deeper problem is that the literal has no digits at all.
+            // Emit the "expected digits" diagnostic too so the user doesn't
+            // have to guess what's wrong.
             self.diagnostics.push(Diagnostic::error(
                 E_UNEXPECTED_CHAR,
-                "expected hexadecimal digits after `$`",
+                format!("expected {label} digits after `{prefix_char}`"),
                 Label::new(span),
             ));
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
@@ -837,72 +860,7 @@ impl<'src> Lexer<'src> {
                 return;
             }
         };
-        match u64::from_str_radix(stripped, 16) {
-            Ok(v) => self.push_token(TokenKind::IntLit(v), span),
-            Err(_) => self.report_malformed_number(span),
-        }
-    }
-
-    fn scan_number_binary(&mut self, start: u32) {
-        debug_assert_eq!(self.peek_byte(), Some(b'%'));
-        self.bump_byte(); // '%'
-        let mut pre_consumed_underscore = false;
-        match self.peek_byte() {
-            Some(b'0') | Some(b'1') => {}
-            Some(b'_') => {
-                let bad_span = Span::new(self.pos, self.pos + 1, self.file);
-                self.diagnostics.push(Diagnostic::error(
-                    E_INVALID_DIGIT_SEPARATOR,
-                    "digit separator cannot appear before any binary digit",
-                    Label::new(bad_span),
-                ));
-                // Pre-consume the offending `_` so `scan_digit_run` does not
-                // re-diagnose the same byte as a leading separator.
-                self.bump_byte();
-                pre_consumed_underscore = true;
-            }
-            _ => {
-                let span = self.current_span(start);
-                self.diagnostics.push(Diagnostic::error(
-                    E_UNEXPECTED_CHAR,
-                    "expected binary digits after `%`",
-                    Label::new(span),
-                ));
-                self.push_token(TokenKind::Error(LexErrorKind::UnexpectedChar), span);
-                return;
-            }
-        }
-        let (run_lo, run_hi, bad_sep_from_run) = if pre_consumed_underscore {
-            self.scan_digit_run_no_leading_diag(|b| matches!(b, b'0' | b'1'), "binary")
-        } else {
-            self.scan_digit_run(|b| matches!(b, b'0' | b'1'), "binary")
-        };
-        let span = self.current_span(start);
-        let raw = &self.bytes[run_lo as usize..run_hi as usize];
-        if raw.is_empty() {
-            // `%_` form — see comment in `scan_number_hex` above.
-            self.diagnostics.push(Diagnostic::error(
-                E_UNEXPECTED_CHAR,
-                "expected binary digits after `%`",
-                Label::new(span),
-            ));
-            self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
-            return;
-        }
-        let bad_sep_real = bad_sep_from_run || Self::has_separator_issue(raw);
-        if bad_sep_real {
-            self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
-            return;
-        }
-        let mut scratch = [0u8; DIGIT_SCRATCH];
-        let stripped = match Self::strip_underscores(raw, &mut scratch) {
-            Some(s) => s,
-            None => {
-                self.report_malformed_number(span);
-                return;
-            }
-        };
-        match u64::from_str_radix(stripped, 2) {
+        match u64::from_str_radix(stripped, radix) {
             Ok(v) => self.push_token(TokenKind::IntLit(v), span),
             Err(_) => self.report_malformed_number(span),
         }

@@ -1,7 +1,7 @@
 //! Main analysis engine — declaration collection (pass 1) and type checking (pass 2).
 
 use cb_diagnostics::{Diagnostic, FileId, Interner, Label, Span, Symbol};
-use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt};
+use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt, TypeDeclKind};
 use cb_frontend::{Arena, BinOp, NodeId, Sigil, SpanExt, UnOp};
 
 use crate::convert::{self, ConversionTable};
@@ -571,13 +571,19 @@ impl<'a> Checker<'a> {
             }) => {
                 self.pass1_function(scope, name_span, return_sigil, &params, return_ty, span);
             }
-            Node::Stmt(Stmt::Type { name_span, fields }) => {
-                self.pass1_type_def(scope, name_span, &fields, span);
+            Node::Stmt(Stmt::TypeDecl {
+                kind,
+                name_span,
+                fields,
+            }) => {
+                self.pass1_type_decl(scope, kind, name_span, &fields, span);
             }
-            Node::Stmt(Stmt::Struct { name_span, fields }) => {
-                self.pass1_struct_def(scope, name_span, &fields, span);
-            }
-            Node::Stmt(Stmt::Global { names, ty, init: _ }) => {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: true,
+                names,
+                ty,
+                init: _,
+            }) => {
                 self.pass1_global(scope, &names, ty);
             }
             Node::Stmt(Stmt::Label { name_span }) => {
@@ -654,14 +660,10 @@ impl<'a> Checker<'a> {
         self.try_declare(scope, name, decl, E_DUPLICATE_DEFINITION);
     }
 
-    fn pass1_type_def(
-        &mut self,
-        scope: ScopeId,
-        name_span: Span,
-        fields: &[NodeId],
-        _full_span: Span,
-    ) {
-        let name = self.intern_span(name_span);
+    /// Collect a `Type`/`Struct` body's `FieldDecl`s into `FieldInfo`s,
+    /// emitting the sigil/`As` disagreement diagnostic (E0320) per field.
+    /// Shared by both record kinds (S-M11).
+    fn collect_fields(&mut self, fields: &[NodeId]) -> Vec<FieldInfo> {
         let mut field_infos = Vec::with_capacity(fields.len());
         for &fid in fields {
             if let Node::Stmt(Stmt::FieldDecl {
@@ -687,55 +689,39 @@ impl<'a> Checker<'a> {
                 });
             }
         }
-        let decl = Declaration {
-            kind: DeclKind::TypeDef {
-                fields: field_infos,
-            },
-            ty: Type::TypeRef { name },
-            span: name_span,
-            is_global: false,
-        };
-        self.try_declare(scope, name, decl, E_DUPLICATE_DEFINITION);
+        field_infos
     }
 
-    fn pass1_struct_def(
+    /// Register a `Type` or `Struct` declaration. The two forms differ only in
+    /// the resulting `DeclKind`/`Type` (heap reference vs value), selected from
+    /// `kind` (F-A1); the field collection is shared.
+    fn pass1_type_decl(
         &mut self,
         scope: ScopeId,
+        kind: TypeDeclKind,
         name_span: Span,
         fields: &[NodeId],
         _full_span: Span,
     ) {
         let name = self.intern_span(name_span);
-        let mut field_infos = Vec::with_capacity(fields.len());
-        for &fid in fields {
-            if let Node::Stmt(Stmt::FieldDecl {
-                name_span: fname_span,
-                sigil,
-                ty,
-            }) = &self.arena[fid]
-            {
-                let fname = self.intern_ident(*fname_span, *sigil);
-                let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let (fty, sigil_as_disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
-                if sigil_as_disagree {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_SIGIL_AS_DISAGREE,
-                        "sigil and `As` type disagree",
-                        Label::new(*fname_span),
-                    ));
-                }
-                field_infos.push(FieldInfo {
-                    name: fname,
-                    ty: fty,
-                    span: *fname_span,
-                });
-            }
-        }
+        let field_infos = self.collect_fields(fields);
+        let (decl_kind, ty) = match kind {
+            TypeDeclKind::Type => (
+                DeclKind::TypeDef {
+                    fields: field_infos,
+                },
+                Type::TypeRef { name },
+            ),
+            TypeDeclKind::Struct => (
+                DeclKind::StructDef {
+                    fields: field_infos,
+                },
+                Type::StructVal { name },
+            ),
+        };
         let decl = Declaration {
-            kind: DeclKind::StructDef {
-                fields: field_infos,
-            },
-            ty: Type::StructVal { name },
+            kind: decl_kind,
+            ty,
             span: name_span,
             is_global: false,
         };
@@ -1509,27 +1495,26 @@ impl<'a> Checker<'a> {
                     self.check_expr(expr);
                 }
             }
-            Node::Stmt(Stmt::Dim { names, ty, init }) => {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: false,
+                names,
+                ty,
+                init,
+            }) => {
                 self.check_dim(&names, ty, init);
             }
-            Node::Stmt(Stmt::Global {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: true,
                 names,
                 ty,
                 init: Some(init_id),
             }) => {
                 let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let init_ty = self.check_expr(init_id);
-                // Coerce the initializer to the declared type (mirror check_dim
-                // / check_assign) so lowering emits the right Convert (FD-035).
-                // Global-with-initializer is single-name.
-                if let Some(dn) = names.first() {
-                    let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
-                    if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
-                        self.coerce(init_id, &init_ty, &var_ty);
-                    }
-                }
+                self.coerce_initializer(init_id, &names, as_ty.as_ref());
             }
-            Node::Stmt(Stmt::Global { .. }) => {}
+            Node::Stmt(Stmt::VarDecl {
+                is_global: true, ..
+            }) => {}
             Node::Stmt(Stmt::Const {
                 name_span,
                 sigil,
@@ -1676,8 +1661,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             // Statements that are already handled or require no type checking:
-            Node::Stmt(Stmt::Type { .. })
-            | Node::Stmt(Stmt::Struct { .. })
+            Node::Stmt(Stmt::TypeDecl { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
             | Node::Stmt(Stmt::End)
             | Node::Stmt(Stmt::Include { .. })
@@ -1955,6 +1939,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Coerce a single-name declaration's initializer to its declared type so
+    /// lowering emits the right `Convert` (FD-035 / mirror `check_assign`).
+    /// Shared by `Dim` and `Global`; `check_expr` runs unconditionally (even
+    /// with empty `names`) to match the prior inline behavior, while the
+    /// coercion itself is single-name.
+    fn coerce_initializer(
+        &mut self,
+        init_id: NodeId,
+        names: &[cb_frontend::DimName],
+        as_ty: Option<&Type>,
+    ) {
+        let init_ty = self.check_expr(init_id);
+        if let Some(dn) = names.first() {
+            let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty);
+            if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
+                self.coerce(init_id, &init_ty, &var_ty);
+            }
+        }
+    }
+
     fn check_dim(
         &mut self,
         names: &[cb_frontend::DimName],
@@ -1985,16 +1989,7 @@ impl<'a> Checker<'a> {
         }
 
         if let Some(init_id) = init {
-            let init_ty = self.check_expr(init_id);
-            // Coerce the initializer to the declared type (mirror check_assign)
-            // so lowering emits the right Convert and narrowing is range-checked
-            // / warned (FD-035). Dim-with-initializer is single-name.
-            if let Some(dn) = names.first() {
-                let (var_ty, _) = types::resolve_var_type(dn.sigil, as_ty.as_ref());
-                if !init_ty.is_error() && !var_ty.is_error() && init_ty != var_ty {
-                    self.coerce(init_id, &init_ty, &var_ty);
-                }
-            }
+            self.coerce_initializer(init_id, names, as_ty.as_ref());
         }
     }
 

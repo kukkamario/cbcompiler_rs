@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 use cb_diagnostics::{Diagnostic, Severity};
-use cb_frontend::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeExpr};
+use cb_frontend::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeDeclKind, TypeExpr};
 use cb_frontend::span::FileId;
 use cb_frontend::token::{Kw, Sigil, StrLitKind};
 use cb_frontend::{BinOp, LexerOptions, UnOp, parse, tokenize};
@@ -129,18 +129,14 @@ fn format_stmt(s: &Stmt) -> String {
     match s {
         Stmt::Assign { .. } => "Assign".to_string(),
         Stmt::ExprStmt { .. } => "ExprStmt".to_string(),
-        Stmt::Dim {
-            names, ty, init, ..
+        Stmt::VarDecl {
+            is_global,
+            names,
+            ty,
+            init,
         } => format!(
-            "Dim(names={}, has_ty={}, has_init={})",
-            names.len(),
-            ty.is_some(),
-            init.is_some(),
-        ),
-        Stmt::Global {
-            names, ty, init, ..
-        } => format!(
-            "Global(names={}, has_ty={}, has_init={})",
+            "{}(names={}, has_ty={}, has_init={})",
+            if *is_global { "Global" } else { "Dim" },
             names.len(),
             ty.is_some(),
             init.is_some(),
@@ -193,8 +189,14 @@ fn format_stmt(s: &Stmt) -> String {
             return_sigil.map(sigil_str).unwrap_or("None"),
             return_ty.is_some(),
         ),
-        Stmt::Type { fields, .. } => format!("Type(fields={})", fields.len()),
-        Stmt::Struct { fields, .. } => format!("Struct(fields={})", fields.len()),
+        Stmt::TypeDecl { kind, fields, .. } => format!(
+            "{}(fields={})",
+            match kind {
+                TypeDeclKind::Type => "Type",
+                TypeDeclKind::Struct => "Struct",
+            },
+            fields.len()
+        ),
         Stmt::FieldDecl { sigil, ty, .. } => format!(
             "FieldDecl(sigil={}, has_ty={})",
             sigil.map(sigil_str).unwrap_or("None"),
@@ -332,7 +334,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.push(*value);
             }
             Stmt::ExprStmt { expr } => out.push(*expr),
-            Stmt::Dim { ty, init, .. } | Stmt::Global { ty, init, .. } => {
+            Stmt::VarDecl { ty, init, .. } => {
                 if let Some(t) = ty {
                     out.push(*t);
                 }
@@ -420,7 +422,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 }
                 out.extend_from_slice(body);
             }
-            Stmt::Type { fields, .. } | Stmt::Struct { fields, .. } => {
+            Stmt::TypeDecl { fields, .. } => {
                 out.extend_from_slice(fields);
             }
             Stmt::FieldDecl { ty: Some(t), .. } => {

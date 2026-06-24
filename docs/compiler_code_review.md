@@ -23,18 +23,20 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 
 | Domain | High | Medium | Low |
 |---|---|---|---|
-| Sema (check / lower / types / scope) | 0 | 6 | 21 |
-| Frontend (lexer / parser / AST) | 0 | 12 | 28 |
-| IR + Interpreter | 0 | 1 | 24 |
+| Sema (check / lower / types / scope) | 0 | 2 | 21 |
+| Frontend (lexer / parser / AST) | 0 | 6 | 27 |
+| IR + Interpreter | 0 | 0 | 24 |
 | Diagnostics + Runtime/Driver/LLVM | 0 | 0 | 20 |
 
 > **Resolved findings have been removed from this report.** Fixed and dropped:
 > the four High-severity `cb-sema` miscompiles (S-H1–S-H4); the "Bundle 1" sema
 > validation gaps (S-M1–S-M5); the "Bundle 2" fail-loud robustness items (S-M6,
 > S-M7, S-M8, II-V1, II-V2, II-V3 — except the still-deferred `Call`-result/
-> signature cross-check — II-V20, II-V27); and the "Bundle 3" behavioral
-> inconsistencies (DR-R1, DR-R2/DR-R3, II-V26). DR-D6 was a false positive and
-> is recorded under [Confirmed non-issues](#confirmed-non-issues-checked-and-rejected).
+> signature cross-check — II-V20, II-V27); the "Bundle 3" behavioral
+> inconsistencies (DR-R1, DR-R2/DR-R3, II-V26); and the "Bundle 4" de-dup sweep
+> + AST consolidation (S-M11, S-M12, S-M13, S-M14, II-V10, F-L1, F-L3, F-P2,
+> F-A1, F-A2, F-A3, and the F-L6 spec reconciliation). DR-D6 was a false positive
+> and is recorded under [Confirmed non-issues](#confirmed-non-issues-checked-and-rejected).
 > The findings below are the open remainder.
 
 ### Cross-cutting themes
@@ -42,22 +44,13 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 These patterns recur across crates and are worth treating as systemic, not
 one-off:
 
-- **Coercion / widening logic duplicated across crates.** The "Byte/Short widen
-  to Int, else keep type" rule appears three times in `cb-sema` (S-M14), and a
-  near-identical value→i64 / value→f64 pair exists in both `interp.rs` and
-  `ffi.rs` with subtly divergent string handling (II-V10).
 - **`RuntimeType` is reference-like but excluded from `is_reference()`**, forcing
   duplicated special-case arms in conversion and equality logic. The exclusion
   is deliberate but undocumented. (S-M9)
-- **Keyword-only structural duplication in the AST** (`Type`/`Struct`,
-  `Dim`/`Global` are byte-for-byte identical variants). Per `CLAUDE.md` these are
-  load-bearing-adjacent and should be discussed before refactoring. (F-A1/A2)
 - **Invariants documented in prose far from the code that relies on them** —
   trap-channel single-slot reentrancy (II-V17), the two-level scope tree
   (S-M10), span ownership in FFI (II-V16), and the IR's reverse-postorder
   dominance assumption (II-V8).
-- **One genuine code-vs-spec disagreement:** `\xNN` decodes to a Unicode code
-  point, but `cb_syntax.md` §1.6 calls it a byte. (F-L6)
 
 ---
 
@@ -89,37 +82,6 @@ one-off:
   Never asserted or documented.
 - Fix: comment that the tree is at most TopLevel→Function;
   optionally `debug_assert!` no second Function scope appears in a parent chain.
-
-#### S-M11 — Duplicated field-collection loops in `pass1_type_def` / `pass1_struct_def`
-- `check.rs:645-662`, `check.rs:682-699`
-- Category: Duplication
-- Byte-for-byte identical field-info collection loops differing only in the final
-  `DeclKind`/`ty` (both now also emit the sigil/`As` E0320 per S-M4, so a
-  `collect_fields` extraction would dedup that too).
-- Fix: extract `fn collect_fields(&mut self, fields: &[NodeId]) -> Vec<FieldInfo>`.
-
-#### S-M12 — Duplicated `Dim`-init / `Global`-init coercion that recomputes `var_ty`
-- `check.rs:1466-1476` (Global-with-init), `check.rs:1893-1904` (`check_dim`)
-- Category: Duplication
-- The "coerce initializer to declared type" logic is copy-pasted, and both
-  recompute `resolve_var_type` purely to get `var_ty` for the single-name init.
-- Fix: factor `fn coerce_initializer(...)` (or route Global-with-init through
-  `check_dim`); at minimum reuse the already-computed `var_ty`.
-
-#### S-M13 — Repeated loop-scaffolding pattern across five loop lowerings
-- `lower.rs:1618-1880` (while / repeat-forever / repeat-while / for), `lower.rs:1909-2080` (for-each type/array)
-- Category: Duplication
-- Each loop repeats push `ControlContext::Loop` / lower body / pop /
-  `if !terminated { Goto }` / `switch_to(exit)` ~5 times; a fallthrough fix must
-  touch every copy.
-- Fix: extract `fn lower_loop_body(&mut self, body, continue_block, exit_block, fallthrough, span)`.
-
-#### S-M14 — "Byte/Short → Int, else clone" widening duplicated three times
-- `types.rs:209-213` (`numeric_promote`), `types.rs:260-263` (shift LHS), `types.rs:316-321` (`unary_result_type::widen`)
-- Category: Duplication
-- §3.4's storage-widening rule is implemented three times with identical match
-  arms; adding e.g. `Single` would touch all three.
-- Fix: extract `fn widen_storage(t: &Type) -> Type`.
 
 ### Low
 
@@ -179,25 +141,6 @@ one-off:
 
 ### Medium
 
-#### F-L6 — `\xNN` decodes to a Unicode code point, contradicting `cb_syntax.md` §1.6
-- `string_value.rs:140-184`; spec `docs/cb_syntax.md:179`
-- Category: Inconsistency (code vs spec)
-- The spec table calls `\xNN` a byte, but the implementation pushes
-  `char::from_u32(cp)` for `cp ∈ 0..=0xFF`, so `\xFF` becomes U+00FF (UTF-8
-  `C3 BF`), not byte `0xFF`. The code comment acknowledges the divergence; the
-  spec was never updated.
-- Fix: reconcile — either update §1.6 to say "code point in 0..0xFF" (matches the
-  impl and the `escaped_hex_ff` test) or implement true byte semantics.
-
-#### F-L1 — Float path hand-rolls underscore-stripping three times
-- `lexer.rs:677-739` vs the shared `strip_underscores` at `lexer.rs:595-612`
-- Category: Duplication
-- The int/hex/binary paths call `strip_underscores`, but the float branch
-  open-codes the same "copy into scratch, skip `_`, bail on overflow" loop three
-  times (int part, frac part, exponent), each repeating the buffer-overflow guard.
-- Fix: factor an `append_stripped(buf, &mut n, bytes) -> Result<(), Overflow>`
-  helper used by all three sub-parts.
-
 #### F-L2 — Two parallel separator-validation mechanisms; numeric paths inconsistent
 - `lexer.rs:535-590` (`scan_digit_run_inner` → `bad_sep`), `lexer.rs:925-946` (`has_separator_issue`); hex `:827`, binary `:892`, decimal `:667`
 - Category: Duplication / Inconsistency
@@ -208,21 +151,16 @@ one-off:
   `bad_sep` was false, an error token would be produced with no diagnostic.
 - Fix: drop `has_separator_issue` and rely on the `scan_digit_run` flag uniformly.
 
-#### F-L3 — `scan_number_hex` and `scan_number_binary` are ~65-line near-duplicates
-- `lexer.rs:775-844` (hex), `lexer.rs:846-909` (binary)
-- Category: Duplication
-- Differ only in prefix byte, digit predicate, radix label, and parse base; the
-  rest is copy-pasted.
-- Fix: extract `fn scan_radix_number(&mut self, start, prefix, is_digit, radix, label)`.
-
 #### F-L4 — `$_` / `%_` empty-run emits two diagnostics with a mismatched error-token kind
-- `lexer.rs:812-823` (hex), `lexer.rs:882-890` (binary)
+- `lexer.rs` `scan_radix_number` (the empty-`raw` branch; covers both `$`/`%`
+  since F-L3 merged the two scanners)
 - Category: Inconsistency / Clarity
 - For `$_` the pre-check emits `E0105 InvalidDigitSeparator` and consumes `_`;
   then the empty-`raw` path emits a second diagnostic `E0106 UnexpectedChar` but
   pushes a token of kind `InvalidDigitSeparator` — so one literal yields two
   diagnostics and the token kind doesn't match the dominant diagnostic.
-- Fix: pick one primary error and keep the token kind aligned with it.
+- Fix: pick one primary error and keep the token kind aligned with it. Now a
+  single-site fix after the F-L3 merge.
 
 #### F-L5 — Float exponent reconstruction back-scans instead of reusing forward-scan offsets
 - `lexer.rs:708-739`
@@ -244,13 +182,6 @@ one-off:
 - Fix: factor one `eat_block_header_newline` helper, or comment why leading-`If`
   consumes only one newline (it relies on `parse_block_until`'s own `eat_newlines`).
 
-#### F-P2 — "Missing loop closer" recovery block copy-pasted three times
-- `parser.rs:1818-1831`, `:1901-1910`, `:1936-1945`
-- Category: Duplication
-- Three near-identical blocks differing only in `Wend`/`Next` and the opener
-  name string.
-- Fix: extract `fn close_loop_block(&mut self, closer: Kw, opener: Span, name: &str) -> Span`.
-
 #### F-P3 — `Select` aborts the whole block on one bad arm; record bodies catch-and-continue
 - `parser.rs:2037, 2040` (`parse_case_arm()?`) vs `parse_record_body:2311-2317`
 - Category: Inconsistency
@@ -260,24 +191,6 @@ one-off:
   materially different recovery granularity.
 - Fix: wrap the arm parsers in an `Ok/Err` match (record + resync) like
   `parse_record_body`, or document why `Select` aborts wholesale.
-
-#### F-A1 — `Stmt::Type` and `Stmt::Struct` are structurally identical
-- `ast.rs:210-217`; collapsed in `ast_print.rs:190-192`
-- Category: Inconsistency / Clarity
-- Both carry `name_span: Span, fields: Vec<NodeId>` and are handled identically
-  wherever traversed. The Type-vs-Struct distinction is real (§3.3) but encoded
-  as two whole variants rather than a discriminant.
-- Fix (load-bearing-adjacent — raise with the user first): consider
-  `Stmt::TypeDecl { kind: TypeDeclKind, name_span, fields }`. If kept as two
-  variants, add a doc comment on each citing §3.3.
-
-#### F-A2 — `Stmt::Dim` and `Stmt::Global` are structurally identical
-- `ast.rs:145-154`; collapsed in `ast_print.rs:102`
-- Category: Inconsistency / Duplication
-- Identical fields (`names`, `ty`, `init`); `Global`'s top-level-only rule is a
-  sema/parse check, not a reason for a separate AST shape.
-- Fix (load-bearing-adjacent — raise first): consider
-  `Stmt::VarDecl { is_global: bool, names, ty, init }` (also resolves F-A3).
 
 #### F-A4 — `Expr::Paren` / `TypeExpr::Paren` retained with no doc explaining why
 - `ast.rs:121-123`, `ast.rs:314-316`
@@ -329,8 +242,6 @@ one-off:
   `split_end_to_joined` and uses `.expect`. `parser.rs:1516-1518`.
 - **F-P8** — `Break` count `u32::MAX` bound rejects in-range-but-too-big literals
   with a misleading "must be a positive integer literal" message. `parser.rs:1378, 1389`.
-- **F-A3** — Global-ness modelled inconsistently: variant split for Dim/Global,
-  bool flag for Const. Resolve with F-A2. `ast.rs:145-161`.
 - **F-A5** — `Expr::Ident` carries `sigil` but `Expr::Field` does not, while
   `FieldDecl` does. Confirm whether sigils are allowed at field-access sites.
   `ast.rs:90-93, 111-120`.
@@ -355,17 +266,6 @@ one-off:
 
 ## IR + Interpreter (`cb-ir`, `cb-backend-interp`)
 
-### Medium
-
-#### II-V10 — Duplicated value→i64 / value→f64 coercion across `interp.rs` and `ffi.rs`
-- `interp.rs:1200-1231` (`value_to_i64`/`value_to_f64`) vs `ffi.rs:82-102` (`value_as_i64`/`value_as_f64`)
-- Category: Duplication
-- Two near-identical coercion pairs that differ subtly: the interp path parses
-  `Value::String` via `parse_leading_int`, while the ffi path returns `0` for
-  strings. A fix to one will likely miss the other.
-- Fix: extract a single coercion helper (methods on `Value`) used by both,
-  documenting why the ffi path never legitimately sees strings (see II-V11).
-
 ### Low
 
 - **II-V4** — Four `verify_inst_*` helpers duplicate bounds-check boilerplate;
@@ -381,9 +281,11 @@ one-off:
   not validate real dominance. `verify.rs:20-28, 74-94`.
 - **II-V9** — `BasicBlock.terminator_span` pairing (meaningful only once
   `terminator` is `Some`) is undocumented. `cb-ir/src/lib.rs:195-196`.
-- **II-V11** — ffi `value_as_i64`/`value_as_f64` string + fallthrough arms are
-  dead and silently zero; would mask a type mismatch. Add `debug_assert!`/`unreachable!`.
-  `ffi.rs:82-102`.
+- **II-V11** — the shared `Value::to_i64`/`to_f64` non-numeric (`String` + `_`)
+  arms silently return 0 when reached from the ffi marshaller (II-V10 unified the
+  two old `value_as_*` copies onto these). They are dead under well-typed IR but
+  would mask a type mismatch; consider a `debug_assert!`/`unreachable!` on the
+  marshalling path. `value.rs` (`to_i64`/`to_f64`), `ffi.rs` (`marshal`).
 - **II-V12** — Three parallel "read registers into args/indices" loops, and the
   Call/CallIndirect dispatch tails are line-for-line parallel; factor
   `read_args` and `dispatch_call`. `interp.rs:462-483, 809-830`.

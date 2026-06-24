@@ -190,6 +190,17 @@ pub fn resolve_return_type(return_sigil: Option<Sigil>, return_ty: Option<&Type>
     }
 }
 
+/// Apply CoolBasic's storage-widening rule (FD-035 / cb_syntax.md §3.4):
+/// `Byte`/`Short` are storage-only and never compute in their own width, so
+/// they widen to `Int`; every other type is returned unchanged. Used wherever
+/// an arithmetic/bitwise/shift result must be promoted out of a narrow width.
+pub(crate) fn widen_storage(t: &Type) -> Type {
+    match t {
+        Type::Byte | Type::Short => Type::Int,
+        other => other.clone(),
+    }
+}
+
 /// Numeric promotion for a binary operation: return the wider of the two
 /// types, floored at `Int` for integers. `Byte`/`Short` are storage-only and
 /// widen to `Int` for all arithmetic (FD-035 / cb_syntax.md §3.4); `Float`
@@ -206,11 +217,7 @@ pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
         }
     }
     let wider = if rank(a) >= rank(b) { a } else { b };
-    match wider {
-        // Byte/Short never compute in their own width — widen to Int.
-        Type::Byte | Type::Short => Type::Int,
-        other => other.clone(),
-    }
+    widen_storage(wider)
 }
 
 /// Determine the result type of a binary operation, or `None` if the types
@@ -257,10 +264,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
         // operands, so the interpreter widens the LHS (FD-035).
         BinOp::Shl | BinOp::Shr | BinOp::Sar => {
             if lhs.is_integer() && rhs.is_integer() {
-                Some(match lhs {
-                    Type::Byte | Type::Short => Type::Int,
-                    other => other.clone(),
-                })
+                Some(widen_storage(lhs))
             } else {
                 None
             }
@@ -313,16 +317,10 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
 pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
     // Byte/Short widen to Int for unary arithmetic/bitwise, mirroring binary
     // promotion (FD-035): e.g. negating a Byte yields a signed Int.
-    fn widen(t: &Type) -> Type {
-        match t {
-            Type::Byte | Type::Short => Type::Int,
-            other => other.clone(),
-        }
-    }
     match op {
         UnOp::Plus | UnOp::Neg => {
             if operand.is_numeric() {
-                Some(widen(operand))
+                Some(widen_storage(operand))
             } else {
                 None
             }
@@ -336,7 +334,7 @@ pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
         }
         UnOp::BinNot => {
             if operand.is_integer() {
-                Some(widen(operand))
+                Some(widen_storage(operand))
             } else {
                 None
             }

@@ -10,7 +10,7 @@
 
 use std::fmt;
 
-use crate::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeExpr};
+use crate::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeDeclKind, TypeExpr};
 
 /// Write a one-rooted AST subtree to `out`, indented by one level.
 ///
@@ -99,7 +99,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.push(*value);
             }
             Stmt::ExprStmt { expr } => out.push(*expr),
-            Stmt::Dim { ty, init, .. } | Stmt::Global { ty, init, .. } => {
+            Stmt::VarDecl { ty, init, .. } => {
                 if let Some(t) = ty {
                     out.push(*t);
                 }
@@ -187,7 +187,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 }
                 out.extend_from_slice(body);
             }
-            Stmt::Type { fields, .. } | Stmt::Struct { fields, .. } => {
+            Stmt::TypeDecl { fields, .. } => {
                 out.extend_from_slice(fields);
             }
             Stmt::FieldDecl { ty: Some(t), .. } => {
@@ -259,8 +259,12 @@ fn stmt_variant_name(s: &Stmt) -> &'static str {
     match s {
         Stmt::Assign { .. } => "Assign",
         Stmt::ExprStmt { .. } => "ExprStmt",
-        Stmt::Dim { .. } => "Dim",
-        Stmt::Global { .. } => "Global",
+        Stmt::VarDecl {
+            is_global: false, ..
+        } => "Dim",
+        Stmt::VarDecl {
+            is_global: true, ..
+        } => "Global",
         Stmt::Const { .. } => "Const",
         Stmt::Redim { .. } => "Redim",
         Stmt::If { .. } => "If",
@@ -271,8 +275,14 @@ fn stmt_variant_name(s: &Stmt) -> &'static str {
         Stmt::ForEach { .. } => "ForEach",
         Stmt::Select { .. } => "Select",
         Stmt::Function { .. } => "Function",
-        Stmt::Type { .. } => "Type",
-        Stmt::Struct { .. } => "Struct",
+        Stmt::TypeDecl {
+            kind: TypeDeclKind::Type,
+            ..
+        } => "Type",
+        Stmt::TypeDecl {
+            kind: TypeDeclKind::Struct,
+            ..
+        } => "Struct",
         Stmt::FieldDecl { .. } => "FieldDecl",
         Stmt::Return { .. } => "Return",
         Stmt::Goto { .. } => "Goto",

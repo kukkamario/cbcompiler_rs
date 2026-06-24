@@ -21,7 +21,7 @@
 //! `no_panic` test in practice — the proptest runner's per-case timeout
 //! already wraps execution.
 
-use cb_frontend::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeExpr};
+use cb_frontend::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeDeclKind, TypeExpr};
 use cb_frontend::span::FileId;
 use cb_frontend::{LexerOptions, parse, tokenize};
 use proptest::prelude::*;
@@ -98,8 +98,12 @@ fn node_header(node: &Node) -> &'static str {
         Node::Stmt(s) => match s {
             Stmt::Assign { .. } => "Stmt::Assign",
             Stmt::ExprStmt { .. } => "Stmt::ExprStmt",
-            Stmt::Dim { .. } => "Stmt::Dim",
-            Stmt::Global { .. } => "Stmt::Global",
+            Stmt::VarDecl {
+                is_global: false, ..
+            } => "Stmt::Dim",
+            Stmt::VarDecl {
+                is_global: true, ..
+            } => "Stmt::Global",
             Stmt::Const { .. } => "Stmt::Const",
             Stmt::Redim { .. } => "Stmt::Redim",
             Stmt::If { .. } => "Stmt::If",
@@ -110,8 +114,14 @@ fn node_header(node: &Node) -> &'static str {
             Stmt::ForEach { .. } => "Stmt::ForEach",
             Stmt::Select { .. } => "Stmt::Select",
             Stmt::Function { .. } => "Stmt::Function",
-            Stmt::Type { .. } => "Stmt::Type",
-            Stmt::Struct { .. } => "Stmt::Struct",
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Type,
+                ..
+            } => "Stmt::Type",
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Struct,
+                ..
+            } => "Stmt::Struct",
             Stmt::FieldDecl { .. } => "Stmt::FieldDecl",
             Stmt::Return { .. } => "Stmt::Return",
             Stmt::Goto { .. } => "Stmt::Goto",
@@ -174,7 +184,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.push(*value);
             }
             Stmt::ExprStmt { expr } => out.push(*expr),
-            Stmt::Dim { ty, init, .. } | Stmt::Global { ty, init, .. } => {
+            Stmt::VarDecl { ty, init, .. } => {
                 if let Some(t) = ty {
                     out.push(*t);
                 }
@@ -262,7 +272,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 }
                 out.extend_from_slice(body);
             }
-            Stmt::Type { fields, .. } | Stmt::Struct { fields, .. } => {
+            Stmt::TypeDecl { fields, .. } => {
                 out.extend_from_slice(fields);
             }
             Stmt::FieldDecl { ty: Some(t), .. } => {
