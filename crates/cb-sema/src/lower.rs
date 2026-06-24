@@ -830,12 +830,20 @@ impl<'a> Lowerer<'a> {
             Node::Expr(Expr::New(kind)) => match kind {
                 NewKind::Type(_type_expr_id) => {
                     let ty = self.types.get(id).cloned().unwrap_or(Type::Void);
-                    let type_name = match ty {
-                        Type::TypeRef { name } => name,
-                        _ => self.interner.intern("<unknown>"),
+                    let type_def = match &ty {
+                        Type::TypeRef { name } => self.type_def_map.get(name).copied(),
+                        _ => None,
                     };
-                    let type_def = self.type_def_map[&type_name];
-                    self.emit(InstKind::NewType { type_def }, span)
+                    match type_def {
+                        Some(type_def) => self.emit(InstKind::NewType { type_def }, span),
+                        None => {
+                            // Sema resolves `New T` to a known TypeRef; this only
+                            // fires on degenerate/already-errored input. Emit a
+                            // null rather than indexing a fabricated key.
+                            debug_assert!(false, "New Type lowered with unresolved type {ty:?}");
+                            self.emit(InstKind::ConstNull, span)
+                        }
+                    }
                 }
                 NewKind::Array { elem: _, dims } => {
                     let elem_ty = self
@@ -1176,11 +1184,16 @@ impl<'a> Lowerer<'a> {
                 }
                 "first" | "last" => {
                     let ty = self.types.get(args[0]).cloned().unwrap_or(Type::Void);
-                    let type_name = match ty {
-                        Type::TypeRef { name } => name,
-                        _ => self.interner.intern("<unknown>"),
+                    let type_def = match &ty {
+                        Type::TypeRef { name } => self.type_def_map.get(name).copied(),
+                        _ => None,
                     };
-                    let type_def = self.type_def_map[&type_name];
+                    let Some(type_def) = type_def else {
+                        // Sema resolves the operand to a known TypeRef; degenerate
+                        // input falls back to null instead of a panic.
+                        debug_assert!(false, "{name_str} lowered with unresolved type {ty:?}");
+                        return self.emit(InstKind::ConstNull, span);
+                    };
                     return if name_str == "first" {
                         self.emit(InstKind::First { type_def }, span)
                     } else {
@@ -1452,22 +1465,41 @@ impl<'a> Lowerer<'a> {
                 }
                 if let Some(eb) = exit_block {
                     self.terminate(Terminator::Goto(eb), self.arena.span_of(id));
+                } else {
+                    // Sema (E0332) rejects a `Break` with no enclosing loop, so
+                    // this is unreachable for checked input. Stay well-formed for
+                    // release/hand-written IR by terminating the block anyway.
+                    debug_assert!(
+                        false,
+                        "Break with no enclosing loop should be rejected by sema (E0332)"
+                    );
+                    self.terminate(Terminator::Return { value: None }, self.arena.span_of(id));
                 }
             }
             Node::Stmt(Stmt::Continue) => {
-                if let Some(ctx) = self.context_stack.iter().next_back() {
-                    match ctx {
-                        ControlContext::Loop { continue_block, .. } => {
-                            self.terminate(
-                                Terminator::Goto(*continue_block),
-                                self.arena.span_of(id),
-                            );
-                        }
-                        ControlContext::Select { next_arm_body } => {
-                            if let Some(target) = next_arm_body {
-                                self.terminate(Terminator::Goto(*target), self.arena.span_of(id));
-                            }
-                        }
+                match self.context_stack.iter().next_back() {
+                    Some(ControlContext::Loop { continue_block, .. }) => {
+                        self.terminate(Terminator::Goto(*continue_block), self.arena.span_of(id));
+                    }
+                    Some(ControlContext::Select {
+                        next_arm_body: Some(target),
+                    }) => {
+                        self.terminate(Terminator::Goto(*target), self.arena.span_of(id));
+                    }
+                    Some(ControlContext::Select {
+                        next_arm_body: None,
+                    }) => {
+                        // `Continue` in the final `Select` arm falls through past
+                        // the `Select`; the arm-lowering merge guard terminates
+                        // this block, so nothing is emitted here.
+                    }
+                    None => {
+                        // Sema (E0332) rejects a `Continue` outside any loop or
+                        // `Select`; unreachable for checked input.
+                        debug_assert!(
+                            false,
+                            "Continue outside loop/Select should be rejected by sema (E0332)"
+                        );
                     }
                 }
             }
@@ -1977,13 +2009,19 @@ impl<'a> Lowerer<'a> {
         body: &[NodeId],
         span: Span,
     ) {
+        // Sema resolves the `For Each` source to a known type; bail gracefully
+        // (no loop) on degenerate input rather than indexing a missing key.
+        let Some(&type_def) = self.type_def_map.get(&type_name) else {
+            debug_assert!(false, "For Each lowered with unknown type {type_name:?}");
+            return;
+        };
+
         let cond_block = self.fresh_block();
         let body_block = self.fresh_block();
         let step_block = self.fresh_block();
         let exit_block = self.fresh_block();
 
         // Init: var = First(T)
-        let type_def = self.type_def_map[&type_name];
         let first = self.emit(InstKind::First { type_def }, span);
         self.emit_store_var(var_ref, first, span);
         self.terminate(Terminator::Goto(cond_block), span);

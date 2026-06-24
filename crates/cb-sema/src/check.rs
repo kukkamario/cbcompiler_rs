@@ -44,6 +44,17 @@ pub(crate) struct Checker<'a> {
     for_loop_stack: Vec<NodeId>,
     /// For each label symbol, the set of For loop NodeIds containing it.
     label_for_nesting: std::collections::HashMap<Symbol, Vec<NodeId>>,
+    /// Stack of enclosing loop/`Select` constructs, used to validate `Break`
+    /// (needs a loop) and `Continue` (needs a loop or `Select`). Mirrors the
+    /// control-context stack lowering builds (cb_syntax.md §6.2/§6.3).
+    control_stack: Vec<ControlKind>,
+}
+
+/// An enclosing control construct that `Break`/`Continue` can target.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ControlKind {
+    Loop,
+    Select,
 }
 
 impl<'a> Checker<'a> {
@@ -71,6 +82,7 @@ impl<'a> Checker<'a> {
             current_scope: top,
             current_fn_return_ty: None,
             for_loop_stack: Vec::new(),
+            control_stack: Vec::new(),
             label_for_nesting: std::collections::HashMap::new(),
         };
 
@@ -601,7 +613,14 @@ impl<'a> Checker<'a> {
                     None => Symbol::DUMMY,
                 };
                 let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let (pty, _disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                let (pty, sigil_as_disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                if sigil_as_disagree {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_SIGIL_AS_DISAGREE,
+                        "sigil and `As` type disagree",
+                        Label::new(pname.unwrap_or(name_span)),
+                    ));
+                }
                 param_infos.push(ParamInfo {
                     name: pname_sym,
                     ty: pty,
@@ -653,7 +672,14 @@ impl<'a> Checker<'a> {
             {
                 let fname = self.intern_ident(*fname_span, *sigil);
                 let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let (fty, _disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                let (fty, sigil_as_disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                if sigil_as_disagree {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_SIGIL_AS_DISAGREE,
+                        "sigil and `As` type disagree",
+                        Label::new(*fname_span),
+                    ));
+                }
                 field_infos.push(FieldInfo {
                     name: fname,
                     ty: fty,
@@ -690,7 +716,14 @@ impl<'a> Checker<'a> {
             {
                 let fname = self.intern_ident(*fname_span, *sigil);
                 let as_ty = ty.map(|tid| self.resolve_type_expr(tid));
-                let (fty, _disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                let (fty, sigil_as_disagree) = types::resolve_var_type(*sigil, as_ty.as_ref());
+                if sigil_as_disagree {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_SIGIL_AS_DISAGREE,
+                        "sigil and `As` type disagree",
+                        Label::new(*fname_span),
+                    ));
+                }
                 field_infos.push(FieldInfo {
                     name: fname,
                     ty: fty,
@@ -1304,13 +1337,33 @@ impl<'a> Checker<'a> {
             ));
             return Some(Type::Error);
         }
-        self.check_expr(args[0]);
+        // Int/Float/Str convert only from a numeric or String operand; a Type
+        // instance, array, etc. has no conversion to a scalar (contrast `Len`,
+        // which validates its operand kind).
+        let arg_ty = self.check_expr(args[0]);
+        if !arg_ty.is_error() && !arg_ty.is_numeric() && !matches!(arg_ty, Type::String) {
+            self.diagnostics.push(Diagnostic::error(
+                E_TYPE_MISMATCH,
+                "conversion intrinsic argument must be numeric or a string",
+                Label::new(self.arena.span_of(args[0])),
+            ));
+        }
         Some(target)
     }
 
     fn check_index(&mut self, array: NodeId, indices: &[NodeId], span: Span) -> Type {
         let arr_ty = self.check_expr(array);
-        let _idx_types: Vec<Type> = indices.iter().map(|&i| self.check_expr(i)).collect();
+        // Index operands must be integers (matching `check_new`/`check_redim`).
+        for &i in indices {
+            let idx_ty = self.check_expr(i);
+            if !idx_ty.is_integer() && !idx_ty.is_error() {
+                self.diagnostics.push(Diagnostic::error(
+                    E_TYPE_MISMATCH,
+                    "array index must be an integer",
+                    Label::new(self.arena.span_of(i)),
+                ));
+            }
+        }
 
         if arr_ty.is_error() {
             return Type::Error;
@@ -1483,12 +1536,18 @@ impl<'a> Checker<'a> {
                 value,
                 ..
             }) => {
-                self.check_expr(value);
-                // Evaluate the constant expression and update the declaration.
+                let value_ty = self.check_expr(value);
+                // §4.4: a Const initializer must be a constant expression.
                 if let Some(const_val) = self.eval_const_expr(value) {
                     let name = self.intern_ident(name_span, sigil);
                     self.symbols
                         .update_const_value(self.current_scope, name, const_val);
+                } else if !value_ty.is_error() {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_CONST_EVAL_ERROR,
+                        "Const initializer must be a constant expression",
+                        Label::new(self.arena.span_of(value)),
+                    ));
                 }
             }
             Node::Stmt(Stmt::If {
@@ -1516,19 +1575,25 @@ impl<'a> Checker<'a> {
             }
             Node::Stmt(Stmt::While { cond, body }) => {
                 self.check_condition(cond);
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
             }
             Node::Stmt(Stmt::RepeatForever { body }) => {
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
             }
             Node::Stmt(Stmt::RepeatWhile { body, cond }) => {
+                self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
                 }
+                self.control_stack.pop();
                 self.check_condition(cond);
             }
             Node::Stmt(Stmt::For {
@@ -1580,12 +1645,42 @@ impl<'a> Checker<'a> {
                     .insert(name, self.for_loop_stack.clone());
             }
             Node::Stmt(Stmt::Label { .. }) => {}
+            Node::Stmt(Stmt::Break { count }) => {
+                // `Break N` must have at least N enclosing loops; a `Select`
+                // does not count (Break never targets a Select).
+                let n = count.unwrap_or(1).max(1) as usize;
+                let loops = self
+                    .control_stack
+                    .iter()
+                    .filter(|c| **c == ControlKind::Loop)
+                    .count();
+                if loops < n {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_MISPLACED_LOOP_CONTROL,
+                        if count.is_some() {
+                            format!("`Break {n}` has no {n} enclosing loop(s)")
+                        } else {
+                            "`Break` outside of a loop".to_string()
+                        },
+                        Label::new(self.arena.span_of(id)),
+                    ));
+                }
+            }
+            Node::Stmt(Stmt::Continue) => {
+                // `Continue` needs an enclosing loop or `Select` (the explicit
+                // fall-through form, cb_syntax.md §6.2).
+                if self.control_stack.is_empty() {
+                    self.diagnostics.push(Diagnostic::error(
+                        E_MISPLACED_LOOP_CONTROL,
+                        "`Continue` outside of a loop or `Select`",
+                        Label::new(self.arena.span_of(id)),
+                    ));
+                }
+            }
             // Statements that are already handled or require no type checking:
             Node::Stmt(Stmt::Type { .. })
             | Node::Stmt(Stmt::Struct { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
-            | Node::Stmt(Stmt::Break { .. })
-            | Node::Stmt(Stmt::Continue)
             | Node::Stmt(Stmt::End)
             | Node::Stmt(Stmt::Include { .. })
             | Node::Stmt(Stmt::Error) => {}
@@ -2018,9 +2113,11 @@ impl<'a> Checker<'a> {
         }
 
         self.for_loop_stack.push(for_id);
+        self.control_stack.push(ControlKind::Loop);
         for &s in body {
             self.check_stmt(s);
         }
+        self.control_stack.pop();
         self.for_loop_stack.pop();
     }
 
@@ -2057,31 +2154,49 @@ impl<'a> Checker<'a> {
         }
 
         self.for_loop_stack.push(for_id);
+        self.control_stack.push(ControlKind::Loop);
         for &s in body {
             self.check_stmt(s);
         }
+        self.control_stack.pop();
         self.for_loop_stack.pop();
     }
 
     fn check_select(&mut self, scrutinee: NodeId, arms: &[NodeId]) {
-        self.check_expr(scrutinee);
+        let scrut_ty = self.check_expr(scrutinee);
         for &arm_id in arms {
             match &self.arena[arm_id] {
                 Node::CaseArm(CaseArm::Case { values, body }) => {
                     let values = values.clone();
                     let body = body.clone();
                     for &v in &values {
-                        self.check_expr(v);
+                        // §6.2: each Case value must be a constant expression
+                        // implicitly convertible to the scrutinee type.
+                        let val_ty = self.check_expr(v);
+                        if !val_ty.is_error() && !scrut_ty.is_error() {
+                            self.coerce(v, &val_ty, &scrut_ty);
+                            if self.eval_const_expr(v).is_none() {
+                                self.diagnostics.push(Diagnostic::error(
+                                    E_CONST_EVAL_ERROR,
+                                    "Case value must be a constant expression",
+                                    Label::new(self.arena.span_of(v)),
+                                ));
+                            }
+                        }
                     }
+                    self.control_stack.push(ControlKind::Select);
                     for &s in &body {
                         self.check_stmt(s);
                     }
+                    self.control_stack.pop();
                 }
                 Node::CaseArm(CaseArm::Default { body }) => {
                     let body = body.clone();
+                    self.control_stack.push(ControlKind::Select);
                     for &s in &body {
                         self.check_stmt(s);
                     }
+                    self.control_stack.pop();
                 }
                 _ => {}
             }
@@ -3828,5 +3943,206 @@ mod tests {
             .filter(|rc| matches!(rc, crate::ResolvedCall::UserDefined { .. }))
             .collect();
         assert_eq!(user_calls.len(), 1);
+    }
+
+    // ---- Bundle 1: sema validation gaps (S-M1..S-M5) ----------------------
+
+    // S-M1: §6.2 — every Case value must be a constant expression implicitly
+    // convertible to the scrutinee type.
+    #[test]
+    fn pass2_select_case_wrong_type_e0317() {
+        let result =
+            analyze_src("Dim x As Integer\nx = 1\nSelect x\nCase \"foo\"\nx = 2\nEndSelect\n");
+        assert!(
+            error_codes(&result).contains(&"E0317"),
+            "expected E0317, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_select_case_non_constant_e0322() {
+        let result = analyze_src(
+            "Dim x As Integer\nDim y As Integer\nx = 1\ny = 2\nSelect x\nCase y\nx = 3\nEndSelect\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0322"),
+            "expected E0322, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn select_case_valid_ok() {
+        // Constant, convertible Case values must stay clean (over-firing guard).
+        let result = analyze_src(
+            "Dim x As Int\nx = 2\nSelect x\n  Case 1\n    x = 10\n  Case 2\n    x = 20\n  Default\n    x = 0\nEnd Select\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M2: Int/Float/Str must validate their operand (numeric or String).
+    #[test]
+    fn pass2_int_intrinsic_bad_operand_e0301() {
+        let result = analyze_src(
+            "Type Foo\nField a As Integer\nEndType\nDim m As Foo\nm = New Foo\nDim n As Integer\nn = Int(m)\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0301"),
+            "expected E0301, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn conversion_intrinsics_valid_operands_ok() {
+        let result = analyze_src(
+            "Dim a As Integer\nDim b As Float\nDim c As String\na = Int(\"5\")\nb = Float(3.5)\nc = Str(5)\na = Int(b)\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M3: array index operands must be integers.
+    #[test]
+    fn pass2_index_non_integer_e0301() {
+        let result = analyze_src("a = New Integer[10]\nDim n As Integer\nn = a[1.5]\n");
+        assert!(
+            error_codes(&result).contains(&"E0301"),
+            "expected E0301, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn pass2_index_string_e0301() {
+        let result = analyze_src("a = New Integer[10]\nDim n As Integer\nn = a[\"x\"]\n");
+        assert!(
+            error_codes(&result).contains(&"E0301"),
+            "expected E0301, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn index_integer_ok() {
+        let result = analyze_src("a = New Integer[10]\nDim n As Integer\nn = a[2]\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M4: param and field sigil/As disagreement must emit E0320, exactly once.
+    #[test]
+    fn pass1_param_sigil_as_disagree_e0320() {
+        let result = analyze_src("Function f(count% As Float) As Integer\nReturn 0\nEndFunction\n");
+        let codes = error_codes(&result);
+        assert_eq!(
+            codes.iter().filter(|c| **c == "E0320").count(),
+            1,
+            "expected exactly one E0320, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn type_field_sigil_as_disagree_e0320() {
+        let result = analyze_src("Type Foo\nField x% As Float\nEndType\n");
+        assert!(
+            error_codes(&result).contains(&"E0320"),
+            "expected E0320, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn struct_field_sigil_as_disagree_e0320() {
+        let result = analyze_src("Struct Foo\nField x% As Float\nEndStruct\n");
+        assert!(
+            error_codes(&result).contains(&"E0320"),
+            "expected E0320, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn param_field_sigil_as_agree_ok() {
+        let result = analyze_src(
+            "Type Foo\nField x# As Float\nEndType\nFunction f(count% As Integer) As Integer\nReturn count\nEndFunction\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M5: §4.4 — a Const initializer must be a constant expression.
+    #[test]
+    fn pass2_const_non_constant_e0322() {
+        let result = analyze_src("Dim y As Integer\ny = 5\nConst x = y\n");
+        assert!(
+            error_codes(&result).contains(&"E0322"),
+            "expected E0322, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn const_constant_initializer_ok() {
+        let result = analyze_src("Const x = 1 + 2\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    // S-M7/S-M8: Break needs an enclosing loop; Continue an enclosing loop or
+    // Select (cb_syntax.md §6.2/§6.3).
+    #[test]
+    fn break_outside_loop_e0332() {
+        let result = analyze_src("Break\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn continue_outside_loop_e0332() {
+        let result = analyze_src("Continue\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_count_exceeds_loop_nesting_e0332() {
+        let result = analyze_src("While 1\nBreak 2\nWend\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_in_select_without_loop_e0332() {
+        // Break cannot target a Select; a Select that isn't inside a loop has no
+        // loop for Break to break.
+        let result =
+            analyze_src("Dim x As Int\nx = 1\nSelect x\n  Case 1\n    Break\nEnd Select\n");
+        assert!(
+            error_codes(&result).contains(&"E0332"),
+            "expected E0332, got {:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn break_continue_in_loop_ok() {
+        let result = analyze_src("While 1\n  Continue\n  Break\nWend\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn continue_in_select_ok() {
+        // Continue inside a Select is the legal explicit fall-through (§6.2).
+        let result = analyze_src(
+            "Dim x As Int\nx = 1\nSelect x\n  Case 1\n    Continue\n  Case 2\n    x = 2\nEnd Select\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }

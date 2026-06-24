@@ -71,6 +71,37 @@ pub fn verify(program: &Program) {
             );
         }
 
+        // (II-V1) `Function.params` duplicates the leading `is_param` locals;
+        // keep the two in sync. Lowering allocates parameter locals first, in
+        // order, then `Dim` locals — so the first `params.len()` locals must be
+        // exactly the `is_param` ones, with matching types, and no later local
+        // may be flagged `is_param`.
+        assert!(
+            func.locals.len() >= func.params.len(),
+            "function declares {} params but has only {} locals",
+            func.params.len(),
+            func.locals.len(),
+        );
+        for (i, pty) in func.params.iter().enumerate() {
+            let local = &func.locals[i];
+            assert!(
+                local.is_param,
+                "local {i} backs param {i} but its is_param flag is false",
+            );
+            assert!(
+                &local.ty == pty,
+                "param {i} type {pty:?} disagrees with backing local type {:?}",
+                local.ty,
+            );
+        }
+        for (i, local) in func.locals.iter().enumerate().skip(func.params.len()) {
+            assert!(
+                !local.is_param,
+                "local {i} is flagged is_param but lies beyond the {} declared params",
+                func.params.len(),
+            );
+        }
+
         let mut defined_regs: HashSet<Reg> = HashSet::new();
 
         for block in &func.blocks {
@@ -88,8 +119,29 @@ pub fn verify(program: &Program) {
                 verify_inst_func_ids(&inst.kind, func_table_len);
                 verify_inst_type_defs(&inst.kind, num_type_defs);
                 verify_inst_globals(&inst.kind, num_globals);
+                // (II-V3) Result-register presence must match the instruction
+                // kind: a value-producing instruction defines exactly one
+                // register, a pure-effect one defines none. `Call`/`CallIndirect`
+                // are exempt (their void-ness depends on the callee signature).
+                match produces_value(&inst.kind) {
+                    Some(true) => assert!(
+                        inst.result.is_some(),
+                        "value-producing instruction {:?} must produce a result",
+                        inst.kind,
+                    ),
+                    Some(false) => assert!(
+                        inst.result.is_none(),
+                        "pure-effect instruction {:?} must not produce a result",
+                        inst.kind,
+                    ),
+                    None => {}
+                }
                 if let Some(r) = inst.result {
-                    defined_regs.insert(r);
+                    // (II-V2) Single-assignment: a register is defined once.
+                    assert!(
+                        defined_regs.insert(r),
+                        "register {r} defined more than once",
+                    );
                 }
             }
 
@@ -295,6 +347,51 @@ fn verify_terminator_regs(term: &Terminator, defined: &HashSet<Reg>) {
         | Terminator::Goto(_)
         | Terminator::Halt { .. }
         | Terminator::Trap(_) => {}
+    }
+}
+
+/// Classifies an instruction by whether it defines a value:
+/// `Some(true)` for value-producing kinds, `Some(false)` for pure-effect ones,
+/// and `None` for `Call`/`CallIndirect`, whose void-ness depends on the callee
+/// signature (and which lowering currently always assigns a result — the
+/// signature cross-check is a deferred follow-up). The exhaustive match makes a
+/// newly added `InstKind` a compile error here until it is classified.
+fn produces_value(kind: &InstKind) -> Option<bool> {
+    use InstKind::*;
+    match kind {
+        BinOp { .. }
+        | UnOp { .. }
+        | LoadLocal { .. }
+        | LoadGlobal { .. }
+        | NewType { .. }
+        | NewArray { .. }
+        | GetField { .. }
+        | GetElement { .. }
+        | First { .. }
+        | Last { .. }
+        | Next { .. }
+        | Previous { .. }
+        | Len { .. }
+        | StrLen { .. }
+        | ConvertExplicit { .. }
+        | Convert { .. }
+        | FuncAddr { .. }
+        | ConstInt(_)
+        | ConstLong(_)
+        | ConstFloat(_)
+        | ConstString(_)
+        | ConstNull
+        | ArrayTotalLen { .. }
+        | GetElementFlat { .. } => Some(true),
+        StoreLocal { .. }
+        | StoreGlobal { .. }
+        | StorePlace { .. }
+        | DeleteLvalue { .. }
+        | DeleteLvalueGlobal { .. }
+        | DeleteRvalue { .. }
+        | Redim { .. }
+        | RedimGlobal { .. } => Some(false),
+        Call { .. } | CallIndirect { .. } => None,
     }
 }
 
@@ -780,6 +877,157 @@ mod tests {
                 },
             ],
         });
+        verify(&prog);
+    }
+
+    // ---- Bundle 2: II-V1 / II-V2 / II-V3 robustness checks ---------------
+
+    // II-V2: a register must be defined at most once (SSA-like single def).
+    #[test]
+    #[should_panic(expected = "defined more than once")]
+    fn register_defined_twice() {
+        let prog = valid_one_block(
+            vec![
+                Inst {
+                    result: Some(Reg(0)),
+                    kind: InstKind::ConstInt(1),
+                    span: DUMMY_SPAN,
+                },
+                Inst {
+                    result: Some(Reg(0)),
+                    kind: InstKind::ConstInt(2),
+                    span: DUMMY_SPAN,
+                },
+            ],
+            vec![],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    // II-V3: a pure-effect instruction must not carry a result register.
+    #[test]
+    #[should_panic(expected = "must not produce a result")]
+    fn void_inst_with_result() {
+        let prog = valid_one_block(
+            vec![
+                Inst {
+                    result: Some(Reg(0)),
+                    kind: InstKind::ConstInt(1),
+                    span: DUMMY_SPAN,
+                },
+                Inst {
+                    result: Some(Reg(1)),
+                    kind: InstKind::StoreLocal {
+                        local: crate::LocalId(0),
+                        value: Reg(0),
+                    },
+                    span: DUMMY_SPAN,
+                },
+            ],
+            vec![Local {
+                name: dummy_sym(),
+                ty: IrType::Int,
+                is_param: false,
+            }],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    // II-V3: a value-producing instruction must define a result register.
+    #[test]
+    #[should_panic(expected = "must produce a result")]
+    fn value_inst_without_result() {
+        let prog = valid_one_block(
+            vec![Inst {
+                result: None,
+                kind: InstKind::ConstInt(1),
+                span: DUMMY_SPAN,
+            }],
+            vec![],
+            Terminator::Return { value: None },
+        );
+        verify(&prog);
+    }
+
+    fn func_with_params(params: Vec<IrType>, locals: Vec<Local>) -> Program {
+        minimal_program(Function {
+            name: dummy_sym(),
+            params,
+            return_type: IrType::Void,
+            locals,
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                insts: vec![],
+                terminator: Some(Terminator::Return { value: None }),
+                terminator_span: DUMMY_SPAN,
+            }],
+        })
+    }
+
+    // II-V1: the leading `params.len()` locals must be the `is_param` locals.
+    #[test]
+    #[should_panic(expected = "is_param")]
+    fn param_local_not_flagged() {
+        let prog = func_with_params(
+            vec![IrType::Int],
+            vec![Local {
+                name: dummy_sym(),
+                ty: IrType::Int,
+                is_param: false,
+            }],
+        );
+        verify(&prog);
+    }
+
+    // II-V1: a param's type must equal the corresponding local's type.
+    #[test]
+    #[should_panic(expected = "param")]
+    fn param_type_disagrees_with_local() {
+        let prog = func_with_params(
+            vec![IrType::Float],
+            vec![Local {
+                name: dummy_sym(),
+                ty: IrType::Int,
+                is_param: true,
+            }],
+        );
+        verify(&prog);
+    }
+
+    // II-V1: no local past the declared params may be flagged `is_param`.
+    #[test]
+    #[should_panic(expected = "is_param")]
+    fn is_param_local_after_params() {
+        let prog = func_with_params(
+            vec![],
+            vec![Local {
+                name: dummy_sym(),
+                ty: IrType::Int,
+                is_param: true,
+            }],
+        );
+        verify(&prog);
+    }
+
+    #[test]
+    fn valid_function_with_params() {
+        let prog = func_with_params(
+            vec![IrType::Int],
+            vec![
+                Local {
+                    name: dummy_sym(),
+                    ty: IrType::Int,
+                    is_param: true,
+                },
+                Local {
+                    name: dummy_sym(),
+                    ty: IrType::Int,
+                    is_param: false,
+                },
+            ],
+        );
         verify(&prog);
     }
 }

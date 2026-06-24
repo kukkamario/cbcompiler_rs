@@ -93,7 +93,12 @@ pub fn default_value(
                     fields,
                 }))
             } else {
-                Value::Null
+                // A `StructVal` whose definition is missing from `struct_defs`
+                // is an internal lowering inconsistency, not a runtime
+                // condition. The interpreter is the reference implementation
+                // and must fail loudly here rather than fabricate a `Null` that
+                // surfaces later as a misleading `NullDeref` far from the cause.
+                panic!("internal: default_value for unknown struct {name:?}");
             }
         }
         IrType::FnPtr(_) => Value::FnPtr(None),
@@ -122,5 +127,20 @@ impl fmt::Display for Value {
             Value::Null => write!(f, "Null"),
             Value::Void => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cb_diagnostics::Symbol;
+
+    // II-V20: an unknown struct definition is an internal inconsistency and
+    // must fail loudly rather than silently return Null.
+    #[test]
+    #[should_panic(expected = "unknown struct")]
+    fn default_value_unknown_struct_panics() {
+        let api = cb_runtime_sys::string_api();
+        let _ = default_value(&IrType::StructVal(Symbol::DUMMY), &[], api);
     }
 }

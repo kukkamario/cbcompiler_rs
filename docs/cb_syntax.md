@@ -921,6 +921,8 @@ For i = 0 To 9
 Next i
 ```
 
+`Break` requires an enclosing loop (and `Break n` requires `n` of them); `Continue` requires an enclosing loop or `Select`. A `Break`/`Continue` with no such enclosing construct is an error (E0332). A `Break` is never satisfied by a `Select` — only loops count toward its `n`.
+
 ### 6.4 Goto and labels
 
 A label is `name:` on a line by itself (any indentation):
