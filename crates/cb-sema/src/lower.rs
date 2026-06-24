@@ -501,9 +501,7 @@ impl<'a> Lowerer<'a> {
         // Lower non-function/type/struct top-level statements.
         for &id in program {
             match &self.arena[id] {
-                Node::Stmt(Stmt::Function { .. })
-                | Node::Stmt(Stmt::Type { .. })
-                | Node::Stmt(Stmt::Struct { .. }) => continue,
+                Node::Stmt(Stmt::Function { .. }) | Node::Stmt(Stmt::TypeDecl { .. }) => continue,
                 _ => self.lower_stmt(id),
             }
         }
@@ -603,7 +601,11 @@ impl<'a> Lowerer<'a> {
     fn scan_body_for_locals(&mut self, body: &[NodeId]) {
         for &id in body {
             match self.arena[id].clone() {
-                Node::Stmt(Stmt::Dim { names, ty: _, .. }) => {
+                Node::Stmt(Stmt::VarDecl {
+                    is_global: false,
+                    names,
+                    ..
+                }) => {
                     for dn in &names {
                         let name = self.intern_ident(dn.name_span, dn.sigil);
                         if self.lookup_local(name).is_none() {
@@ -616,7 +618,9 @@ impl<'a> Lowerer<'a> {
                         }
                     }
                 }
-                Node::Stmt(Stmt::Global { .. }) => {
+                Node::Stmt(Stmt::VarDecl {
+                    is_global: true, ..
+                }) => {
                     // Globals are collected at program level — no local slot needed.
                 }
                 // Recurse into nested bodies for variables declared in blocks.
@@ -1322,7 +1326,8 @@ impl<'a> Lowerer<'a> {
                     self.terminate(Terminator::Halt { code: 1 }, self.arena.span_of(expr));
                 }
             }
-            Node::Stmt(Stmt::Dim {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: false,
                 names,
                 init: Some(init_id),
                 ..
@@ -1336,8 +1341,8 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
-            Node::Stmt(Stmt::Dim { .. }) => {}
-            Node::Stmt(Stmt::Global {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: true,
                 names,
                 init: Some(init_id),
                 ..
@@ -1351,7 +1356,8 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
-            Node::Stmt(Stmt::Global { .. }) => {}
+            // `Dim`/`Global` with no initializer: declaration only, no IR.
+            Node::Stmt(Stmt::VarDecl { .. }) => {}
             Node::Stmt(Stmt::Const { .. }) => {
                 // Constants are inlined at use sites — no IR needed.
             }
@@ -1544,8 +1550,7 @@ impl<'a> Lowerer<'a> {
 
             // These are handled at the program level, not inline.
             Node::Stmt(Stmt::Function { .. })
-            | Node::Stmt(Stmt::Type { .. })
-            | Node::Stmt(Stmt::Struct { .. })
+            | Node::Stmt(Stmt::TypeDecl { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
             | Node::Stmt(Stmt::Include { .. })
             | Node::Stmt(Stmt::Error) => {}

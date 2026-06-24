@@ -142,12 +142,13 @@ pub enum Stmt {
     ExprStmt {
         expr: NodeId,
     },
-    Dim {
-        names: Vec<DimName>,
-        ty: Option<NodeId>,
-        init: Option<NodeId>,
-    },
-    Global {
+    /// A `Dim` (local) or `Global` variable declaration. The two keyword forms
+    /// share an identical shape — the only difference is scope/visibility,
+    /// captured by `is_global` (matching `Const`'s `is_global` flag) rather
+    /// than a separate variant (F-A2/F-A3). `Global`'s top-level-only rule is a
+    /// sema/parse check, not a reason for a distinct AST node.
+    VarDecl {
+        is_global: bool,
         names: Vec<DimName>,
         ty: Option<NodeId>,
         init: Option<NodeId>,
@@ -207,11 +208,12 @@ pub enum Stmt {
         return_ty: Option<NodeId>,
         body: Vec<NodeId>,
     },
-    Type {
-        name_span: Span,
-        fields: Vec<NodeId>,
-    },
-    Struct {
+    /// A `Type ... EndType` or `Struct ... EndStruct` declaration. The two
+    /// forms are structurally identical and differ only in the heap-vs-value
+    /// semantics they imply downstream (§3.3), captured by `kind` rather than a
+    /// separate variant (F-A1).
+    TypeDecl {
+        kind: TypeDeclKind,
         name_span: Span,
         fields: Vec<NodeId>,
     },
@@ -270,6 +272,15 @@ pub struct ElseIf {
 pub enum IfForm {
     Block,
     SingleLine,
+}
+
+/// Which keyword introduced a [`Stmt::TypeDecl`] — `Type` (heap reference
+/// semantics) or `Struct` (value semantics). The distinction is real (§3.3)
+/// but carries no structural weight in the AST (F-A1).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TypeDeclKind {
+    Type,
+    Struct,
 }
 
 /// One arm of a `Select` statement.

@@ -12,7 +12,7 @@ use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::ast::{
     Arena, BinOp, CaseArm, DimName, ElseIf, Expr, IfForm, NewKind, Node, NodeId, Param, Stmt,
-    TypeExpr, UnOp,
+    TypeDeclKind, TypeExpr, UnOp,
 };
 use crate::span::{FileId, Span, SpanExt};
 use crate::string_value;
@@ -1188,7 +1188,7 @@ impl<'t> Parser<'t> {
 
     /// Parse an implicit declaration with `As` annotation:
     /// `<name>[<sigil>] As <Type> = <expr>` (§4.1, FD-004 #4). Produces a
-    /// single-name `Stmt::Dim` with the type and initializer. The `= <expr>`
+    /// single-name local `Stmt::VarDecl` with the type and initializer. The `= <expr>`
     /// tail is required; without it sema can't tell an implicit decl from a
     /// dangling `Ident As Type` (which has no statement meaning), and any
     /// later assignment would conflict. The current token at entry is the
@@ -1221,7 +1221,8 @@ impl<'t> Parser<'t> {
         let span = name_tok_span.merge(self.arena.span_of(value));
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(
-            Node::Stmt(Stmt::Dim {
+            Node::Stmt(Stmt::VarDecl {
+                is_global: false,
                 names: vec![DimName { name_span, sigil }],
                 ty: Some(ty),
                 init: Some(value),
@@ -2232,7 +2233,14 @@ impl<'t> Parser<'t> {
         let close_span = self.consume_block_closer(Kw::EndType, opener, "Type");
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();
-        Ok(self.alloc(Node::Stmt(Stmt::Type { name_span, fields }), span))
+        Ok(self.alloc(
+            Node::Stmt(Stmt::TypeDecl {
+                kind: TypeDeclKind::Type,
+                name_span,
+                fields,
+            }),
+            span,
+        ))
     }
 
     /// Parse `Struct <Name> … EndStruct`.
@@ -2257,7 +2265,14 @@ impl<'t> Parser<'t> {
         let close_span = self.consume_block_closer(Kw::EndStruct, opener, "Struct");
         let span = opener.merge(close_span);
         let _ = self.consume_stmt_sep_or_terminator();
-        Ok(self.alloc(Node::Stmt(Stmt::Struct { name_span, fields }), span))
+        Ok(self.alloc(
+            Node::Stmt(Stmt::TypeDecl {
+                kind: TypeDeclKind::Struct,
+                name_span,
+                fields,
+            }),
+            span,
+        ))
     }
 
     /// Body of a `Type`/`Struct`: zero or more `Field <name> [As <type>]`
@@ -2435,10 +2450,11 @@ impl<'t> Parser<'t> {
         let span = opener.merge(end_span);
         self.consume_stmt_sep_or_terminator()?;
 
-        let stmt = if global {
-            Stmt::Global { names, ty, init }
-        } else {
-            Stmt::Dim { names, ty, init }
+        let stmt = Stmt::VarDecl {
+            is_global: global,
+            names,
+            ty,
+            init,
         };
         Ok(self.alloc(Node::Stmt(stmt), span))
     }
@@ -4769,7 +4785,12 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Dim { names, ty, init } => {
+            Stmt::VarDecl {
+                is_global: false,
+                names,
+                ty,
+                init,
+            } => {
                 assert_eq!(names.len(), 1);
                 assert_eq!(names[0].name_span.slice(src), "x");
                 assert!(names[0].sigil.is_none());
@@ -4786,7 +4807,12 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Dim { names, ty, init } => {
+            Stmt::VarDecl {
+                is_global: false,
+                names,
+                ty,
+                init,
+            } => {
                 assert_eq!(names.len(), 1);
                 assert_eq!(names[0].sigil, Some(Sigil::Integer));
                 assert_eq!(names[0].name_span.slice(src), "count");
@@ -4803,7 +4829,12 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Dim { names, ty, init } => {
+            Stmt::VarDecl {
+                is_global: false,
+                names,
+                ty,
+                init,
+            } => {
                 assert_eq!(names.len(), 1);
                 assert_eq!(names[0].sigil, Some(Sigil::Float));
                 assert!(ty.is_none());
@@ -4823,7 +4854,12 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Dim { names, ty, init } => {
+            Stmt::VarDecl {
+                is_global: false,
+                names,
+                ty,
+                init,
+            } => {
                 assert_eq!(names.len(), 3);
                 assert_eq!(names[0].name_span.slice(src), "a");
                 assert_eq!(names[1].name_span.slice(src), "b");
@@ -4880,7 +4916,12 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Global { names, ty, init } => {
+            Stmt::VarDecl {
+                is_global: true,
+                names,
+                ty,
+                init,
+            } => {
                 assert_eq!(names.len(), 1);
                 assert_eq!(names[0].name_span.slice(src), "score");
                 assert_primitive(&r.arena, ty.expect("ty"), Kw::Integer);
@@ -4896,7 +4937,11 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Global { names, .. } => assert_eq!(names.len(), 2),
+            Stmt::VarDecl {
+                is_global: true,
+                names,
+                ..
+            } => assert_eq!(names.len(), 2),
             other => panic!("expected Global, got {other:?}"),
         }
     }
@@ -5208,7 +5253,11 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Type { name_span, fields } => {
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Type,
+                name_span,
+                fields,
+            } => {
                 assert_eq!(name_span.slice(src), "Pt");
                 assert_eq!(fields.len(), 2);
                 for &f in fields {
@@ -5224,7 +5273,13 @@ mod decl_tests {
         let src = "Type Pt\n  Field x As Integer\nEnd Type\n";
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
-        assert!(matches!(stmt_of(&r.arena, r.program[0]), Stmt::Type { .. }));
+        assert!(matches!(
+            stmt_of(&r.arena, r.program[0]),
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Type,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -5233,7 +5288,11 @@ mod decl_tests {
         let r = parse_src(src);
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Struct { name_span, fields } => {
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Struct,
+                name_span,
+                fields,
+            } => {
                 assert_eq!(name_span.slice(src), "V");
                 assert_eq!(fields.len(), 2);
             }
@@ -5251,7 +5310,13 @@ mod decl_tests {
             !r.diagnostics.is_empty(),
             "expected diagnostic for non-Field in Type body"
         );
-        assert!(matches!(stmt_of(&r.arena, r.program[0]), Stmt::Type { .. }));
+        assert!(matches!(
+            stmt_of(&r.arena, r.program[0]),
+            Stmt::TypeDecl {
+                kind: TypeDeclKind::Type,
+                ..
+            }
+        ));
     }
 
     #[test]
