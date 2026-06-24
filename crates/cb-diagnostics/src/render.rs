@@ -130,8 +130,8 @@ fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
         eprintln!("cb-diagnostics: {msg}");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
     };
-    let text_len = u32::try_from(src.text.len())
-        .expect("source longer than u32::MAX bytes — Source builders forbid this");
+    // Reuse the byte length the `LineIndex` already stored at build time.
+    let text_len = src.line_index().text_len();
     if label.span.end > text_len {
         let msg = format!(
             "Span end ({}) exceeds source length ({}) of file '{}'",

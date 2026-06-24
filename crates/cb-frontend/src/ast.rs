@@ -9,6 +9,8 @@
 //!   could derive `Eq` if a use case ever wants it. `Eq` is not currently
 //!   derived because no caller needs it and `PartialEq` is sufficient.
 
+use std::num::NonZeroU32;
+
 use crate::span::Span;
 use crate::token::{FloatBits, Kw, Sigil, StrLitKind};
 
@@ -178,8 +180,7 @@ pub enum Stmt {
         init: Option<NodeId>,
     },
     Const {
-        name_span: Span,
-        sigil: Option<Sigil>,
+        name: DimName,
         ty: Option<NodeId>,
         value: NodeId,
         is_global: bool,
@@ -242,21 +243,22 @@ pub enum Stmt {
         fields: Vec<NodeId>,
     },
     FieldDecl {
-        name_span: Span,
-        sigil: Option<Sigil>,
+        name: DimName,
         ty: Option<NodeId>,
     },
     Return {
         value: Option<NodeId>,
     },
     Goto {
-        label_span: Span,
+        name_span: Span,
     },
     Label {
         name_span: Span,
     },
+    /// `Break [n]` — exit `n` enclosing loops (`None` means 1). The parser
+    /// guarantees `n > 0`, so the count is a [`NonZeroU32`].
     Break {
-        count: Option<u32>,
+        count: Option<NonZeroU32>,
     },
     Continue,
     /// `End` — terminate the whole program (`cb_runtime.md` §System). Lowered

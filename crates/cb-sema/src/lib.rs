@@ -50,10 +50,10 @@ pub fn analyze(
     arena: &Arena,
     program: &[NodeId],
     source: &str,
-    file_id: FileId,
+    _file_id: FileId,
     runtime_catalog: &RuntimeCatalog,
 ) -> SemaResult {
-    check::Checker::run(arena, program, source, file_id, runtime_catalog)
+    check::Checker::run(arena, program, source, runtime_catalog)
 }
 
 /// Result of semantic analysis.

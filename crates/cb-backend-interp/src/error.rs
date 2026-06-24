@@ -30,15 +30,7 @@ impl fmt::Display for InterpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             InterpErrorKind::Trap(kind) => {
-                let msg = match kind {
-                    TrapKind::NullDeref => "null pointer dereference",
-                    TrapKind::DeletedAccess => "access to deleted object",
-                    TrapKind::DivisionByZero => "division by zero",
-                    TrapKind::IndexOutOfBounds => "array index out of bounds",
-                    TrapKind::NullFnPtr => "null function pointer call",
-                    TrapKind::DoubleDelete => "double delete",
-                };
-                write!(f, "runtime trap: {msg}")
+                write!(f, "runtime trap: {}", kind.message())
             }
             InterpErrorKind::RuntimeError(msg) => write!(f, "runtime error: {msg}"),
             // Should be intercepted by `run` and never displayed; defensive.

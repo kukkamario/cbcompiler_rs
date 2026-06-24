@@ -525,11 +525,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_function_def(&mut self, id: NodeId) {
         let Node::Stmt(Stmt::Function {
-            name_span,
-            return_sigil: _,
-            params: _,
-            return_ty: _,
-            body,
+            name_span, body, ..
         }) = self.arena[id].clone()
         else {
             return;
@@ -833,9 +829,8 @@ impl<'a> Lowerer<'a> {
 
             Node::Expr(Expr::New(kind)) => match kind {
                 NewKind::Type(_type_expr_id) => {
-                    let ty = self.types.get(id).cloned().unwrap_or(Type::Void);
-                    let type_def = match &ty {
-                        Type::TypeRef { name } => self.type_def_map.get(name).copied(),
+                    let type_def = match self.types.get(id) {
+                        Some(Type::TypeRef { name }) => self.type_def_map.get(name).copied(),
                         _ => None,
                     };
                     match type_def {
@@ -844,7 +839,11 @@ impl<'a> Lowerer<'a> {
                             // Sema resolves `New T` to a known TypeRef; this only
                             // fires on degenerate/already-errored input. Emit a
                             // null rather than indexing a fabricated key.
-                            debug_assert!(false, "New Type lowered with unresolved type {ty:?}");
+                            debug_assert!(
+                                false,
+                                "New Type lowered with unresolved type {:?}",
+                                self.types.get(id)
+                            );
                             self.emit(InstKind::ConstNull, span)
                         }
                     }
@@ -1447,8 +1446,8 @@ impl<'a> Lowerer<'a> {
                 }
                 self.switch_to(label_bb);
             }
-            Node::Stmt(Stmt::Goto { label_span }) => {
-                let name = self.intern_span(label_span);
+            Node::Stmt(Stmt::Goto { name_span }) => {
+                let name = self.intern_span(name_span);
                 let target = self.label_blocks.get(&name).copied().unwrap_or_else(|| {
                     let bb = self.fresh_block();
                     self.label_blocks.insert(name, bb);
@@ -1457,7 +1456,7 @@ impl<'a> Lowerer<'a> {
                 self.terminate(Terminator::Goto(target), self.arena.span_of(id));
             }
             Node::Stmt(Stmt::Break { count }) => {
-                let n = count.unwrap_or(1) as usize;
+                let n = count.map_or(1, |c| c.get()) as usize;
                 let mut loops_found = 0usize;
                 let mut exit_block = None;
                 for ctx in self.context_stack.iter().rev() {

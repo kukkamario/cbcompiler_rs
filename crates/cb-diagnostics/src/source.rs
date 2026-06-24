@@ -4,6 +4,25 @@
 //! [`Source`] precomputes a [`LineIndex`] so diagnostics can translate byte
 //! offsets to (line, column) coordinates lazily and cheaply.
 
+/// Allocate the next `u32` id for a collection of length `len`.
+///
+/// Two-stage exhaustion guard, shared by [`SourceMap`] and
+/// [`crate::Interner`]: `try_from` only fails once `len` exceeds `u32::MAX`
+/// (true overflow), while the `assert!` catches the one-short boundary —
+/// `id == u32::MAX` — which both collections reserve as a sentinel
+/// (`FileId::SYNTHETIC` / `Symbol::DUMMY`). `what` names the caller so the
+/// panic message identifies which collection exhausted.
+pub(crate) fn alloc_id(len: usize, what: &str) -> u32 {
+    let id =
+        u32::try_from(len).unwrap_or_else(|_| panic!("{what} exhausted: count exceeds u32::MAX"));
+    assert!(
+        id != u32::MAX,
+        "{what} exhausted: cannot allocate id {} — reserved as sentinel",
+        u32::MAX
+    );
+    id
+}
+
 /// Opaque identifier for a source file inside a [`SourceMap`].
 ///
 /// `FileId(u32::MAX)` is reserved as [`FileId::SYNTHETIC`] for tests and
@@ -149,13 +168,7 @@ impl SourceMap {
     }
 
     fn push_source(&mut self, name: String, text: String) -> FileId {
-        let idx = self.sources.len();
-        let id = u32::try_from(idx).expect("source map index overflowed u32");
-        assert!(
-            id != u32::MAX,
-            "source map exhausted: cannot allocate FileId({}) — reserved as SYNTHETIC",
-            u32::MAX
-        );
+        let id = alloc_id(self.sources.len(), "source map");
         self.sources.push(Source::new(name, text));
         FileId(id)
     }

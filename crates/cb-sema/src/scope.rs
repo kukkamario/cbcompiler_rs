@@ -71,6 +71,28 @@ pub enum DeclKind {
     RuntimeTypeDef,
 }
 
+impl DeclKind {
+    /// Whether a top-level declaration of this kind is visible inside function
+    /// bodies regardless of the `is_global` flag — the "hoisted" kinds. Only
+    /// `Variable` is *not* hoisted (it needs an explicit `Global`). Drives the
+    /// visibility filter in [`SymbolTable::lookup`].
+    pub(crate) fn is_hoisted(&self) -> bool {
+        matches!(
+            self,
+            DeclKind::Function { .. }
+                | DeclKind::TypeDef { .. }
+                | DeclKind::StructDef { .. }
+                | DeclKind::Constant { .. }
+                | DeclKind::Label
+                | DeclKind::RuntimeFn { .. }
+                | DeclKind::OverloadSet { .. }
+                // Runtime opaque types (e.g. `Object`) are global like runtime
+                // functions, so a function body using `As Object` resolves them.
+                | DeclKind::RuntimeTypeDef
+        )
+    }
+}
+
 /// One variant of an overloaded runtime function.
 #[derive(Clone, Debug)]
 pub struct OverloadVariant {
@@ -172,7 +194,7 @@ impl SymbolTable {
     /// From a function scope:
     /// - Local symbols (this scope)
     /// - Globals (top-level symbols with `is_global == true`)
-    /// - Hoisted items: Functions, TypeDefs, StructDefs from the top-level scope
+    /// - Hoisted items from the top-level scope (see [`DeclKind::is_hoisted`])
     /// - NOT ordinary top-level variables
     ///
     /// Load-bearing invariant: the scope tree is at most two levels deep —
@@ -207,22 +229,7 @@ impl SymbolTable {
                 if from_function && ps.kind == ScopeKind::TopLevel {
                     // From a function scope looking into top-level:
                     // only globals and hoisted items are visible.
-                    let visible = decl.is_global
-                        || matches!(
-                            decl.kind,
-                            DeclKind::Function { .. }
-                                | DeclKind::TypeDef { .. }
-                                | DeclKind::StructDef { .. }
-                                | DeclKind::Constant { .. }
-                                | DeclKind::Label
-                                | DeclKind::RuntimeFn { .. }
-                                | DeclKind::OverloadSet { .. }
-                                // Runtime opaque types (e.g. `Object`) are
-                                // global like runtime functions, so a function
-                                // body using `As Object` resolves them too.
-                                | DeclKind::RuntimeTypeDef
-                        );
-                    if visible {
+                    if decl.is_global || decl.kind.is_hoisted() {
                         return Some(decl);
                     }
                 } else {

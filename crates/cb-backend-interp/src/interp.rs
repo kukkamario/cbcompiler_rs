@@ -402,6 +402,43 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
+    /// Snapshot the argument registers of the current frame into values.
+    fn read_args(&self, args: &[Reg]) -> Vec<Value> {
+        let frame = self.call_stack.last().unwrap();
+        args.iter()
+            .map(|r| frame.registers[r.0 as usize].clone())
+            .collect()
+    }
+
+    /// Shared call tail for `Call`/`CallIndirect`: notify the observer, then
+    /// dispatch to a user-defined body (push a frame) or a runtime function.
+    /// The two callers differ only in how `callee` is resolved.
+    fn dispatch_call(
+        &mut self,
+        callee: FuncId,
+        arg_vals: &[Value],
+        result_reg: Option<Reg>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        self.observer
+            .on_call(self.call_stack.last().unwrap(), callee, arg_vals);
+
+        let decl = &self.program.func_table[callee.0 as usize];
+        match &decl.kind {
+            FuncKind::UserDefined { body_index } => {
+                let body_index = *body_index;
+                self.push_frame(callee, body_index, arg_vals, result_reg)?;
+                Ok(Value::Void)
+            }
+            FuncKind::Runtime { symbol, fn_ptr } => {
+                let symbol = symbol.clone();
+                let fn_ptr = *fn_ptr;
+                let sig = decl.sig.clone();
+                self.call_runtime(&symbol, fn_ptr, &sig, arg_vals, span)
+            }
+        }
+    }
+
     fn exec_inst(
         &mut self,
         kind: &InstKind,
@@ -474,29 +511,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             // ── Function calls ─────────────────────────────────────
             InstKind::Call { callee, args } => {
-                let frame = self.call_stack.last().unwrap();
-                let arg_vals: Vec<Value> = args
-                    .iter()
-                    .map(|r| frame.registers[r.0 as usize].clone())
-                    .collect();
-
-                self.observer
-                    .on_call(self.call_stack.last().unwrap(), *callee, &arg_vals);
-
-                let decl = &self.program.func_table[callee.0 as usize];
-                match &decl.kind {
-                    FuncKind::UserDefined { body_index } => {
-                        let body_index = *body_index;
-                        self.push_frame(*callee, body_index, &arg_vals, result_reg)?;
-                        Ok(Value::Void)
-                    }
-                    FuncKind::Runtime { symbol, fn_ptr } => {
-                        let symbol = symbol.clone();
-                        let fn_ptr = *fn_ptr;
-                        let sig = decl.sig.clone();
-                        self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
-                    }
-                }
+                let arg_vals = self.read_args(args);
+                self.dispatch_call(*callee, &arg_vals, result_reg, span)
             }
 
             // ── Type instance operations ────────────────────────────
@@ -833,28 +849,10 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 let callee_val = frame.registers[callee.0 as usize].clone();
                 match callee_val {
                     Value::FnPtr(Some(func_id)) => {
-                        let arg_vals: Vec<Value> = args
-                            .iter()
-                            .map(|r| frame.registers[r.0 as usize].clone())
-                            .collect();
-
-                        self.observer
-                            .on_call(self.call_stack.last().unwrap(), func_id, &arg_vals);
-
-                        let decl = &self.program.func_table[func_id.0 as usize];
-                        match &decl.kind {
-                            FuncKind::UserDefined { body_index } => {
-                                let body_index = *body_index;
-                                self.push_frame(func_id, body_index, &arg_vals, result_reg)?;
-                                Ok(Value::Void)
-                            }
-                            FuncKind::Runtime { symbol, fn_ptr } => {
-                                let symbol = symbol.clone();
-                                let fn_ptr = *fn_ptr;
-                                let sig = decl.sig.clone();
-                                self.call_runtime(&symbol, fn_ptr, &sig, &arg_vals, span)
-                            }
-                        }
+                        // Callee resolution differs from `Call` (register/value
+                        // vs direct FuncId); the dispatch tail is shared.
+                        let arg_vals = self.read_args(args);
+                        self.dispatch_call(func_id, &arg_vals, result_reg, span)
                     }
                     Value::FnPtr(None) | Value::Null => {
                         Err(self.trap_error(TrapKind::NullFnPtr, span))
@@ -1213,19 +1211,19 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // Note the String→numeric asymmetry (see `Value::to_i64`/`to_f64`):
         // converting to int parses a leading prefix (`"3x"` → 3) while
         // converting to float requires a full parse (`"3x"` → 0.0).
-        let i = self.value_to_int_cb(v);
-        let f = v.to_f64();
-
+        //
+        // Each coercion is computed only in the arm that needs it, so a String
+        // source is parsed once (not via both `value_to_int_cb` and `to_f64`).
         match to {
-            IrType::Byte => Ok(Value::Byte(i as u8)),
-            IrType::Short => Ok(Value::Short(i as u16)),
-            IrType::Int => Ok(Value::Int(i as i32)),
-            IrType::Long => Ok(Value::Long(i)),
+            IrType::Byte => Ok(Value::Byte(self.value_to_int_cb(v) as u8)),
+            IrType::Short => Ok(Value::Short(self.value_to_int_cb(v) as u16)),
+            IrType::Int => Ok(Value::Int(self.value_to_int_cb(v) as i32)),
+            IrType::Long => Ok(Value::Long(self.value_to_int_cb(v))),
             IrType::Float => {
                 if from.is_integer() {
-                    Ok(Value::Float(i as f64))
+                    Ok(Value::Float(self.value_to_int_cb(v) as f64))
                 } else {
-                    Ok(Value::Float(f))
+                    Ok(Value::Float(v.to_f64()))
                 }
             }
             IrType::String => Ok(Value::String(v.as_cb_string(self.string_api))),

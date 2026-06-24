@@ -220,7 +220,7 @@ pub(crate) fn widen_storage(t: &Type) -> Type {
 /// types, floored at `Int` for integers. `Byte`/`Short` are storage-only and
 /// widen to `Int` for all arithmetic (FD-035 / cb_syntax.md §3.4); `Float`
 /// beats every integer.
-pub(crate) fn numeric_promote(a: &Type, b: &Type) -> Type {
+pub fn numeric_promote(a: &Type, b: &Type) -> Type {
     fn rank(t: &Type) -> u8 {
         match t {
             Type::Byte => 1,

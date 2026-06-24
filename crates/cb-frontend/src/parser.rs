@@ -8,6 +8,8 @@
 //! is currently coarse — errors bubble to statement boundary. Refine in a
 //! future FD when concrete cases motivate it.
 
+use std::num::NonZeroU32;
+
 use cb_diagnostics::{Diagnostic, DiagnosticCode, Label};
 
 use crate::ast::{
@@ -1340,10 +1342,10 @@ impl<'t> Parser<'t> {
         };
         self.cursor.bump();
         // Parser is permissive on label sigils; sema enforces no-sigil.
-        let label_span = bare_name_span(label_tok.span, sigil);
+        let name_span = bare_name_span(label_tok.span, sigil);
         let span = start.merge(label_tok.span);
         self.consume_stmt_sep_or_terminator()?;
-        Ok(self.alloc(Node::Stmt(Stmt::Goto { label_span }), span))
+        Ok(self.alloc(Node::Stmt(Stmt::Goto { name_span }), span))
     }
 
     fn parse_include(&mut self) -> Result<NodeId, ParseError> {
@@ -1370,7 +1372,7 @@ impl<'t> Parser<'t> {
 
     fn parse_break(&mut self) -> Result<NodeId, ParseError> {
         let start = self.cursor.bump().span;
-        let mut count: Option<u32> = None;
+        let mut count: Option<NonZeroU32> = None;
         let mut span = start;
         if !self.cursor.is_stmt_terminator() {
             // Must be a positive integer literal (§6.3). Anything else → E0213.
@@ -1378,7 +1380,7 @@ impl<'t> Parser<'t> {
             match n_tok.kind {
                 TokenKind::IntLit(v) if v > 0 && v <= u32::MAX as u64 => {
                     self.cursor.bump();
-                    count = Some(v as u32);
+                    count = Some(NonZeroU32::new(v as u32).expect("guard ensures v > 0"));
                     span = start.merge(n_tok.span);
                 }
                 _ => {
@@ -1514,9 +1516,9 @@ impl<'t> Parser<'t> {
                 start.merge(end)
             }
             // Mismatched split: `End <other>`.
-            TokenKind::Keyword(Kw::End) if split_end_to_joined(self.cursor.peek_n(1)).is_some() => {
-                let actual_kw = split_end_to_joined(self.cursor.peek_n(1))
-                    .expect("split_end_to_joined was Some above");
+            TokenKind::Keyword(Kw::End)
+                if let Some(actual_kw) = split_end_to_joined(self.cursor.peek_n(1)) =>
+            {
                 let start = self.cursor.bump().span;
                 let end = self.cursor.bump().span;
                 let span = start.merge(end);
@@ -2409,8 +2411,7 @@ impl<'t> Parser<'t> {
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(
             Node::Stmt(Stmt::FieldDecl {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
             }),
             span,
@@ -2578,8 +2579,7 @@ impl<'t> Parser<'t> {
         self.consume_stmt_sep_or_terminator()?;
         Ok(self.alloc(
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 value,
                 is_global: global,
@@ -3631,8 +3631,8 @@ mod stmt_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Goto { label_span } => {
-                assert_eq!(label_span.slice(src), "cleanup");
+            Stmt::Goto { name_span } => {
+                assert_eq!(name_span.slice(src), "cleanup");
             }
             other => panic!("expected Goto, got {other:?}"),
         }
@@ -3672,7 +3672,7 @@ mod stmt_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         assert_eq!(r.program.len(), 1);
         match stmt_of(&r.arena, r.program[0]) {
-            Stmt::Break { count } => assert_eq!(*count, Some(2)),
+            Stmt::Break { count } => assert_eq!(*count, NonZeroU32::new(2)),
             other => panic!("expected Break, got {other:?}"),
         }
     }
@@ -5011,8 +5011,7 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 value,
                 is_global,
@@ -5037,8 +5036,7 @@ mod decl_tests {
         assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
         match stmt_of(&r.arena, r.program[0]) {
             Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 is_global,
                 value,
                 ..

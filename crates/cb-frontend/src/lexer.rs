@@ -239,7 +239,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn scan_newline(&mut self, start: u32) {
+    /// Consume one line terminator (`\r`, `\n`, or `\r\n`) if present.
+    fn consume_line_terminator(&mut self) {
         match self.peek_byte() {
             Some(b'\r') => {
                 self.bump_byte();
@@ -252,6 +253,10 @@ impl<'src> Lexer<'src> {
             }
             _ => {}
         }
+    }
+
+    fn scan_newline(&mut self, start: u32) {
+        self.consume_line_terminator();
         let span = self.current_span(start);
         self.push_token(TokenKind::Newline, span);
     }
@@ -266,18 +271,7 @@ impl<'src> Lexer<'src> {
         let is_continuation = matches!(self.peek_byte(), Some(b'\n') | Some(b'\r'));
         if is_continuation {
             // Consume the line terminator.
-            match self.peek_byte() {
-                Some(b'\r') => {
-                    self.bump_byte();
-                    if self.peek_byte() == Some(b'\n') {
-                        self.bump_byte();
-                    }
-                }
-                Some(b'\n') => {
-                    self.bump_byte();
-                }
-                _ => {}
-            }
+            self.consume_line_terminator();
             if self.opts.preserve_trivia {
                 let span = self.current_span(start);
                 self.push_token(TokenKind::Continuation, span);
@@ -402,21 +396,19 @@ impl<'src> Lexer<'src> {
                     saw_backslash = true;
                     self.bump_byte();
                     // Consume the next char of the escape (any char), if any.
-                    if self.peek_byte().is_some() {
-                        // Don't validate; that's the parser's job. But stop
-                        // before newline so a stray `\` doesn't swallow it.
-                        match self.peek_byte() {
-                            Some(b'\n') | Some(b'\r') => {
-                                // Treat as backslash-followed-by-newline; do
-                                // not consume. Fall through to the
-                                // post-loop diagnostic (distinct message
-                                // from plain newline-in-string).
-                                break;
-                            }
-                            _ => {
-                                self.bump_char();
-                            }
+                    // Don't validate; that's the parser's job. But stop before
+                    // newline so a stray `\` doesn't swallow it.
+                    match self.peek_byte() {
+                        Some(b'\n') | Some(b'\r') => {
+                            // Treat as backslash-followed-by-newline; do not
+                            // consume. Fall through to the post-loop diagnostic
+                            // (distinct message from plain newline-in-string).
+                            break;
                         }
+                        Some(_) => {
+                            self.bump_char();
+                        }
+                        None => {}
                     }
                 }
                 Some(b'"') => {
@@ -930,23 +922,11 @@ impl<'src> Lexer<'src> {
     fn scan_operator_or_punct(&mut self, start: u32) {
         let b = self.peek_byte().expect("scan_operator_or_punct: at EOF");
         match b {
-            b'+' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Plus), span);
-            }
-            b'-' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Minus), span);
-            }
+            b'+' => self.emit_single(start, TokenKind::Op(Op::Plus)),
+            b'-' => self.emit_single(start, TokenKind::Op(Op::Minus)),
             b'*' => self.emit_single(start, TokenKind::Op(Op::Star)),
             b'^' => self.emit_single(start, TokenKind::Op(Op::Caret)),
-            b'=' => {
-                self.bump_byte();
-                let span = self.current_span(start);
-                self.push_token(TokenKind::Op(Op::Eq), span);
-            }
+            b'=' => self.emit_single(start, TokenKind::Op(Op::Eq)),
             b'<' => {
                 self.bump_byte();
                 match self.peek_byte() {

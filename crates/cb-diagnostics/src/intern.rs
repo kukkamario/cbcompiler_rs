@@ -8,6 +8,7 @@
 //! original (first-seen) spelling is preserved so diagnostics echo what the
 //! user actually wrote.
 
+use crate::source::alloc_id;
 use std::collections::HashMap;
 
 /// Fold one `char` to its Unicode simple-case-folding form.
@@ -35,6 +36,14 @@ fn fold_char(c: char) -> char {
 /// no cross-character expansions like full folding's `ß` → `ss`.
 pub fn fold(name: &str) -> String {
     name.chars().map(fold_char).collect()
+}
+
+/// True when folding `name` would change at least one scalar.
+///
+/// When this is `false`, `name` already equals its own fold key, so a lookup
+/// can borrow `name` directly without allocating a folded `String`.
+fn needs_fold(name: &str) -> bool {
+    name.chars().any(|c| fold_char(c) != c)
 }
 
 /// Interned string identifier — a lightweight, copyable handle.
@@ -85,22 +94,29 @@ impl Interner {
     /// last `u32` value is reserved for [`Symbol::DUMMY`], mirroring the
     /// `SourceMap` sentinel discipline.
     pub fn intern(&mut self, name: &str) -> Symbol {
+        // Hot path: if `name` is already its own fold key (e.g. all-lowercase
+        // ASCII identifiers, the common case), `name == fold(name)`, so we can
+        // look it up by borrowing `name` directly — no throwaway `String`. Only
+        // genuinely cased input allocates a fold key here.
+        if !needs_fold(name) {
+            if let Some(&sym) = self.map.get(name) {
+                return sym;
+            }
+            // Miss on a name that needs no folding: the owned key equals the name.
+            return self.insert_new(name, name.to_string());
+        }
         let key = fold(name);
         if let Some(&sym) = self.map.get(&key) {
             return sym;
         }
-        // Two-stage exhaustion guard: `try_from` only fails once the vec holds
-        // more than `u32::MAX` strings (true overflow), while the `assert!`
-        // below catches the one-short boundary — `id == u32::MAX` — which is
-        // reserved as the `Symbol::DUMMY` sentinel.
-        let id = u32::try_from(self.strings.len())
-            .expect("interner exhausted: name count exceeds u32::MAX");
-        assert!(
-            id != u32::MAX,
-            "interner exhausted: cannot allocate Symbol({}) — reserved as DUMMY",
-            u32::MAX
-        );
-        let sym = Symbol(id);
+        self.insert_new(name, key)
+    }
+
+    /// Mint a fresh symbol for `name`, storing `key` as its fold key.
+    ///
+    /// Caller must have already confirmed `key` is absent from the map.
+    fn insert_new(&mut self, name: &str, key: String) -> Symbol {
+        let sym = Symbol(alloc_id(self.strings.len(), "interner"));
         self.strings.push(name.to_string());
         self.map.insert(key, sym);
         sym

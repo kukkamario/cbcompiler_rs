@@ -78,16 +78,11 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
     while i < bytes.len() {
         let b = bytes[i];
         if b != b'\\' {
-            // Push one UTF-8 character. `body` is valid UTF-8, so find the
-            // next character boundary using char_indices.
-            // Simpler: push as bytes via from_utf8_unchecked? No unsafe.
-            // Instead, scan to the next char boundary by checking high bits.
-            let ch_len = utf8_char_len(b);
-            // Bounds-check defensively in case of truncated UTF-8 (shouldn't
-            // happen — input is &str — but stay safe).
-            let end = (i + ch_len).min(bytes.len());
-            out.push_str(&body[i..end]);
-            i = end;
+            // Push one UTF-8 character. `i` is at a char boundary in the valid
+            // `&str`, so read the char there and advance by its encoded length.
+            let ch = body[i..].chars().next().expect("byte index in bounds");
+            out.push(ch);
+            i += ch.len_utf8();
             continue;
         }
 
@@ -225,8 +220,10 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
             }
             _ => {
                 // Unknown escape character. Copy the offending characters
-                // verbatim ('\\' + the next char) and emit a diagnostic.
-                let ch_len = utf8_char_len(next);
+                // verbatim ('\\' + the next char) and emit a diagnostic. The
+                // escaped char begins at `i + 1`, a char boundary in `body`.
+                let ch = body[i + 1..].chars().next().expect("byte after `\\`");
+                let ch_len = ch.len_utf8();
                 let escape_end_in_lit = escape_start_in_lit + 1 + ch_len as u32;
                 let span = sub_span(lit_span, escape_start_in_lit, escape_end_in_lit);
                 diags.push(Diagnostic::error(
@@ -237,30 +234,13 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                 // Friendly recovery: drop the backslash and keep the literal
                 // character — `"a\qb"` → `"aqb"`. This matches the choice
                 // documented in the FD-002 plan.
-                let end = (i + 1 + ch_len).min(bytes.len());
-                out.push_str(&body[i + 1..end]);
-                i = end;
+                out.push(ch);
+                i += 1 + ch_len;
             }
         }
     }
 
     (out, diags)
-}
-
-fn utf8_char_len(first_byte: u8) -> usize {
-    if first_byte < 0x80 {
-        1
-    } else if first_byte < 0xC0 {
-        // Continuation byte appearing standalone — shouldn't happen in valid
-        // UTF-8 input, but stay defensive.
-        1
-    } else if first_byte < 0xE0 {
-        2
-    } else if first_byte < 0xF0 {
-        3
-    } else {
-        4
-    }
 }
 
 fn is_hex(b: u8) -> bool {

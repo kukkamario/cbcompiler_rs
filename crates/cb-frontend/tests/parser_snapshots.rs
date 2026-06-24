@@ -14,7 +14,9 @@
 use std::fmt::Write as _;
 
 use cb_diagnostics::{Diagnostic, Severity};
-use cb_frontend::ast::{Arena, CaseArm, Expr, NewKind, Node, NodeId, Stmt, TypeDeclKind, TypeExpr};
+use cb_frontend::ast::{
+    Arena, CaseArm, DimName, Expr, NewKind, Node, NodeId, Stmt, TypeDeclKind, TypeExpr,
+};
 use cb_frontend::span::FileId;
 use cb_frontend::token::{Kw, Sigil, StrLitKind};
 use cb_frontend::{BinOp, LexerOptions, UnOp, parse, tokenize};
@@ -143,7 +145,7 @@ fn format_stmt(s: &Stmt) -> String {
         ),
         Stmt::Const {
             is_global,
-            sigil,
+            name: DimName { sigil, .. },
             ty,
             ..
         } => format!(
@@ -197,7 +199,10 @@ fn format_stmt(s: &Stmt) -> String {
             },
             fields.len()
         ),
-        Stmt::FieldDecl { sigil, ty, .. } => format!(
+        Stmt::FieldDecl {
+            name: DimName { sigil, .. },
+            ty,
+        } => format!(
             "FieldDecl(sigil={}, has_ty={})",
             sigil.map(sigil_str).unwrap_or("None"),
             ty.is_some(),

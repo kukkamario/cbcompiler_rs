@@ -2,7 +2,7 @@
 
 use cb_diagnostics::Interner;
 
-use crate::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
+use crate::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
 use crate::types::IrType;
 use crate::{FuncDecl, Function, Global, Program, TypeDefInfo};
 
@@ -327,15 +327,7 @@ fn print_terminator(out: &mut String, term: &Terminator) {
             write!(out, "halt {code}").unwrap();
         }
         Terminator::Trap(kind) => {
-            let name = match kind {
-                TrapKind::NullDeref => "null_deref",
-                TrapKind::DeletedAccess => "deleted_access",
-                TrapKind::DivisionByZero => "division_by_zero",
-                TrapKind::IndexOutOfBounds => "index_out_of_bounds",
-                TrapKind::NullFnPtr => "null_fn_ptr",
-                TrapKind::DoubleDelete => "double_delete",
-            };
-            write!(out, "trap {name}").unwrap();
+            write!(out, "trap {}", kind.mnemonic()).unwrap();
         }
     }
 }

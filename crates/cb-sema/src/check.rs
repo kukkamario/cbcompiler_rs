@@ -1,8 +1,8 @@
 //! Main analysis engine — declaration collection (pass 1) and type checking (pass 2).
 
-use cb_diagnostics::{Diagnostic, FileId, Interner, Label, Span, Symbol};
+use cb_diagnostics::{Diagnostic, DiagnosticCode, FileId, Interner, Label, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt, TypeDeclKind};
-use cb_frontend::{Arena, BinOp, NodeId, Sigil, SpanExt, UnOp};
+use cb_frontend::{Arena, BinOp, DimName, NodeId, Sigil, SpanExt, UnOp};
 
 use crate::convert::{self, ConversionTable};
 use crate::diagnostics::*;
@@ -28,8 +28,6 @@ const INTRINSIC_PREVIOUS: &str = "previous";
 pub(crate) struct Checker<'a> {
     arena: &'a Arena,
     source: &'a str,
-    #[allow(dead_code)]
-    file_id: FileId,
     interner: Interner,
     symbols: SymbolTable,
     types: TypeTable,
@@ -62,7 +60,6 @@ impl<'a> Checker<'a> {
         arena: &'a Arena,
         program: &[NodeId],
         source: &'a str,
-        file_id: FileId,
         runtime_catalog: &RuntimeCatalog,
     ) -> SemaResult {
         let mut symbols = SymbolTable::new();
@@ -71,7 +68,6 @@ impl<'a> Checker<'a> {
         let mut checker = Checker {
             arena,
             source,
-            file_id,
             interner: Interner::new(),
             symbols,
             types: TypeTable::new(),
@@ -107,6 +103,20 @@ impl<'a> Checker<'a> {
     fn intern_span(&mut self, span: Span) -> Symbol {
         let text = span.slice(self.source);
         self.interner.intern(text)
+    }
+
+    /// Push an error diagnostic with a single primary label at `span`.
+    fn err(&mut self, code: DiagnosticCode, message: impl Into<String>, span: Span) {
+        self.diagnostics
+            .push(Diagnostic::error(code, message, Label::new(span)));
+    }
+
+    /// Emit an `E_TYPE_MISMATCH` "<what> must be an integer" diagnostic at `span`
+    /// unless `ty` is already integer or an error type (errors don't cascade).
+    fn expect_integer(&mut self, ty: &Type, span: Span, what: &str) {
+        if !ty.is_integer() && !ty.is_error() {
+            self.err(E_TYPE_MISMATCH, format!("{what} must be an integer"), span);
+        }
     }
 
     fn intern_ident(&mut self, name_span: Span, _sigil: Option<Sigil>) -> Symbol {
@@ -434,8 +444,7 @@ impl<'a> Checker<'a> {
     fn collect_consts_recursive(&mut self, id: NodeId, scope: ScopeId) {
         match self.arena[id].clone() {
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 ty,
                 is_global,
                 ..
@@ -667,8 +676,11 @@ impl<'a> Checker<'a> {
         let mut field_infos = Vec::with_capacity(fields.len());
         for &fid in fields {
             if let Node::Stmt(Stmt::FieldDecl {
-                name_span: fname_span,
-                sigil,
+                name:
+                    DimName {
+                        name_span: fname_span,
+                        sigil,
+                    },
                 ty,
             }) = &self.arena[fid]
             {
@@ -1202,40 +1214,38 @@ impl<'a> Checker<'a> {
         match cb_diagnostics::fold(name).as_str() {
             INTRINSIC_LEN => {
                 if args.is_empty() || args.len() > 2 {
-                    self.diagnostics.push(Diagnostic::error(
+                    self.err(
                         E_WRONG_ARG_COUNT,
                         format!("Len expects 1 or 2 arguments, got {}", args.len()),
-                        Label::new(span),
-                    ));
+                        span,
+                    );
                     return Some(Type::Error);
                 }
                 let arg0_ty = self.check_expr(args[0]);
                 if matches!(arg0_ty, Type::String) {
                     // Len(s$) — codepoint length of a string. No dimension arg.
                     if args.len() == 2 {
-                        self.diagnostics.push(Diagnostic::error(
+                        self.err(
                             E_WRONG_ARG_COUNT,
                             "Len of a string takes exactly 1 argument",
-                            Label::new(span),
-                        ));
+                            span,
+                        );
                     }
                 } else {
                     if !matches!(arg0_ty, Type::Array { .. }) && !arg0_ty.is_error() {
-                        self.diagnostics.push(Diagnostic::error(
+                        self.err(
                             E_TYPE_MISMATCH,
                             "first argument to Len must be an array or a string",
-                            Label::new(self.arena.span_of(args[0])),
-                        ));
+                            self.arena.span_of(args[0]),
+                        );
                     }
                     if args.len() == 2 {
                         let dim_ty = self.check_expr(args[1]);
-                        if !dim_ty.is_integer() && !dim_ty.is_error() {
-                            self.diagnostics.push(Diagnostic::error(
-                                E_TYPE_MISMATCH,
-                                "second argument to Len must be an integer",
-                                Label::new(self.arena.span_of(args[1])),
-                            ));
-                        }
+                        self.expect_integer(
+                            &dim_ty,
+                            self.arena.span_of(args[1]),
+                            "second argument to Len",
+                        );
                     }
                 }
                 Some(Type::Int)
@@ -1342,13 +1352,7 @@ impl<'a> Checker<'a> {
         // Index operands must be integers (matching `check_new`/`check_redim`).
         for &i in indices {
             let idx_ty = self.check_expr(i);
-            if !idx_ty.is_integer() && !idx_ty.is_error() {
-                self.diagnostics.push(Diagnostic::error(
-                    E_TYPE_MISMATCH,
-                    "array index must be an integer",
-                    Label::new(self.arena.span_of(i)),
-                ));
-            }
+            self.expect_integer(&idx_ty, self.arena.span_of(i), "array index");
         }
 
         if arr_ty.is_error() {
@@ -1357,23 +1361,23 @@ impl<'a> Checker<'a> {
 
         if let Type::Array { elem, rank } = &arr_ty {
             if indices.len() != *rank as usize {
-                self.diagnostics.push(Diagnostic::error(
+                self.err(
                     E_RANK_MISMATCH,
                     format!(
                         "array has {} dimension(s), but {} index/indices provided",
                         rank,
                         indices.len()
                     ),
-                    Label::new(span),
-                ));
+                    span,
+                );
             }
             *elem.clone()
         } else {
-            self.diagnostics.push(Diagnostic::error(
+            self.err(
                 E_INDEX_NON_ARRAY,
                 format!("cannot index value of type `{arr_ty:?}`"),
-                Label::new(span),
-            ));
+                span,
+            );
             Type::Error
         }
     }
@@ -1397,11 +1401,11 @@ impl<'a> Checker<'a> {
                     _ => None,
                 }),
             _ => {
-                self.diagnostics.push(Diagnostic::error(
+                self.err(
                     E_FIELD_ON_NON_TYPE,
                     format!("cannot access fields on `{target_ty:?}`"),
-                    Label::new(span),
-                ));
+                    span,
+                );
                 return Type::Error;
             }
         };
@@ -1412,11 +1416,11 @@ impl<'a> Checker<'a> {
                     return f.ty.clone();
                 }
             }
-            self.diagnostics.push(Diagnostic::error(
+            self.err(
                 E_NO_SUCH_FIELD,
                 format!("no field `{}` on type", self.interner.resolve(field_name)),
-                Label::new(name_span),
-            ));
+                name_span,
+            );
             Type::Error
         } else {
             Type::Error
@@ -1432,11 +1436,7 @@ impl<'a> Checker<'a> {
                 } else if ty.is_error() {
                     Type::Error
                 } else {
-                    self.diagnostics.push(Diagnostic::error(
-                        E_TYPE_MISMATCH,
-                        "New requires a Type name",
-                        Label::new(span),
-                    ));
+                    self.err(E_TYPE_MISMATCH, "New requires a Type name", span);
                     Type::Error
                 }
             }
@@ -1444,13 +1444,7 @@ impl<'a> Checker<'a> {
                 let elem_ty = self.resolve_type_expr(*elem);
                 for &d in dims {
                     let dty = self.check_expr(d);
-                    if !dty.is_integer() && !dty.is_error() {
-                        self.diagnostics.push(Diagnostic::error(
-                            E_TYPE_MISMATCH,
-                            "array dimension must be an integer",
-                            Label::new(self.arena.span_of(d)),
-                        ));
-                    }
+                    self.expect_integer(&dty, self.arena.span_of(d), "array dimension");
                 }
                 Type::Array {
                     elem: Box::new(elem_ty),
@@ -1516,8 +1510,7 @@ impl<'a> Checker<'a> {
                 is_global: true, ..
             }) => {}
             Node::Stmt(Stmt::Const {
-                name_span,
-                sigil,
+                name: DimName { name_span, sigil },
                 value,
                 ..
             }) => {
@@ -1611,8 +1604,8 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Return { value }) => {
                 self.check_return(value, self.arena.span_of(id));
             }
-            Node::Stmt(Stmt::Goto { label_span }) => {
-                self.check_goto(label_span);
+            Node::Stmt(Stmt::Goto { name_span }) => {
+                self.check_goto(name_span);
             }
             Node::Stmt(Stmt::Delete { operand }) => {
                 self.check_delete(id, operand);
@@ -1633,7 +1626,7 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::Break { count }) => {
                 // `Break N` must have at least N enclosing loops; a `Select`
                 // does not count (Break never targets a Select).
-                let n = count.unwrap_or(1).max(1) as usize;
+                let n = count.map_or(1, |c| c.get()) as usize;
                 let loops = self
                     .control_stack
                     .iter()
@@ -2355,13 +2348,7 @@ impl<'a> Checker<'a> {
         self.resolve_type_expr(elem_ty_node);
         for &d in dims {
             let dty = self.check_expr(d);
-            if !dty.is_integer() && !dty.is_error() {
-                self.diagnostics.push(Diagnostic::error(
-                    E_TYPE_MISMATCH,
-                    "Redim dimension must be an integer",
-                    Label::new(self.arena.span_of(d)),
-                ));
-            }
+            self.expect_integer(&dty, self.arena.span_of(d), "Redim dimension");
         }
     }
 }
