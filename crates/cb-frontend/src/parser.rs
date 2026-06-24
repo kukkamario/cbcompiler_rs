@@ -1584,10 +1584,17 @@ impl<'t> Parser<'t> {
         let cond = self.parse_expr_bp(0)?;
         self.cursor.expect_kw(Kw::Then, "after `If` condition")?;
 
-        // Single-line vs block: peek ONE token (no eat_newlines).
+        // Single-line vs block: peek exactly ONE token (no `eat_newlines`).
+        // Unlike While/For/Repeat/ElseIf — which call `eat_newlines()` after
+        // their header — the leading `If` cannot eat newlines here, because
+        // *seeing* a newline is precisely what selects the block form over the
+        // single-line `If … Then <stmt>` form. So we bump only the one
+        // discriminating newline; any further blank lines before the first body
+        // statement are absorbed by `parse_block_until`, which calls
+        // `eat_newlines()` at the top of every iteration.
         if matches!(self.cursor.peek(), TokenKind::Newline) {
             // Block form.
-            self.cursor.bump(); // consume the newline
+            self.cursor.bump(); // consume the discriminating newline
             let then_body =
                 self.parse_block_until(&[Kw::ElseIf, Kw::Else, Kw::EndIf], opener, "If");
             let (elseifs, else_body) = self.parse_if_block_tail(opener)?;
@@ -2022,26 +2029,45 @@ impl<'t> Parser<'t> {
                     );
                     break;
                 }
-                TokenKind::Keyword(Kw::Case) => arms.push(self.parse_case_arm()?),
+                // Per-arm error recovery (mirrors `parse_record_body`): a bad
+                // arm records its diagnostic and resyncs to the next statement
+                // boundary instead of `?`-propagating out and discarding every
+                // arm parsed so far. `sync_to_stmt_boundary` stops at the next
+                // `Case`/`Default`/`EndSelect` (all `is_block_end_marker`s), so
+                // the loop picks up cleanly on the following arm.
+                TokenKind::Keyword(Kw::Case) => match self.parse_case_arm() {
+                    Ok(id) => arms.push(id),
+                    Err(err) => {
+                        self.diagnostics.push(*err.diag);
+                        self.sync_to_stmt_boundary();
+                    }
+                },
                 TokenKind::Keyword(Kw::Default) => {
                     let default_kw_span = self.cursor.peek_tok().span;
-                    let arm_id = self.parse_default_arm()?;
-                    if let Some(prev_span) = first_default_span {
-                        self.diagnostics.push(
-                            Diagnostic::error(
-                                E_DUPLICATE_DEFAULT,
-                                "`Select` has more than one `Default` arm",
-                                Label::new(default_kw_span),
-                            )
-                            .with_secondary(Label::with_message(
-                                prev_span,
-                                "first `Default` arm here",
-                            )),
-                        );
-                    } else {
-                        first_default_span = Some(default_kw_span);
+                    match self.parse_default_arm() {
+                        Ok(arm_id) => {
+                            if let Some(prev_span) = first_default_span {
+                                self.diagnostics.push(
+                                    Diagnostic::error(
+                                        E_DUPLICATE_DEFAULT,
+                                        "`Select` has more than one `Default` arm",
+                                        Label::new(default_kw_span),
+                                    )
+                                    .with_secondary(Label::with_message(
+                                        prev_span,
+                                        "first `Default` arm here",
+                                    )),
+                                );
+                            } else {
+                                first_default_span = Some(default_kw_span);
+                            }
+                            arms.push(arm_id);
+                        }
+                        Err(err) => {
+                            self.diagnostics.push(*err.diag);
+                            self.sync_to_stmt_boundary();
+                        }
                     }
-                    arms.push(arm_id);
                 }
                 _ => {
                     // Stray token — emit a diagnostic and consume one to
@@ -4386,6 +4412,31 @@ mod block_tests {
                         assert_eq!(body.len(), 2);
                         assert!(matches!(stmt_of(&r.arena, body[1]), Stmt::Continue));
                     }
+                    other => panic!("expected Case arm, got {other:?}"),
+                }
+            }
+            other => panic!("expected Select, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_recovers_from_bad_case_arm() {
+        // A malformed `Case` value (`*` cannot start an expression) must not
+        // discard the rest of the block: the parser records the diagnostic,
+        // resyncs to the next arm, and the well-formed `Case 2` survives.
+        // (Mirrors `parse_record_body`'s per-item recovery — finding F-P3.)
+        let src = "Select x\n  Case *\n  Case 2\n    a\nEndSelect\n";
+        let r = parse_src(src);
+        assert!(
+            !r.diagnostics.is_empty(),
+            "expected a diagnostic for the malformed `Case *` arm"
+        );
+        assert_eq!(r.program.len(), 1);
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::Select { arms, .. } => {
+                assert_eq!(arms.len(), 1, "well-formed `Case 2` arm should survive");
+                match case_arm_of(&r.arena, arms[0]) {
+                    CaseArm::Case { body, .. } => assert_eq!(body.len(), 1),
                     other => panic!("expected Case arm, got {other:?}"),
                 }
             }

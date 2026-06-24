@@ -76,7 +76,10 @@ pub fn find_implicit_conversion(from: &Type, to: &Type) -> Option<Conversion> {
         // Null → any reference type
         (Type::Null, t) if t.is_reference() => Some(Conversion::NullToRef),
 
-        // Null → runtime opaque type
+        // Null → runtime opaque type. This is a *separate* arm, not dead code:
+        // `is_reference()` deliberately excludes `RuntimeType` (it has no
+        // ordering — see `Type::is_reference`), so the arm above does not cover
+        // opaque handles even though they default to `Null` (§3.5).
         (Type::Null, Type::RuntimeType { .. }) => Some(Conversion::NullToRef),
 
         _ => None,

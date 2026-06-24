@@ -171,6 +171,15 @@ impl SymbolTable {
     /// - Globals (top-level symbols with `is_global == true`)
     /// - Hoisted items: Functions, TypeDefs, StructDefs from the top-level scope
     /// - NOT ordinary top-level variables
+    ///
+    /// Load-bearing invariant: the scope tree is at most two levels deep —
+    /// exactly one `TopLevel` root with `Function` children (functions cannot
+    /// nest, §7.1; block constructs do not open scopes). Because of this,
+    /// `from_function` is computed once from the *leaf* scope and the visibility
+    /// filter only ever sees `TopLevel` parents. If a `Function` scope could
+    /// appear as a parent, the `else` branch below would leak that intermediate
+    /// function's locals into the inner one. The `debug_assert!` in the walk
+    /// guards the invariant.
     pub(crate) fn lookup(&self, scope: ScopeId, name: Symbol) -> Option<&Declaration> {
         let s = &self.scopes[scope.0 as usize];
 
@@ -185,6 +194,12 @@ impl SymbolTable {
 
         while let Some(pid) = parent {
             let ps = &self.scopes[pid.0 as usize];
+            // Every parent must be the TopLevel root (tree depth ≤ 2); see the
+            // doc above for why the visibility filter relies on this.
+            debug_assert!(
+                ps.kind == ScopeKind::TopLevel,
+                "scope tree deeper than TopLevel→Function: parent scope is a Function"
+            );
             if let Some(decl) = ps.symbols.get(&name) {
                 if from_function && ps.kind == ScopeKind::TopLevel {
                     // From a function scope looking into top-level:

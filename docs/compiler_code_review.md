@@ -23,8 +23,8 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 
 | Domain | High | Medium | Low |
 |---|---|---|---|
-| Sema (check / lower / types / scope) | 0 | 2 | 21 |
-| Frontend (lexer / parser / AST) | 0 | 6 | 27 |
+| Sema (check / lower / types / scope) | 0 | 0 | 20 |
+| Frontend (lexer / parser / AST) | 0 | 0 | 27 |
 | IR + Interpreter | 0 | 0 | 24 |
 | Diagnostics + Runtime/Driver/LLVM | 0 | 0 | 20 |
 
@@ -33,9 +33,11 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 > validation gaps (S-M1–S-M5); the "Bundle 2" fail-loud robustness items (S-M6,
 > S-M7, S-M8, II-V1, II-V2, II-V3 — except the still-deferred `Call`-result/
 > signature cross-check — II-V20, II-V27); the "Bundle 3" behavioral
-> inconsistencies (DR-R1, DR-R2/DR-R3, II-V26); and the "Bundle 4" de-dup sweep
+> inconsistencies (DR-R1, DR-R2/DR-R3, II-V26); the "Bundle 4" de-dup sweep
 > + AST consolidation (S-M11, S-M12, S-M13, S-M14, II-V10, F-L1, F-L3, F-P2,
-> F-A1, F-A2, F-A3, and the F-L6 spec reconciliation). DR-D6 was a false positive
+> F-A1, F-A2, F-A3, and the F-L6 spec reconciliation); and the "Bundle 5" Medium
+> clarity/robustness sweep (S-M9, S-M10, F-L2, F-L4, F-L5, F-P1, F-P3, F-A4 — and
+> the linked S-L6 resolved by S-M9's inline note). DR-D6 was a false positive
 > and is recorded under [Confirmed non-issues](#confirmed-non-issues-checked-and-rejected).
 > The findings below are the open remainder.
 
@@ -44,44 +46,19 @@ Line numbers reflect the tree at review time and may drift as the code changes.
 These patterns recur across crates and are worth treating as systemic, not
 one-off:
 
-- **`RuntimeType` is reference-like but excluded from `is_reference()`**, forcing
-  duplicated special-case arms in conversion and equality logic. The exclusion
-  is deliberate but undocumented. (S-M9)
 - **Invariants documented in prose far from the code that relies on them** —
-  trap-channel single-slot reentrancy (II-V17), the two-level scope tree
-  (S-M10), span ownership in FFI (II-V16), and the IR's reverse-postorder
-  dominance assumption (II-V8).
+  trap-channel single-slot reentrancy (II-V17), span ownership in FFI (II-V16),
+  and the IR's reverse-postorder dominance assumption (II-V8). (The two-level
+  scope tree, S-M10, and the deliberate `RuntimeType`/`is_reference()` split,
+  S-M9, were of this kind and are now documented inline.)
 
 ---
 
 ## Sema (`cb-sema`)
 
-> The High-severity (S-H1–S-H4) and Bundle 1/2 (S-M1–S-M8) findings have been
-> fixed and removed; the Medium/Low findings below are the open remainder.
-
-### Medium
-
-#### S-M9 — `RuntimeType` excluded from `is_reference()`, forcing scattered special-casing
-- `types.rs:60-65` (`is_reference`), `types.rs:277-279` (Eq/NotEq), `convert.rs:77-80`
-- Category: Inconsistency
-- §3.5 says opaque runtime types "behave like references," yet `is_reference()`
-  covers only `TypeRef | Array | FnPtr`. As a result `convert.rs` needs a
-  separate `(Null, RuntimeType)` arm duplicating the `(Null, t) if t.is_reference()`
-  arm, and `binary_result_type` adds three explicit RuntimeType clauses
-  duplicating ref/ref and Null/ref logic. The exclusion is deliberate (identity
-  equality, no ordering) but undocumented.
-- Fix: document why RuntimeType is excluded, or add `is_reference_like()`
-  covering it and route the Null-conversion and equality clauses through it.
-
-#### S-M10 — `lookup` two-level scope-tree assumption is load-bearing but undocumented
-- `scope.rs:174-218` (`lookup`)
-- Category: Oversight / Clarity
-- The visibility filter `from_function && ps.kind == TopLevel` is computed from
-  the *leaf* scope's kind and applied to every TopLevel parent. This is correct
-  only because the tree is exactly two levels deep (functions can't nest, §7.1).
-  Never asserted or documented.
-- Fix: comment that the tree is at most TopLevel→Function;
-  optionally `debug_assert!` no second Function scope appears in a parent chain.
+> The High-severity (S-H1–S-H4), Bundle 1/2 (S-M1–S-M8), and Bundle 5 Medium
+> (S-M9, S-M10) findings have been fixed and removed; the Low findings below are
+> the open remainder.
 
 ### Low
 
@@ -96,9 +73,6 @@ one-off:
 - **S-L5** — Field access on `RuntimeType` falls through to a `{:?}`-formatted
   E0309 leaking `Symbol(n)`; several diagnostics use `{:?}` on `Type`. Consider a
   `Display` for `Type`. `check.rs:1349-1367`.
-- **S-L6** — `find_implicit_conversion` Null arms `(Null, t) if t.is_reference())`
-  and `(Null, RuntimeType)` overlap with no explanation (the second is *not* dead;
-  ties to S-M9). `convert.rs:77-80`.
 - **S-L7** — `maybe_convert` uses `IrType::Void` as the "unknown source type"
   sentinel, so Void means "void", "error", and "type unknown". `lower.rs:846-865`.
 - **S-L8** — `reset_function_state` leaves `current_block` stale, relying on an
@@ -139,68 +113,8 @@ one-off:
 
 ## Frontend (`cb-frontend`)
 
-### Medium
-
-#### F-L2 — Two parallel separator-validation mechanisms; numeric paths inconsistent
-- `lexer.rs:535-590` (`scan_digit_run_inner` → `bad_sep`), `lexer.rs:925-946` (`has_separator_issue`); hex `:827`, binary `:892`, decimal `:667`
-- Category: Duplication / Inconsistency
-- `scan_digit_run_inner` already diagnoses and flags leading/doubled/trailing
-  underscores. Hex/binary additionally OR in `has_separator_issue`, which
-  re-scans the same bytes for the same conditions but emits *no* diagnostic;
-  decimal trusts the flag alone. If `has_separator_issue` ever fired while
-  `bad_sep` was false, an error token would be produced with no diagnostic.
-- Fix: drop `has_separator_issue` and rely on the `scan_digit_run` flag uniformly.
-
-#### F-L4 — `$_` / `%_` empty-run emits two diagnostics with a mismatched error-token kind
-- `lexer.rs` `scan_radix_number` (the empty-`raw` branch; covers both `$`/`%`
-  since F-L3 merged the two scanners)
-- Category: Inconsistency / Clarity
-- For `$_` the pre-check emits `E0105 InvalidDigitSeparator` and consumes `_`;
-  then the empty-`raw` path emits a second diagnostic `E0106 UnexpectedChar` but
-  pushes a token of kind `InvalidDigitSeparator` — so one literal yields two
-  diagnostics and the token kind doesn't match the dominant diagnostic.
-- Fix: pick one primary error and keep the token kind aligned with it. Now a
-  single-site fix after the F-L3 merge.
-
-#### F-L5 — Float exponent reconstruction back-scans instead of reusing forward-scan offsets
-- `lexer.rs:708-739`
-- Category: Clarity / Bug-risk
-- The forward scan already consumed `e`/`E` and the optional sign at known
-  positions but discarded them; the rebuild reverse-scans with a loop that
-  assumes at most one sign byte and exactly one `e`/`E` immediately preceding.
-- Fix: capture the `e`/`E` position and sign during the forward scan and reuse
-  them, removing the back-scan coupling.
-
-#### F-P1 — Block-`If` header-newline handling diverges from every other block opener
-- `parser.rs:1587-1589` vs `parse_while:1816`, `parse_for:1899/1934`, `parse_repeat:1839`, `ElseIf:1751-1752`
-- Category: Inconsistency
-- Block-`If` decides "block form" with `matches!(peek, Newline)` and bumps
-  exactly one newline, while While/For/Repeat call `eat_newlines()` and `ElseIf`
-  uses `require_newline_after_block_then(...)` then `eat_newlines()` — three ways
-  to consume the end-of-header newline, with leading-`If` differing from `ElseIf`
-  in the same construct.
-- Fix: factor one `eat_block_header_newline` helper, or comment why leading-`If`
-  consumes only one newline (it relies on `parse_block_until`'s own `eat_newlines`).
-
-#### F-P3 — `Select` aborts the whole block on one bad arm; record bodies catch-and-continue
-- `parser.rs:2037, 2040` (`parse_case_arm()?`) vs `parse_record_body:2311-2317`
-- Category: Inconsistency
-- A parse error in a `Case`/`Default` arm propagates via `?` out of
-  `parse_select`, discarding all already-parsed arms. `parse_record_body` instead
-  matches `Ok/Err` per field, records the diagnostic, resyncs, and keeps going —
-  materially different recovery granularity.
-- Fix: wrap the arm parsers in an `Ok/Err` match (record + resync) like
-  `parse_record_body`, or document why `Select` aborts wholesale.
-
-#### F-A4 — `Expr::Paren` / `TypeExpr::Paren` retained with no doc explaining why
-- `ast.rs:121-123`, `ast.rs:314-316`
-- Category: Clarity / Oversight
-- Both wrap a single `inner` and add no semantic info (§5.4: `(T)` is the same
-  type as `T`). Keeping them for span/round-trip fidelity is legitimate but
-  undocumented — contrast the detailed FD-004 note on `Expr::Field`. A sema
-  author can't tell if `Paren` is load-bearing or dead weight.
-- Fix: add a one-line doc on each `Paren` stating it is kept for span/round-trip
-  fidelity and is transparent to type/value, noting where it must be unwrapped.
+> The Medium findings (F-L2, F-L4, F-L5, F-P1, F-P3, F-A4) have been fixed and
+> removed; the Low findings below are the open remainder.
 
 ### Low
 
@@ -415,7 +329,8 @@ were checked against the source and found to be correct as written:
   matches CB's documented float formatting — is a real latent concern but is
   unrelated to these two functions.)
 - **`convert.rs` `(Null, RuntimeType)` arm is not dead** — `is_reference()`
-  genuinely excludes `RuntimeType` (kept as the clarity note S-L6).
+  genuinely excludes `RuntimeType`; the overlap is now documented inline at the
+  arm and on `Type::is_reference` (former clarity note S-L6, resolved with S-M9).
 - **`LineIndex` / `offset_to_line_char_col` are well-tested** (withdrawn DR-D6) —
   the off-by-one-prone line/column arithmetic is covered by
   `crates/cb-diagnostics/tests/line_index.rs` (CRLF / bare-`\r` / LF terminators,

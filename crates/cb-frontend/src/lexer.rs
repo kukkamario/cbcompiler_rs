@@ -582,8 +582,12 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
-        if last_was_underscore {
-            // Trailing underscore.
+        if last_was_underscore && self.pos > run_start {
+            // Trailing underscore — but only if this run actually consumed
+            // bytes. An empty run in suppress mode (e.g. `$_`) has
+            // `last_was_underscore` seeded `true` from the caller's already-
+            // diagnosed leading `_`; reporting it again as "trailing" would be a
+            // spurious second diagnostic for the same separator.
             let bad_span = Span::new(self.pos - 1, self.pos, self.file);
             self.diagnostics.push(Diagnostic::error(
                 E_INVALID_DIGIT_SEPARATOR,
@@ -639,6 +643,11 @@ impl<'src> Lexer<'src> {
         let mut is_float = false;
         let mut frac_lo = int_hi;
         let mut frac_hi = int_hi;
+        // `exp_marker_lo` is the offset of the `e`/`E`; captured during the
+        // forward scan so the float rebuild can slice `e[sign]<digits>` directly
+        // instead of back-scanning to relocate the marker. Only read when
+        // `exp_hi > exp_lo` (i.e. a complete exponent was scanned).
+        let mut exp_marker_lo = int_hi;
         let mut exp_lo = int_hi;
         let mut exp_hi = int_hi;
 
@@ -657,6 +666,7 @@ impl<'src> Lexer<'src> {
         }
         if matches!(self.peek_byte(), Some(b'e') | Some(b'E')) {
             is_float = true;
+            exp_marker_lo = self.pos; // offset of the `e`/`E`, before consuming it
             self.bump_byte(); // 'e'/'E'
             // Optional sign.
             if matches!(self.peek_byte(), Some(b'+') | Some(b'-')) {
@@ -723,27 +733,17 @@ impl<'src> Lexer<'src> {
                 }
             }
             if exp_hi > exp_lo {
-                // Find the 'e'/'E' and optional sign in the raw span — emit them as-is.
-                // The exponent region in source starts after 'e' (and sign). We
-                // need the original `e`/`E` and sign for `f64::from_str`. We
-                // know the exponent in source begins one byte before exp_lo
-                // (the sign) or two (e + sign), but simpler: look back in
-                // `self.bytes` from `exp_lo` to find the `e`/`E`.
-                let mut p = exp_lo as usize;
-                while p > 0 {
-                    let b = self.bytes[p - 1];
-                    if b == b'+' || b == b'-' {
-                        p -= 1;
-                        continue;
-                    }
-                    if b == b'e' || b == b'E' {
-                        p -= 1;
-                        break;
-                    }
-                    break;
-                }
-                // Append `e[sign]<digits>` from `p` to `exp_hi`, stripping underscores.
-                if Self::append_stripped(&mut buf, &mut n, &self.bytes[p..exp_hi as usize]).is_err()
+                // `f64::from_str` needs the original `e`/`E` and optional sign.
+                // The exponent's source bytes are contiguous from the marker
+                // captured during the forward scan (`e[sign]<digits>`), so slice
+                // straight from there — no back-scan needed. Underscores in the
+                // digit run are stripped by `append_stripped`.
+                if Self::append_stripped(
+                    &mut buf,
+                    &mut n,
+                    &self.bytes[exp_marker_lo as usize..exp_hi as usize],
+                )
+                .is_err()
                 {
                     self.report_malformed_number(span);
                     return;
@@ -833,22 +833,17 @@ impl<'src> Lexer<'src> {
         let span = self.current_span(start);
         let raw = &self.bytes[run_lo as usize..run_hi as usize];
         if raw.is_empty() {
-            // `$_` / `%_` form — the separator was diagnosed at the pre-check,
-            // but the deeper problem is that the literal has no digits at all.
-            // Emit the "expected digits" diagnostic too so the user doesn't
-            // have to guess what's wrong.
-            self.diagnostics.push(Diagnostic::error(
-                E_UNEXPECTED_CHAR,
-                format!("expected {label} digits after `{prefix_char}`"),
-                Label::new(span),
-            ));
+            // `$_` / `%_` form — a leading separator with no digits. The
+            // pre-check already emitted the single primary diagnostic (E0105,
+            // `InvalidDigitSeparator`), consistent with `$_ff`; just push the
+            // matching error token here (no second diagnostic).
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }
-        // Treat any separator issue (reported either by the caller pre-check
-        // or by `scan_digit_run`) as a signal to emit an error token.
-        let bad_sep_real = bad_sep_from_run || Self::has_separator_issue(raw);
-        if bad_sep_real {
+        // `scan_digit_run` already diagnosed (E0105) and flagged any
+        // leading/doubled/trailing separator in this run via `bad_sep_from_run`
+        // (the pre-check handles the pre-consumed leading `_`). Trust that flag.
+        if bad_sep_from_run {
             self.push_token(TokenKind::Error(LexErrorKind::InvalidDigitSeparator), span);
             return;
         }
@@ -878,29 +873,6 @@ impl<'src> Lexer<'src> {
             Label::new(span),
         ));
         self.push_token(TokenKind::Error(LexErrorKind::MalformedNumber), span);
-    }
-
-    /// Returns true if `raw` (a digit run without prefix) has any separator
-    /// issue: leading, trailing, or doubled underscore.
-    fn has_separator_issue(raw: &[u8]) -> bool {
-        if raw.first() == Some(&b'_') {
-            return true;
-        }
-        if raw.last() == Some(&b'_') {
-            return true;
-        }
-        let mut prev_was_us = false;
-        for &b in raw {
-            if b == b'_' {
-                if prev_was_us {
-                    return true;
-                }
-                prev_was_us = true;
-            } else {
-                prev_was_us = false;
-            }
-        }
-        false
     }
 
     // ---------- identifiers / keywords / REM ----------

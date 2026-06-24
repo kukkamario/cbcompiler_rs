@@ -118,6 +118,12 @@ pub enum Expr {
         /// allocation per `.field` access in deep chains.
         name_span: Span,
     },
+    /// A parenthesized expression `(inner)`. Kept as an explicit node for span
+    /// and round-trip fidelity (it surfaces in `ast_print`); it carries no
+    /// semantic information — `(e)` has the same type and value as `e`. Every
+    /// consumer must therefore unwrap it: value/place lowering
+    /// (`cb-sema/src/lower.rs`), type checking, const-eval, and lvalue checks
+    /// (`cb-sema/src/check.rs`) all delegate straight to `inner`.
     Paren {
         inner: NodeId,
     },
@@ -322,6 +328,10 @@ pub enum TypeExpr {
         params: Vec<NodeId>,
         ret: Option<NodeId>,
     },
+    /// A parenthesized type `(inner)`. Like [`Expr::Paren`], kept only for span
+    /// and round-trip fidelity and transparent to meaning — `(T)` resolves to
+    /// the same type as `T` (§5.4). `resolve_type_expr` in `cb-sema/src/types.rs`
+    /// unwraps it.
     Paren {
         inner: NodeId,
     },
