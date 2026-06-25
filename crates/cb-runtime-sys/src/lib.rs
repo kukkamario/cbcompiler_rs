@@ -181,6 +181,25 @@ unsafe extern "C" {
     /// verify retain/release lifecycle; not part of `CbStringApi`.
     pub fn cb_rt_string_test_refcount(s: *const CbString) -> i32;
 
+    // String<->number conversion primitives (FD-046). Bare symbols, like
+    // `cb_rt_string_test_refcount` above — NOT catalog `CB_FN` rows and NOT in
+    // `CbStringApi`, so they touch neither the catalog data, `CB_CATALOG_VERSION`,
+    // nor the drift guard. They service the IR Convert/ConvertExplicit opcodes,
+    // giving the interpreter and a future native backend ONE shared
+    // implementation of every conversion that crosses `String`. The three
+    // number->string functions return an owning `CbString*` (refcount 1).
+    /// Int->String. Byte/Short widen to `i32` at the call site (lossless).
+    pub fn cb_rt_int_to_string(v: i32) -> *mut CbString;
+    /// Long->String.
+    pub fn cb_rt_long_to_string(v: i64) -> *mut CbString;
+    /// Float->String — CB's 6-significant-digit format (the one conversion that
+    /// must not silently diverge between the interp and a native build).
+    pub fn cb_rt_float_to_string(v: f64) -> *mut CbString;
+    /// String->Long — lenient leading-int parse, saturating, 0 on no digits.
+    pub fn cb_rt_string_to_long(s: *const CbString) -> i64;
+    /// String->Float — lenient strtod-style prefix parse, 0.0 on no valid prefix.
+    pub fn cb_rt_string_to_float(s: *const CbString) -> f64;
+
     /// Runtime Trap Channel handshake (FD-015): hand the runtime its host API
     /// and receive the hook table back. See [`runtime_init`] for the safe
     /// wrapper. Each plugin DLL exports this alongside `cb_runtime_get_catalog`.

@@ -18,6 +18,7 @@ find_package(Allegro CONFIG REQUIRED)
 add_library(cb_runtime_core STATIC
     cb_string.cpp
     cb_host.cpp
+    cb_convert.cpp
 )
 target_include_directories(cb_runtime_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -181,6 +182,7 @@ if(CB_RUNTIME_TESTS)
         tests/test_particle.cpp
         tests/test_memblock.cpp
         tests/test_file.cpp
+        tests/test_convert.cpp
         tests/test_input.cpp
         tests/test_masking.cpp
         tests/test_sound.cpp
