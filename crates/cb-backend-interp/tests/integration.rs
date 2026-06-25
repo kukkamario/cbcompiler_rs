@@ -87,7 +87,8 @@ fn arithmetic_mul() {
 #[test]
 fn float_arithmetic() {
     let out = run("Dim x As Float = 1.5 + 2.5\nPrint Str(x)");
-    assert_eq!(out, "4\n");
+    // FD-046: CB's float format always keeps >=1 fractional digit -> "4.0".
+    assert_eq!(out, "4.0\n");
 }
 
 // FD-020: Int(Float) rounds to nearest, ties away from zero (cb_runtime.md
@@ -110,6 +111,44 @@ fn int_conversion_rounds_half_away_from_zero() {
         let out = run(&format!("Dim i As Int = Int({input})\nPrint Str(i)"));
         assert_eq!(out, format!("{expected}\n"), "Int({input})");
     }
+}
+
+#[test]
+fn str_of_float_uses_cb_six_sig_fig_format() {
+    // FD-046: number->String is delegated to the shared core-runtime formatter.
+    // Fixed-point keeps >=1 fractional digit; 6 sig figs; scientific outside
+    // E in [-3, 7]. End-to-end check that the interp routes Str(Float) there.
+    let cases = [
+        ("4.0", "4.0"),
+        ("3.14", "3.14"),
+        ("100.0", "100.0"),
+        ("0.001", "0.001"),
+        ("1234567.0", "1234570.0"),
+        ("100000000.0", "1.e+008"),
+    ];
+    for (input, expected) in cases {
+        let out = run(&format!("Dim x As Float = {input}\nPrint Str(x)"));
+        assert_eq!(out, format!("{expected}\n"), "Str(Float {input})");
+    }
+}
+
+#[test]
+fn float_of_string_is_lenient_prefix_parse() {
+    // FD-046: String->Float is now a lenient strtod-style prefix parse (the old
+    // interp did a strict full parse: "22yo" -> 0.0). Matches the real CoolBasic.
+    assert_eq!(run(r#"Print Str(Float("22yo"))"#), "22.0\n");
+    assert_eq!(run(r#"Print Str(Float("3.14xyz"))"#), "3.14\n");
+    assert_eq!(run(r#"Print Str(Float("1.5e2"))"#), "150.0\n");
+}
+
+#[test]
+fn int_of_string_takes_leading_integer() {
+    // FD-046: String->Int parses a leading integer, stopping at the first
+    // non-digit (including '.', so "22.5" -> 22 — a deliberate divergence from
+    // CB's exact-".5"-rounds-up quirk).
+    assert_eq!(run(r#"Print Str(Int("3x"))"#), "3\n");
+    assert_eq!(run(r#"Print Str(Int("  -42"))"#), "-42\n");
+    assert_eq!(run(r#"Print Str(Int("22.5"))"#), "22\n");
 }
 
 #[test]
@@ -984,9 +1023,9 @@ fn comparison_yields_int_one_or_zero() {
 #[test]
 fn dim_float_from_int_literal_coerces() {
     // `Dim x As Float = 1` coerces the Int literal to Float on init (FD-035
-    // broadened the Dim-init coercion). Float 1.0 prints as "1".
+    // broadened the Dim-init coercion). Float 1.0 prints as "1.0" (FD-046).
     let out = run("Dim x As Float = 1\nPrint Str(x)");
-    assert_eq!(out, "1\n");
+    assert_eq!(out, "1.0\n");
 }
 
 #[test]
@@ -1077,7 +1116,7 @@ fn implicit_for_each_var_in_function_does_not_alias() {
            Return total\n\
          EndFunction\n\
          Print Str(sumArr())");
-    assert_eq!(out, "6\n");
+    assert_eq!(out, "6.0\n");
 }
 
 /// Run `src` on a worker thread, failing if it does not finish in time. The
