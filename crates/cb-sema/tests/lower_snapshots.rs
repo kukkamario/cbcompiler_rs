@@ -198,8 +198,6 @@ fn lower_with_catalog(src: &str, catalog: &cb_sema::RuntimeCatalog) -> String {
     cb_ir::print::print_program(&ir, &sema.interner)
 }
 
-extern "C" fn dummy_runtime_fn() {}
-
 #[test]
 fn runtime_function_call() {
     let catalog = cb_sema::RuntimeCatalog {
@@ -207,7 +205,6 @@ fn runtime_function_call() {
         functions: vec![cb_sema::FuncDesc {
             name: "print".to_string(),
             c_symbol: "cb_rt_print".to_string(),
-            fn_ptr: dummy_runtime_fn,
             params: vec![cb_sema::FuncParamDesc {
                 name: Some("text".to_string()),
                 ty: cb_ir::types::IrType::String,
@@ -246,7 +243,6 @@ fn bare_overloaded_command_lowers_to_call() {
             cb_sema::FuncDesc {
                 name: "drawscreen".to_string(),
                 c_symbol: "cb_rt_drawscreen".to_string(),
-                fn_ptr: dummy_runtime_fn,
                 params: Vec::new(),
                 return_ty: cb_ir::types::IrType::Void,
             },
@@ -254,7 +250,6 @@ fn bare_overloaded_command_lowers_to_call() {
             cb_sema::FuncDesc {
                 name: "drawscreen".to_string(),
                 c_symbol: "cb_rt_drawscreen_args".to_string(),
-                fn_ptr: dummy_runtime_fn,
                 params: two_param(),
                 return_ty: cb_ir::types::IrType::Void,
             },

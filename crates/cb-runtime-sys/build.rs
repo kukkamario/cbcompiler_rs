@@ -168,6 +168,31 @@ fn build_sdk_free(runtime_src: &Path) {
     build.compile("cb_runtime_sdkfree");
 
     println!("cargo:rustc-cfg=cb_no_allegro");
+
+    // FD-045: the metadata catalog must match this SDK-free runtime's catalog,
+    // so compile it under the same CB_NO_ALLEGRO switch.
+    build_meta(runtime_src, true);
+}
+
+/// Compile the metadata-only catalog object (FD-045): just `catalog.cpp` under
+/// `-DCB_METADATA_ONLY`, exposing `cb_runtime_get_catalog_meta()` — a tiny,
+/// Allegro-free object with null function pointers that references no runtime
+/// function body (its only external symbol is the CRT `_fltused`). Sema reads it
+/// as pure metadata, so a metadata-only compiler need not link the executable
+/// runtime. Built with the SAME CB_NO_ALLEGRO switch as the binding runtime so
+/// the two catalogs match by construction.
+fn build_meta(runtime_src: &Path, no_allegro: bool) {
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .std("c++20")
+        .define("CB_METADATA_ONLY", None)
+        .include(runtime_src)
+        .file(runtime_src.join("catalog.cpp"));
+    if no_allegro {
+        build.define("CB_NO_ALLEGRO", None);
+    }
+    build.compile("cb_runtime_meta");
 }
 
 /// Build the full runtime (core + functionality + Allegro) through CMake and
@@ -322,6 +347,10 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
     } else if cfg!(not(target_os = "windows")) {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
+
+    // FD-045: emit the matching metadata-only catalog object (full catalog, no
+    // CB_NO_ALLEGRO) so sema can read the catalog without the executable runtime.
+    build_meta(runtime_src, false);
 
     Ok(())
 }

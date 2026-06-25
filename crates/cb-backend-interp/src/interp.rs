@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -116,6 +117,11 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     /// the handshake succeeded at construction.
     #[allow(dead_code)]
     runtime_hooks: &'static cb_runtime_sys::CbRuntimeHooks,
+    /// Runtime function bindings: the `symbol → fn_ptr` overlay the interpreter
+    /// dispatches through (FD-045). The IR carries only symbols; this table,
+    /// resolved once at startup from the linked executable runtime, supplies the
+    /// live addresses (the metadata catalog has none).
+    bindings: HashMap<String, unsafe extern "C" fn()>,
 }
 
 impl<'a> Interpreter<'a, NoopObserver> {
@@ -127,6 +133,15 @@ impl<'a> Interpreter<'a, NoopObserver> {
         // through an unwired trap channel (FD-024). Clear any stale pending trap.
         let runtime_hooks = cb_runtime_sys::runtime_init(&HOST_API)
             .unwrap_or_else(|e| panic!("runtime trap-channel handshake failed: {e}"));
+        // FD-045: the IR carries runtime calls by symbol only. Resolve the live
+        // `symbol → fn_ptr` overlay from the linked executable runtime once, up
+        // front — and reconcile it against the metadata catalog (the drift guard:
+        // since metadata and bindings come from independently-built objects, a
+        // missing/extra symbol or a signature mismatch must abort here). A failure
+        // means the runtime was not linked or has drifted — fatal startup
+        // misconfiguration, same fatal-by-panic policy as the handshake above.
+        let bindings = cb_runtime_sys::resolve_bindings_checked()
+            .unwrap_or_else(|e| panic!("runtime binding resolution failed: {e}"));
         PENDING_TRAP.with(|slot| slot.set(None));
         let struct_defs = &program.struct_defs;
         let globals = program
@@ -155,6 +170,7 @@ impl<'a> Interpreter<'a, NoopObserver> {
             observer: NoopObserver,
             string_api,
             runtime_hooks,
+            bindings,
         }
     }
 }
@@ -178,6 +194,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             observer,
             string_api: self.string_api,
             runtime_hooks: self.runtime_hooks,
+            bindings: self.bindings,
         }
     }
 
@@ -456,10 +473,15 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 self.push_frame(callee, body_index, arg_vals, result_reg)?;
                 Ok(Value::Void)
             }
-            FuncKind::Runtime { symbol, fn_ptr } => {
+            FuncKind::Runtime { symbol } => {
                 let symbol = symbol.clone();
-                let fn_ptr = *fn_ptr;
                 let sig = decl.sig.clone();
+                // The startup drift guard (FD-045) guarantees every catalog
+                // symbol resolves, so a miss here is an internal invariant break.
+                let fn_ptr = *self
+                    .bindings
+                    .get(&symbol)
+                    .unwrap_or_else(|| panic!("no fn_ptr binding for runtime symbol '{symbol}'"));
                 self.call_runtime(&symbol, fn_ptr, &sig, arg_vals, span)
             }
         }
