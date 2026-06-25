@@ -1,6 +1,7 @@
 # FD-046: Core-Runtime String↔Number Conversion Primitives
 
 **Status:** Complete
+**Completed:** 2026-06-26
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Gives the interpreter and the future LLVM/AOT backend **one shared implementation** of every conversion that crosses the `String` type, so the two backends cannot silently diverge on `Str()`/`Int(s$)`/`Float(s$)` (especially float→string formatting). A prerequisite that de-risks the LLVM backend, fully verifiable on the interp path with **zero LLVM dependency**.
