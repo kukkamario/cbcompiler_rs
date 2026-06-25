@@ -1,9 +1,10 @@
 # FD-045: Catalog Metadata Decoupling
 
-**Status:** Planned
+**Status:** Open
 **Created:** 2026-06-24
+**Designed:** 2026-06-25 (4-angle `/fd-deep` pass; claims verified against the code)
 **Priority:** Medium (prerequisite for a runtime-free native compiler; not blocking interp work)
-**Effort:** High (build-system + ABI surface change; needs a design pass)
+**Effort:** High (build-system + ABI surface change; design pass complete)
 **Impact:** Lets semantic analysis and a future native/AOT (LLVM) compiler obtain the runtime function/type/constant **catalog as metadata** (symbol name + signature) **without linking the executable C++ runtime**. Today every binary that type-checks must link the full C++/Allegro runtime just to read the catalog — this is the real coupling behind "a native compiler that doesn't need the runtime to run," not the executable-topology question.
 
 > Surfaced by FD-044's `/fd-deep` executable-topology analysis (2026-06-24). The deep analysis concluded that splitting the compiler into separate native/interp executables would **not** shed the runtime dependency, because the catalog (a sema input) is only obtainable from the linked runtime. This FD captures the decoupling that actually unblocks a lightweight native compiler. Filed **Planned** — it is a load-bearing build/ABI decision that needs its own design pass (CLAUDE.md: ask before load-bearing structural choices).
@@ -32,41 +33,73 @@ Concretely, after this FD:
 - `cb-backend-interp` still resolves `fn_ptr` by linking the runtime (it must, to execute in-process).
 - The C++ `CB_FN(...)` line stays the one place a runtime function is registered.
 
-## Solution (sketch — to be designed)
+## Solution (designed — `/fd-deep` 2026-06-25)
 
-Candidate approaches, to evaluate in the design pass:
+**Decision (user-confirmed):** the core runtime stays **statically linked** — single-exe deployment is preserved (the deliberate `x64-windows-static-md` choice at `crates/cb-runtime-sys/build.rs:196-203`). The compiler obtains the core catalog as **metadata only**; the full C++/Allegro runtime is linked **only on the interpreter path** to supply `fn_ptr`. The catalog metadata schema is designed to generalize to dlopen'd plugins, but **the plugin loader is out of scope for this FD** (it reuses FD-009's spec).
 
-1. **Build-time metadata generation from the C++ catalog (recommended lean).**
-   A small metadata emitter compiled from `catalog.cpp` under a `-DCB_METADATA_ONLY` define that builds the descriptor arrays with `fn_ptr` set to `nullptr` (omitting the `reinterpret_cast<void(*)(void)>(fn)`), so it references no function addresses and links with only `catalog.cpp` + headers — not the subsystem TUs or Allegro. It serializes name/symbol/tags/constants to a stable format (JSON or a packed table) that `cb-runtime-sys`'s `build.rs` turns into static Rust data (e.g. a generated `catalog_meta.rs`). Sema consumes the generated metadata; the interpreter overlays `fn_ptr`s from the linked runtime by matching on `symbol`. **Pro:** C++ stays source of truth; metadata path needs no runtime link. **Con:** a second build artifact + a symbol-keyed reconciliation step for interp.
+Rationale for this shape over the alternatives considered in the design pass:
+- *Dynamically loading the core runtime ("plugin zero")* would literally satisfy "the compiler links no runtime," but it ends single-exe deployment, adds cross-module CRT-shared-heap management, and complicates the SDK-free static-archive story. Rejected for the core; reserved for plugins.
+- *A language-neutral `.def` rewrite (old approach #3)* has no historical CoolBasic precedent (signatures lived inside the compiler binary) and would discard the C++ `FuncTraits` `decltype`-deduction that makes signatures impossible to mis-declare. The durable lesson from CoolBasic/cbEnchanted is **the metadata/execution split**, not a file format — so keep the `CB_FN` DSL as the single source of truth.
+- *Generate-to-Rust static data* remains a clean **later upgrade** for a pure-Rust / cross-compiled compiler distribution; it is not required now and adds a build-time emitter (compile+link+run a helper) that is currently unprecedented in this repo's `build.rs`.
 
-2. **Two catalog entry points in the linked runtime.** Add `cb_runtime_get_catalog_meta()` returning `fn_ptr`-free descriptors. **Rejected for the stated goal:** it still lives in the linked library, so it does *not* decouple — no win for a runtime-free compiler. (Could still be a cheap intermediate step.)
+### Phase A — Data-model split (independent; do first)
 
-3. **Promote the catalog DSL to a language-neutral description** (e.g. a `.def`/data file, like the existing `cb_keys.def` at `runtime/cb_keys.def`) that *both* the C++ build and a Rust generator read. **Pro:** cleanest single source. **Con:** largest rewrite; loses the C++ `FuncTraits` type-deduction that currently makes signatures impossible to mis-declare.
+Split `cb_ir::FuncDesc` (and the `CbFuncDesc` mirror) so the **metadata** (name, c_symbol, params, return_ty) is separable from the **execution binding** (`fn_ptr`). Verified during the design pass: **sema never dereferences `fn_ptr`** — it is threaded loader→IR and pattern-ignored at `crates/cb-sema/src/check.rs:1117`; the **LLVM backend references neither `fn_ptr` nor `symbol`** (it is a stub); **only the interpreter** consumes it (`crates/cb-backend-interp/src/interp.rs:461` → libffi `ffi.rs:145`). So the split is nearly free for the frontend.
 
-Data-model change common to all: split `cb_ir::FuncDesc` (and the `CbFuncDesc` mirror) so the **metadata** (name, c_symbol, params, return_ty) is separable from the **execution binding** (`fn_ptr`). `RuntimeCatalog` becomes constructible from metadata alone; `fn_ptr` becomes an interp-only overlay resolved by `symbol`.
+- `cb-ir`: `FuncKind::Runtime { symbol, fn_ptr }` → `FuncKind::Runtime { symbol }` (`crates/cb-ir/src/lib.rs:45-49`); drop `FuncDesc::fn_ptr` (`lib.rs:65`).
+- `cb-runtime-sys`: relax `decode_catalog` so a null `fn_ptr` is **valid metadata** (today it errors at `crates/cb-runtime-sys/src/lib.rs:347-349`); add an interp-only `resolve_bindings() -> HashMap<symbol, fn_ptr>`.
+- `cb-sema`: delete the now-dead `fn_ptr` field (`scope.rs:66,102`, `check.rs:394,410`, `lower.rs:397,417`).
+- `cb-backend-interp`: at startup build the `symbol → fn_ptr` table; look up by `symbol` at `interp.rs:461`. `RuntimeCatalog` becomes constructible from metadata alone.
 
-## Open questions (design pass)
+### Phase B — Metadata-only compilation (the chosen decoupling)
 
-- **Target-vs-host catalog content.** `catalog.cpp` content is **build-config-dependent** — graphics/audio rows are behind `#ifndef CB_NO_ALLEGRO` (`catalog.cpp:229-244`), and the SDK-free build emits a smaller catalog (FD-033). A native compiler's metadata must describe the **runtime it links its output against**, which may differ from the host build (and, eventually, cross-compilation targets). How is the metadata config/target selected and versioned? Does `CB_CATALOG_VERSION` need to gate metadata too?
-- **`fn_ptr` reconciliation for interp.** If metadata is `fn_ptr`-free and the interpreter overlays addresses from the linked runtime by `symbol`, the two must agree exactly. How is drift detected (the current DSL ties symbol↔pointer so they "cannot drift" — `catalog.cpp:205`; a split reintroduces that risk)? A startup assert that every metadata symbol resolves?
-- **Where does generated metadata live / how is it tested?** `cb-runtime-sys` `OUT_DIR` vs a committed artifact; how does the existing catalog **mock** (FD-033) coexist with generated metadata in SDK-free CI?
-- **Scope vs. FD-044.** FD-044 ships first and is independent; this FD is only needed once a native backend wants to avoid the runtime link. Confirm sequencing (likely: FD-044 → LLVM codegen begins → this FD when the runtime-link weight actually bites).
+Compile `catalog.cpp` under a new `-DCB_METADATA_ONLY` define: `CB_FN` sets `fn_ptr = nullptr` (drop the lone `reinterpret_cast<void(*)(void)>(fn)` at `runtime/catalog.cpp:209` — the **only** address-take, which is what currently ODR-uses every runtime function and drags in Allegro), and guard the `cb_runtime_string_api` pointer (`catalog.cpp:728`). Removing the cast also makes `catalog_funcs[]` `constexpr` (the comment at `catalog.cpp:280-282` confirms the cast is the sole reason it isn't). This yields a **tiny, Allegro-free object** exposing `cb_runtime_get_catalog_meta()` that references zero function addresses and links with only `catalog.cpp` + headers.
 
-## Files to Create/Modify (preliminary)
+The compiler links **only this metadata object**; the full-runtime link (for `fn_ptr`) moves behind the interpreter path. The metadata object is compiled with the **same `-DCB_NO_ALLEGRO`** switch as the linked runtime, so the two catalogs match by construction (no separate mock needed — both emit the real catalog under the matching define). *(Lean variant first: link the tiny object and call it at runtime. Generate-to-Rust is the later upgrade.)*
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `runtime/catalog.cpp` | MODIFY | `CB_METADATA_ONLY` path (or a metadata emitter) producing `fn_ptr`-free descriptors |
-| `crates/cb-runtime-sys/build.rs` | MODIFY | Generate static Rust catalog **metadata** at build time (approach 1) |
-| `crates/cb-runtime-sys/src/lib.rs` | MODIFY | Expose metadata without `cb_runtime_get_catalog()`; keep `fn_ptr` overlay for interp |
-| `crates/cb-ir/src/lib.rs` | MODIFY | Split `FuncDesc` metadata vs. `fn_ptr` execution binding; `RuntimeCatalog` constructible from metadata alone |
-| `crates/cb-backend-interp/*` | MODIFY | Resolve `fn_ptr` from the linked runtime by `symbol` |
-| `crates/cb-sema/*` | (likely no change) | Already consumes `RuntimeCatalog`; benefits transparently |
+### Phase C — Drift guard
 
-## Verification (preliminary)
+The compile-time `#fn` symbol↔pointer tie (`catalog.cpp:204-205`) no longer holds once metadata and bindings come from independently-built artifacts. Replace it with a **fatal interp-startup assert** (matching the existing fatal-by-panic init at `string_api()`, `crates/cb-runtime-sys/src/lib.rs:220-228`, and cbEnchanted's `link()` assert): every metadata `symbol` must resolve to a non-null binding and vice-versa. Strengthen with a **catalog content hash** over the sorted `(name, symbol, param_tags, return_tag)` tuples, compared between the metadata object and the linked runtime, to catch signature drift the symbol-set check alone would miss.
 
+### Phase D — Plugin-ready schema (design only; loader deferred to FD-009)
+
+Shape the metadata schema so a future plugin DLL is just another catalog source:
+- Carry a `magic` + `plugin-name` + `semver` in the catalog struct (behind a `CB_CATALOG_VERSION` bump); reuse the existing `CB_HOST_ABI_VERSION` handshake (each DLL already exports `cb_runtime_init`).
+- **Cross-module identity is the CB name (namespaced), not the linker symbol** — cbEnchanted keys dispatch on stable IDs / `(groupId, funcId)`, not symbols a third party can't reproduce. `symbol` stays the *binding* key for the statically-linked core only.
+- **Type tags stay catalog-local** (a compact index into each catalog's own param arrays) with host-assigned remapping at merge time. `IrType::RuntimeType(String)` is already name-based (`crates/cb-runtime-sys/src/lib.rs:452-453`), so the IR/type-system is already insulated from the hand-assigned tags 10–18.
+- `CallDLL` (backlog) is explicitly **not** this mechanism — it is a runtime escape hatch (memblock-marshalled, fixed C ABI, type-checked only at the call statement). Keep them separate.
+
+## Open questions
+
+Resolved in the design pass:
+
+- ~~**Target-vs-host catalog content.**~~ **Resolved:** the metadata object is compiled with the **same `-DCB_NO_ALLEGRO`** switch as the linked runtime, so host and metadata catalogs match by construction. Cross-compilation targets (metadata for a runtime other than the host's) remain future work, layered on the plugin schema (Phase D).
+- ~~**`fn_ptr` reconciliation for interp.**~~ **Resolved:** Phase C — fatal interp-startup assert (every metadata `symbol` resolves to a non-null binding and vice-versa) + a catalog content hash to catch signature drift.
+- ~~**Where does generated metadata live / how is it tested?**~~ **Resolved (lean variant):** the compiler links the tiny metadata-only object — no generated artifact, no separate mock. Both the metadata object and the linked runtime emit the real catalog under the matching `-DCB_NO_ALLEGRO` define, so FD-033's SDK-free path is unaffected. (If the generate-to-Rust upgrade is later taken, the emitted data lives in `OUT_DIR`, regenerated each build keyed off the existing `RERUN_SOURCES`.)
+- ~~**Scope vs. FD-044.**~~ **Resolved:** FD-044 has shipped. Phase A (the data-model split) is independent and can land anytime; Phases B–C deliver the decoupling when the runtime-link weight bites.
+
+Still open:
+
+- **Identity key for the plugin schema.** Confirm name-vs-symbol: recommended is **CB name (namespaced) as cross-module identity** for plugins, with the linker `symbol` retained as the binding key for the statically-linked core only (Phase D). The exact namespacing scheme (`plugin::Type`, group IDs) is a Phase-D detail to settle when the loader (FD-009) is built.
+- **Build experiment (gates Phase B).** The "`-DCB_METADATA_ONLY` severs the Allegro link" claim is verified by **code reading only** (`catalog.cpp:209` is the sole address-take). It needs an actual compile to confirm the metadata object links with zero Allegro/subsystem symbols **before** committing to Phase B — see Verification.
+
+## Files to Create/Modify
+
+| File | Action | Phase | Purpose |
+|------|--------|-------|---------|
+| `crates/cb-ir/src/lib.rs` | MODIFY | A | `FuncKind::Runtime { symbol }` (drop `fn_ptr`); drop `FuncDesc::fn_ptr`; `RuntimeCatalog` constructible from metadata alone |
+| `crates/cb-sema/src/{scope,check,lower}.rs` | MODIFY | A | Delete the now-dead `fn_ptr` field threaded through `DeclKind::RuntimeFn`/`OverloadVariant` (verified never dereferenced) |
+| `crates/cb-runtime-sys/src/lib.rs` | MODIFY | A,B | Relax `decode_catalog`'s null-`fn_ptr` error (`:347-349`); add interp-only `resolve_bindings() -> HashMap<symbol, fn_ptr>`; expose `cb_runtime_get_catalog_meta()` |
+| `crates/cb-backend-interp/*` | MODIFY | A,C | Build `symbol → fn_ptr` table at startup; dispatch by `symbol` (`interp.rs:461`); fatal startup drift assert + content-hash check |
+| `runtime/catalog.cpp` | MODIFY | B | `-DCB_METADATA_ONLY` path: `CB_FN` emits `fn_ptr = nullptr` (drop the `reinterpret_cast` at `:209`), guard the string-API pointer (`:728`); emit a content hash |
+| `crates/cb-runtime-sys/build.rs` | MODIFY | B | Compile the metadata-only object (Allegro-free); link the full runtime only on the interp path |
+| `runtime/cb_runtime_core.h` / `cb_runtime_func.h` | MODIFY | C,D | `CB_CATALOG_VERSION` bump; add `magic`/`plugin-name`/`semver` + content-hash fields to the catalog struct; update the static_assert layout pins |
+
+## Verification
+
+- **Build experiment first (gates Phase B):** compile `catalog.cpp` with `-DCB_METADATA_ONLY` and confirm the resulting object links with **zero** Allegro/subsystem symbols (the one claim not yet verified by build).
 - A build/test that type-checks a program (sema) **without** linking the executable runtime (e.g. metadata-only, `--dump-ir` path) — proving the C++/Allegro link is no longer a type-check prerequisite.
-- Interpreter still runs every existing fixture — `fn_ptr` overlay resolves all symbols; a startup check fails loudly on any missing/extra symbol (drift guard).
+- Interpreter still runs every existing fixture — `fn_ptr` overlay resolves all symbols; the startup check fails loudly on any missing/extra symbol or content-hash mismatch (drift guard).
 - Catalog metadata matches the linked runtime's catalog under both full-Allegro and SDK-free configs (`HAS_GRAPHICS` gating preserved).
 - `cargo test --workspace` green across the FD-025 four-feature matrix; clippy/fmt clean.
 
