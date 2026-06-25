@@ -1,6 +1,7 @@
 # FD-045: Catalog Metadata Decoupling
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-25
 **Created:** 2026-06-24
 **Designed:** 2026-06-25 (4-angle `/fd-deep` pass; claims verified against the code)
 **Implemented:** 2026-06-25 (Phases A–C; Phase D remains design-only — plugin loader deferred to FD-009)
