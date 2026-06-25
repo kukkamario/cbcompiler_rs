@@ -11,6 +11,7 @@ The post-FD-018 codebase-review bundle is fully landed, the FD-036 game-object r
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Planned | Low–Medium | Low |
+| [FD-046](FD-046_STRING_NUMBER_CONVERSION_PRIMITIVES.md) | Core-Runtime String↔Number Conversion Primitives | Open | Medium | Medium |
 
 ## Completed
 
