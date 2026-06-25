@@ -1,8 +1,9 @@
 # FD-045: Catalog Metadata Decoupling
 
-**Status:** Open
+**Status:** Pending Verification
 **Created:** 2026-06-24
 **Designed:** 2026-06-25 (4-angle `/fd-deep` pass; claims verified against the code)
+**Implemented:** 2026-06-25 (Phases A–C; Phase D remains design-only — plugin loader deferred to FD-009)
 **Priority:** Medium (prerequisite for a runtime-free native compiler; not blocking interp work)
 **Effort:** High (build-system + ABI surface change; design pass complete)
 **Impact:** Lets semantic analysis and a future native/AOT (LLVM) compiler obtain the runtime function/type/constant **catalog as metadata** (symbol name + signature) **without linking the executable C++ runtime**. Today every binary that type-checks must link the full C++/Allegro runtime just to read the catalog — this is the real coupling behind "a native compiler that doesn't need the runtime to run," not the executable-topology question.
@@ -102,6 +103,24 @@ Still open:
 - Interpreter still runs every existing fixture — `fn_ptr` overlay resolves all symbols; the startup check fails loudly on any missing/extra symbol or content-hash mismatch (drift guard).
 - Catalog metadata matches the linked runtime's catalog under both full-Allegro and SDK-free configs (`HAS_GRAPHICS` gating preserved).
 - `cargo test --workspace` green across the FD-025 four-feature matrix; clippy/fmt clean.
+
+## Implementation Outcome (Phases A–C; verified 2026-06-25, Windows, full-Allegro + SDK-free)
+
+Phases A–C landed; **Phase D stays design-only** (plugin loader deferred to FD-009 — no `magic`/`semver`/`CB_CATALOG_VERSION` bump was needed for A–C, the catalog struct layout is unchanged).
+
+- **Phase A — data-model split:** `FuncKind::Runtime { symbol }` (dropped `fn_ptr`); dropped `FuncDesc::fn_ptr`; deleted the dead `fn_ptr` field threaded through `DeclKind::RuntimeFn` / `OverloadVariant` (`scope.rs`, `check.rs`, `lower.rs`, `lower_snapshots.rs`); `decode_catalog` now accepts a **null `fn_ptr` as valid metadata**; added interp-only `resolve_bindings() -> HashMap<symbol, fn_ptr>`. The interpreter resolves the overlay once at startup and dispatches by `symbol`.
+- **Phase B — metadata-only object:** `runtime/catalog.cpp` under `-DCB_METADATA_ONLY` — `CB_FN_PTR(fn)` nulls the lone `reinterpret_cast<void(*)(void)>(fn)` address-take, function bodies are `#ifndef`-guarded out, the `cb_runtime_string_api` pointer is guarded, and a distinct `cb_runtime_get_catalog_meta()` entry point links alongside the full runtime. `build.rs` compiles it under the **same `CB_NO_ALLEGRO` switch** as the linked runtime (both `build_sdk_free` and `build_full`), so the two catalogs match by construction. Sema reads the metadata catalog via `load_catalog()` → `fetch_catalog_meta()`.
+- **Phase C — drift guard:** chosen as a Rust-side structural `reconcile_catalogs()` (symbol-set + signature-tuple comparison) over a C++-emitted content hash — equivalent coverage, precise drift message. `resolve_bindings_checked()` reconciles metadata vs full catalog at interpreter startup; fatal-by-panic on any missing/extra symbol or signature drift, matching the `string_api`/`runtime_init` init policy.
+
+**Verification results:**
+- **Build-experiment (the gating claim), now confirmed by build:** `dumpbin /SYMBOLS` on the **full** metadata-only archive (`cb_runtime_meta.lib`, carrying the graphics/input/text `CB_FN` rows) shows exactly **one** undefined external symbol — `_fltused` (CRT float marker). **Zero** Allegro (`al_*`) refs, **zero** `cb_rt_*` runtime-function-body refs. `-DCB_METADATA_ONLY` severs the Allegro link as predicted.
+- `cargo test --workspace` green (exit 0): `cb-runtime-sys` 24/24 (incl. `decode_allows_null_fn_ptr` and the four `reconcile_catalogs` drift tests — matching / missing / extra / signature-drift), `cb-backend-interp` 46/46 (every fixture dispatches through the `symbol → fn_ptr` overlay with the startup reconcile running on each construction), `cb-sema` 180 + 46 lower-snapshots (`fn_ptr`-free lowering, snapshots unchanged).
+- **SDK-free config** (`CB_RUNTIME_FORCE_SDK_FREE=1`): `cb-runtime-sys` 24/24 + `cb-backend-interp` 80/80 green — the metadata object + drift guard build and reconcile under `-DCB_NO_ALLEGRO` too.
+- `clippy --workspace --all-targets -D warnings` clean; `fmt --all --check` clean.
+
+**Known gap (consistent with FD scope):** the build still links **both** the full runtime and the metadata object — there is no build target yet that links *only* the metadata object, so the "type-check without linking the executable runtime" outcome is established at the ABI/data-model seam but not yet realized as a runtime-free binary. That binary (a metadata-only `cb-runtime-sys` build config + a driver path) is follow-up work; the native compiler that consumes the seam was always future scope here.
+
+Proofread fix folded in at verify: corrected two stale `fetch_catalog`/`string_api` doc comments that still claimed `load_catalog` shares `fetch_catalog()` (it now reads `fetch_catalog_meta()`).
 
 ## Related
 
