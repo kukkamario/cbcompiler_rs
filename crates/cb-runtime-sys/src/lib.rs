@@ -189,8 +189,10 @@ unsafe extern "C" {
 
 /// Fetch the catalog pointer the linked runtime exports and null-check it.
 /// The single place the raw `cb_runtime_get_catalog()` FFI result is turned
-/// into a safe reference; both [`string_api`] and [`load_catalog`] start here
-/// so the null-check (and its message) live in exactly one spot (DR-R2).
+/// into a safe reference; the full-catalog consumers ([`string_api`],
+/// [`resolve_bindings`]) start here so the null-check (and its message) live
+/// in exactly one spot (DR-R2). Sema's metadata path reads the sibling
+/// [`fetch_catalog_meta`] instead (FD-045).
 ///
 /// # Safety
 /// Relies on the runtime returning either null or a pointer valid for
@@ -235,8 +237,10 @@ fn check_catalog_version(version: u32) -> Result<(), String> {
 /// version-mismatched catalog at the point the interpreter needs the string
 /// runtime is an unrecoverable startup misconfiguration (fatal-by-panic at
 /// init, FD-024) that should surface immediately rather than be absorbed. The
-/// fetch and version checks themselves are shared with `load_catalog` via
-/// [`fetch_catalog`] / [`check_catalog_version`]; only the handling differs.
+/// version check is shared with [`load_catalog`]'s decode path via
+/// [`check_catalog_version`] so the two cannot drift; the fetch reads the
+/// **full** catalog ([`fetch_catalog`]) — the one carrying the string API —
+/// whereas sema's [`load_catalog`] reads the metadata-only catalog (FD-045).
 pub fn string_api() -> &'static CbStringApi {
     let catalog = fetch_catalog().unwrap_or_else(|e| panic!("{e}"));
     check_catalog_version(catalog.version).unwrap_or_else(|e| panic!("{e}"));
