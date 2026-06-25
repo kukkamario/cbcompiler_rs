@@ -63,7 +63,6 @@ pub enum DeclKind {
         params: Vec<ParamInfo>,
         return_ty: Type,
         c_symbol: String,
-        fn_ptr: unsafe extern "C" fn(),
     },
     OverloadSet {
         variants: Vec<OverloadVariant>,
@@ -99,7 +98,6 @@ pub struct OverloadVariant {
     pub params: Vec<ParamInfo>,
     pub return_ty: Type,
     pub c_symbol: String,
-    pub fn_ptr: unsafe extern "C" fn(),
 }
 
 /// Compile-time constant value.

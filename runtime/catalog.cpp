@@ -34,6 +34,12 @@ extern "C" {
 // These are the only runtime functions that use a runtime-defined opaque
 // type, so they double as compile-time tests of the
 // `type_tag<CbTestHandle>` path.
+//
+// CB_METADATA_ONLY (FD-045): omit the function *bodies* so the metadata-only
+// object references neither cb_host() nor the string primitives, and so it can
+// link alongside the full runtime without duplicate definitions. The forward
+// declarations above (and in cb_runtime_func.h) remain — all FuncTraits<…> needs.
+#ifndef CB_METADATA_ONLY
 
 extern "C" CbTestHandle* cb_rt_create_test_handle(void) {
     return reinterpret_cast<CbTestHandle*>(static_cast<uintptr_t>(42));
@@ -79,6 +85,8 @@ extern "C" int32_t cb_rt_abs_int(int32_t x) {
 extern "C" double cb_rt_abs_float(double x) {
     return x < 0.0 ? -x : x;
 }
+
+#endif // CB_METADATA_ONLY
 
 // Math functions live in cb_math.cpp; their prototypes are in cb_runtime.h.
 
@@ -200,13 +208,23 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 // CB_FN — register a runtime function as a single CbFuncDesc entry.
 //
 // `cb_name` is the CoolBasic-visible name (case-insensitive lookup).
-// `fn` is the runtime function. `#fn` stringifies it as the linker symbol,
-// and `reinterpret_cast<void(*)(void)>(fn)` produces the stored pointer.
-// Both reference the same identifier — they cannot drift.
+// `fn` is the runtime function. `#fn` stringifies it as the linker symbol;
+// CB_FN_PTR(fn) is the stored pointer. In a normal build it is
+// `reinterpret_cast<void(*)(void)>(fn)`, tying symbol and pointer to the same
+// identifier so they cannot drift. In a CB_METADATA_ONLY build (FD-045) it is
+// `nullptr`: taking `&fn` is the sole thing that ODR-uses every runtime function
+// and drags in the Allegro closure, so nulling it lets the catalog compile and
+// link as pure metadata, referencing no runtime function body.
+#ifdef CB_METADATA_ONLY
+#define CB_FN_PTR(fn) nullptr
+#else
+#define CB_FN_PTR(fn) reinterpret_cast<void(*)(void)>(fn)
+#endif
+
 #define CB_FN(cb_name, fn)                                                      \
     CbFuncDesc{                                                                 \
         cb_name, #fn,                                                           \
-        reinterpret_cast<void(*)(void)>(fn),                                    \
+        CB_FN_PTR(fn),                                                          \
         (::cb_catalog::FuncTraits<fn>::param_count == 0)                        \
             ? nullptr                                                           \
             : ::cb_catalog::cb_anon_params<fn>.data(),                          \
@@ -725,9 +743,24 @@ static const CbCatalog catalog = {
     catalog_funcs,
     static_cast<uint32_t>(sizeof(catalog_consts) / sizeof(catalog_consts[0])),
     catalog_consts,
+#ifdef CB_METADATA_ONLY
+    nullptr,  // FD-045: metadata-only catalog carries no string API (the interp
+              // reads the full catalog for that). Keeps this object free of the
+              // cb_runtime_string_api symbol — i.e. of cb_string.cpp.
+#else
     &cb_runtime_string_api,
+#endif
 };
 
+#ifdef CB_METADATA_ONLY
+// FD-045: distinct entry-point symbol so the metadata-only object can link
+// alongside the full runtime. The compiler (sema / a native backend) reads the
+// catalog through here without pulling in the executable runtime.
+extern "C" const CbCatalog* cb_runtime_get_catalog_meta(void) {
+    return &catalog;
+}
+#else
 extern "C" const CbCatalog* cb_runtime_get_catalog(void) {
     return &catalog;
 }
+#endif

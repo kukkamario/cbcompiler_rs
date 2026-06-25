@@ -43,10 +43,11 @@ pub enum FuncKind {
         body_index: usize,
     },
     Runtime {
+        /// Linker symbol of the runtime function. The LLVM backend uses this for
+        /// `declare`/`call`; the interpreter resolves it to a live address through
+        /// its startup binding overlay (FD-045). The catalog *metadata* carries no
+        /// function pointer — only this symbol.
         symbol: String,
-        /// Statically-linked address of the runtime function. The interpreter
-        /// dispatches through this; the LLVM backend uses `symbol` for `declare`/`call`.
-        fn_ptr: unsafe extern "C" fn(),
     },
 }
 
@@ -60,9 +61,6 @@ pub enum FuncKind {
 pub struct FuncDesc {
     pub name: String,
     pub c_symbol: String,
-    /// Statically-linked address of the runtime function. Populated by the
-    /// catalog loader; used by the interpreter for libffi dispatch.
-    pub fn_ptr: unsafe extern "C" fn(),
     pub params: Vec<FuncParamDesc>,
     pub return_ty: IrType,
 }

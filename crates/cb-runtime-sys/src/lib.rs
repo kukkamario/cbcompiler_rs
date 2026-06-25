@@ -4,7 +4,7 @@
 //! `#[repr(C)]` mirror types for the catalog ABI, and a safe conversion
 //! function that produces a `RuntimeCatalog` for use by sema.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::CStr;
 
 use cb_ir::types::IrType;
@@ -162,11 +162,19 @@ const CB_TYPE_STRING: u32 = 9;
 
 // ── Extern declarations ────────────────────────────────────────────────
 
-// The catalog is the only entry point Rust needs from the runtime
-// library — every other function is reached through the `fn_ptr` field
-// on each catalog entry, dispatched via libffi by the interpreter.
+// The catalog is the primary entry point Rust needs from the runtime library.
+// Sema reads it as pure metadata ([`load_catalog`]); the interpreter
+// additionally resolves each entry's `fn_ptr` ([`resolve_bindings`]) and
+// dispatches through it via libffi. Splitting the two is what lets a
+// metadata-only compiler avoid link-depending on the executable runtime (FD-045).
 unsafe extern "C" {
     pub fn cb_runtime_get_catalog() -> *const CbCatalog;
+
+    /// Metadata-only catalog entry point (FD-045): the same catalog data with
+    /// null `fn_ptr`s, exported by a tiny Allegro-free object that references no
+    /// runtime function body. [`load_catalog`] reads this, so sema / a native
+    /// backend can type-check without linking the executable runtime.
+    pub fn cb_runtime_get_catalog_meta() -> *const CbCatalog;
 
     /// Instrumentation hook — returns the current refcount of a CbString,
     /// or a negative value for the static-data sentinel. Used by tests to
@@ -191,6 +199,18 @@ fn fetch_catalog() -> Result<&'static CbCatalog, String> {
     let ptr = unsafe { cb_runtime_get_catalog() };
     if ptr.is_null() {
         return Err("cb_runtime_get_catalog() returned null".to_string());
+    }
+    Ok(unsafe { &*ptr })
+}
+
+/// Fetch the metadata-only catalog pointer (FD-045) and null-check it. Mirrors
+/// [`fetch_catalog`] but reads `cb_runtime_get_catalog_meta()` — the catalog
+/// compiled with null `fn_ptr`s and no executable-runtime link dependency. This
+/// is the catalog sema sees.
+fn fetch_catalog_meta() -> Result<&'static CbCatalog, String> {
+    let ptr = unsafe { cb_runtime_get_catalog_meta() };
+    if ptr.is_null() {
+        return Err("cb_runtime_get_catalog_meta() returned null".to_string());
     }
     Ok(unsafe { &*ptr })
 }
@@ -258,13 +278,128 @@ pub fn runtime_init(host: &'static CbHostApi) -> Result<&'static CbRuntimeHooks,
 
 // ── Safe conversion ────────────────────────────────────────────────────
 
-/// Load the runtime catalog and convert it to a `RuntimeCatalog` suitable
-/// for passing to `cb_sema::analyze`. Thin wrapper: fetch + null-check the
-/// catalog pointer via [`fetch_catalog`], then hand it to [`decode_catalog`],
-/// which holds all version/layout validation and is unit-testable against
-/// hand-built fixtures.
+/// Load the runtime catalog (as **metadata only**, FD-045) and convert it to a
+/// `RuntimeCatalog` suitable for passing to `cb_sema::analyze`. Thin wrapper:
+/// fetch + null-check the metadata catalog pointer via [`fetch_catalog_meta`],
+/// then hand it to [`decode_catalog`], which holds all version/layout validation
+/// and is unit-testable against hand-built fixtures. The interpreter overlays
+/// live function pointers separately via [`resolve_bindings`].
 pub fn load_catalog() -> Result<RuntimeCatalog, String> {
-    decode_catalog(fetch_catalog()?)
+    decode_catalog(fetch_catalog_meta()?)
+}
+
+/// Resolve the `symbol → fn_ptr` bindings the interpreter needs to dispatch
+/// runtime calls (FD-045). Reads the **full** linked runtime catalog
+/// (`cb_runtime_get_catalog()`), which carries live function pointers — unlike
+/// the metadata-only catalog [`load_catalog`] decodes. Every entry must have a
+/// non-null `fn_ptr`; a null here means the executable runtime was not linked,
+/// a fatal interpreter-startup misconfiguration the caller should surface.
+///
+/// This is interp-only: a metadata-only compiler (sema, a native/AOT backend)
+/// never calls it and so never link-depends on the executable runtime.
+pub fn resolve_bindings() -> Result<HashMap<String, unsafe extern "C" fn()>, String> {
+    let catalog = fetch_catalog()?;
+    check_catalog_version(catalog.version)?;
+
+    let funcs = if catalog.func_count > 0 {
+        if catalog.funcs.is_null() {
+            return Err("null funcs pointer with non-zero func_count".to_string());
+        }
+        unsafe { std::slice::from_raw_parts(catalog.funcs, catalog.func_count as usize) }
+    } else {
+        &[]
+    };
+
+    let mut bindings = HashMap::with_capacity(funcs.len());
+    for func in funcs {
+        if func.symbol.is_null() {
+            return Err("null symbol in runtime catalog binding".to_string());
+        }
+        let symbol = unsafe { CStr::from_ptr(func.symbol) }
+            .to_str()
+            .map_err(|e| format!("invalid UTF-8 in symbol: {e}"))?
+            .to_string();
+        let fn_ptr = func.fn_ptr.ok_or_else(|| {
+            format!("null fn_ptr for runtime function '{symbol}' (executable runtime not linked?)")
+        })?;
+        bindings.insert(symbol, fn_ptr);
+    }
+    Ok(bindings)
+}
+
+/// Like [`resolve_bindings`], but first reconciles the **metadata** catalog
+/// ([`load_catalog`]'s source) against the **full** binding catalog and fails if
+/// they have drifted (FD-045 Phase C drift guard).
+///
+/// Once metadata and bindings come from independently-built objects, the
+/// compile-time `#fn` symbol↔pointer tie that `CB_FN` used to guarantee no
+/// longer holds. The interpreter calls this at startup so any mismatch — a
+/// metadata symbol with no binding (or vice-versa), or a signature that differs
+/// between the two catalogs — aborts loudly rather than miscalling. Fatal-by-panic
+/// at the call site, matching [`string_api`] / [`runtime_init`].
+pub fn resolve_bindings_checked() -> Result<HashMap<String, unsafe extern "C" fn()>, String> {
+    let meta = decode_catalog(fetch_catalog_meta()?)?;
+    let full = decode_catalog(fetch_catalog()?)?;
+    reconcile_catalogs(&meta, &full)?;
+    resolve_bindings()
+}
+
+/// A stable, comparable key for one runtime function: its CB name, linker
+/// symbol, parameter type tags, and return type tag. Two catalogs that produce
+/// the same sorted key set describe identical signatures.
+fn signature_keys(catalog: &RuntimeCatalog) -> Vec<String> {
+    let mut keys: Vec<String> = catalog
+        .functions
+        .iter()
+        .map(|f| {
+            let params: Vec<String> = f.params.iter().map(|p| format!("{:?}", p.ty)).collect();
+            format!(
+                "{}|{}|{}|{:?}",
+                f.name,
+                f.c_symbol,
+                params.join(","),
+                f.return_ty
+            )
+        })
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// Structurally compare the metadata catalog against the binding (full) catalog
+/// (FD-045 Phase C). Returns `Err` describing the first drift found: a symbol
+/// present in one catalog but not the other, or a function whose signature
+/// differs between them. Pure over its inputs so it is unit-testable with
+/// hand-built catalogs (the live catalogs match by construction).
+fn reconcile_catalogs(meta: &RuntimeCatalog, full: &RuntimeCatalog) -> Result<(), String> {
+    // Symbol-set reconciliation: every metadata symbol must have a binding and
+    // vice-versa.
+    let meta_syms: BTreeSet<&str> = meta.functions.iter().map(|f| f.c_symbol.as_str()).collect();
+    let full_syms: BTreeSet<&str> = full.functions.iter().map(|f| f.c_symbol.as_str()).collect();
+    if meta_syms != full_syms {
+        let missing: Vec<&str> = meta_syms.difference(&full_syms).copied().collect();
+        let extra: Vec<&str> = full_syms.difference(&meta_syms).copied().collect();
+        return Err(format!(
+            "catalog drift (FD-045): metadata and runtime symbol sets differ — \
+             metadata-only symbols: {missing:?}, runtime-only symbols: {extra:?}"
+        ));
+    }
+
+    // Signature reconciliation: identical (name, symbol, params, return) tuples.
+    // Catches drift the symbol-set check alone misses (e.g. a changed param type).
+    let meta_keys = signature_keys(meta);
+    let full_keys = signature_keys(full);
+    if meta_keys != full_keys {
+        let diff = meta_keys
+            .iter()
+            .zip(&full_keys)
+            .find(|(a, b)| a != b)
+            .map(|(a, b)| format!("metadata `{a}` vs runtime `{b}`"))
+            .unwrap_or_else(|| "function count differs between catalogs".to_string());
+        return Err(format!("catalog signature drift (FD-045): {diff}"));
+    }
+
+    Ok(())
 }
 
 /// Decode a `CbCatalog` into a `RuntimeCatalog`, validating version, pointers,
@@ -344,10 +479,6 @@ fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
             .map_err(|e| format!("invalid UTF-8 in symbol for {name}: {e}"))?
             .to_string();
 
-        let fn_ptr = func
-            .fn_ptr
-            .ok_or_else(|| format!("null fn_ptr for function '{name}' (symbol: {symbol})"))?;
-
         let params = if func.param_count > 0 {
             if func.params.is_null() {
                 return Err(format!("null params pointer for function '{name}'"));
@@ -386,7 +517,6 @@ fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
         functions.push(FuncDesc {
             name,
             c_symbol: symbol,
-            fn_ptr,
             params,
             return_ty,
         });
@@ -496,14 +626,24 @@ mod tests {
         #[cfg(cb_no_allegro)]
         assert_eq!(catalog.types.len(), 3);
 
-        // Every entry must have a non-null fn_ptr; the C++ CB_FN macro
-        // makes this a linker-checked invariant.
+        // Metadata carries no fn_ptr (FD-045); sanity-check the symbol instead.
         for func in &catalog.functions {
-            let _: unsafe extern "C" fn() = func.fn_ptr; // type-asserts non-null
             assert!(
                 !func.c_symbol.is_empty(),
                 "entry '{}' has empty c_symbol",
                 func.name
+            );
+        }
+
+        // The interpreter's binding overlay must resolve a non-null fn_ptr for
+        // every catalog symbol — the C++ CB_FN macro ties `#fn` to the pointer,
+        // and resolve_bindings() reads them from the linked executable runtime.
+        let bindings = resolve_bindings().expect("resolve_bindings");
+        for func in &catalog.functions {
+            assert!(
+                bindings.contains_key(&func.c_symbol),
+                "no fn_ptr binding for symbol '{}'",
+                func.c_symbol
             );
         }
 
@@ -1542,7 +1682,10 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_null_fn_ptr() {
+    fn decode_allows_null_fn_ptr() {
+        // FD-045: a null fn_ptr is valid *metadata* — the metadata-only catalog
+        // carries no pointers. Decoding must accept it (the interpreter resolves
+        // pointers separately via resolve_bindings()).
         let name = CString::new("foo").unwrap();
         let sym = CString::new("cb_rt_foo").unwrap();
         let funcs = [CbFuncDesc {
@@ -1557,8 +1700,84 @@ mod tests {
         let mut c = empty_catalog();
         c.func_count = 1;
         c.funcs = funcs.as_ptr();
-        let err = decode_catalog(&c).unwrap_err();
-        assert!(err.contains("null fn_ptr"), "got: {err}");
+        let decoded = decode_catalog(&c).expect("null fn_ptr is valid metadata");
+        assert_eq!(decoded.functions.len(), 1);
+        assert_eq!(decoded.functions[0].c_symbol, "cb_rt_foo");
+    }
+
+    // ── FD-045 drift guard (reconcile_catalogs) ────────────────────────────
+
+    fn rt_desc(name: &str, sym: &str, params: &[IrType], ret: IrType) -> FuncDesc {
+        FuncDesc {
+            name: name.to_string(),
+            c_symbol: sym.to_string(),
+            params: params
+                .iter()
+                .map(|ty| FuncParamDesc {
+                    name: None,
+                    ty: ty.clone(),
+                })
+                .collect(),
+            return_ty: ret,
+        }
+    }
+
+    fn rt_catalog(functions: Vec<FuncDesc>) -> RuntimeCatalog {
+        RuntimeCatalog {
+            types: Vec::new(),
+            functions,
+            constants: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reconcile_accepts_matching_catalogs() {
+        let mk = || {
+            rt_catalog(vec![
+                rt_desc("abs", "cb_rt_abs_int", &[IrType::Int], IrType::Int),
+                rt_desc("print", "cb_rt_print", &[IrType::String], IrType::Void),
+            ])
+        };
+        reconcile_catalogs(&mk(), &mk()).expect("identical catalogs must reconcile");
+    }
+
+    #[test]
+    fn reconcile_rejects_missing_symbol() {
+        let meta = rt_catalog(vec![
+            rt_desc("a", "cb_rt_a", &[], IrType::Void),
+            rt_desc("b", "cb_rt_b", &[], IrType::Void),
+        ]);
+        let full = rt_catalog(vec![rt_desc("a", "cb_rt_a", &[], IrType::Void)]);
+        let err = reconcile_catalogs(&meta, &full).unwrap_err();
+        assert!(err.contains("symbol sets differ"), "got: {err}");
+        assert!(err.contains("cb_rt_b"), "got: {err}");
+    }
+
+    #[test]
+    fn reconcile_rejects_extra_binding_symbol() {
+        let meta = rt_catalog(vec![rt_desc("a", "cb_rt_a", &[], IrType::Void)]);
+        let full = rt_catalog(vec![
+            rt_desc("a", "cb_rt_a", &[], IrType::Void),
+            rt_desc("z", "cb_rt_z", &[], IrType::Void),
+        ]);
+        let err = reconcile_catalogs(&meta, &full).unwrap_err();
+        assert!(err.contains("symbol sets differ"), "got: {err}");
+        assert!(err.contains("cb_rt_z"), "got: {err}");
+    }
+
+    #[test]
+    fn reconcile_rejects_signature_drift() {
+        // Same symbol set, but one parameter type differs — the case the
+        // symbol-set check alone would miss.
+        let meta = rt_catalog(vec![rt_desc("f", "cb_rt_f", &[IrType::Int], IrType::Void)]);
+        let full = rt_catalog(vec![rt_desc(
+            "f",
+            "cb_rt_f",
+            &[IrType::Float],
+            IrType::Void,
+        )]);
+        let err = reconcile_catalogs(&meta, &full).unwrap_err();
+        assert!(err.contains("signature drift"), "got: {err}");
     }
 
     #[test]
