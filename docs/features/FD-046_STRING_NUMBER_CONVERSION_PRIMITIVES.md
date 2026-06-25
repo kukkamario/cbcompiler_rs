@@ -1,6 +1,6 @@
 # FD-046: Core-Runtime String↔Number Conversion Primitives
 
-**Status:** Open
+**Status:** Complete
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Gives the interpreter and the future LLVM/AOT backend **one shared implementation** of every conversion that crosses the `String` type, so the two backends cannot silently diverge on `Str()`/`Int(s$)`/`Float(s$)` (especially float→string formatting). A prerequisite that de-risks the LLVM backend, fully verifiable on the interp path with **zero LLVM dependency**.
@@ -103,6 +103,17 @@ A second probe run (dense rounding/parse sweep on the original CoolBasic) confir
 - Build both configs (full Allegro + SDK-free `CB_RUNTIME_FORCE_SDK_FREE=1`) — the TU must be present in both.
 - `clippy --workspace --all-targets -D warnings` + `fmt --all --check` clean.
 - Confirm the new symbols are **absent from the catalog** (no `CB_FN` row; `cb-runtime-sys` catalog-content asserts unchanged, no `CB_CATALOG_VERSION` bump).
+
+## Verification Result (2026-06-26)
+
+Implemented in `bf262a3` and verified green:
+
+- **`cargo test --workspace`** — all suites pass, 0 failures. The interp ran against the **full CMake-built** `cb_convert.cpp` (linked via `cb_runtime_core`), so the re-baselined interp/driver snapshots are confirmed byte-identical to the C++ formatter.
+- **New interp conversion tests** (`str_of_float_uses_cb_six_sig_fig_format`, `float_of_string_is_lenient_prefix_parse`, `int_of_string_takes_leading_integer`) — pass; `Str()`/`Int(s$)`/`Float(s$)` route through the shared symbols.
+- **Native gtest** (`ctest -R Convert`) — 9/9 pass, pinning the 6-sig-fig float format, lenient `strtod` float parse, and leading-int parse.
+- **SDK-free build** (`CB_RUNTIME_FORCE_SDK_FREE=1`) — compiles `cb_convert.cpp` and passes; the TU is present in both the full and SDK-free builds.
+- **`clippy --workspace --all-targets -D warnings`** exit 0, **`fmt --all --check`** clean.
+- **Catalog unchanged** — no `catalog.cpp`/`cb_runtime_func.h` change, no `CB_CATALOG_VERSION` bump; the bare symbols stayed out of the catalog/drift-guard machinery as designed.
 
 ## Related
 
