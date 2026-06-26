@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Pending Verification | Low–Medium | Low |
+| - | - | - | - | No active features |
 
 ## Deferred / Closed
 
@@ -32,6 +32,7 @@ Low-priority or blocked items. Promote to Active when ready to design.
 
 | FD | Title | Completed | Notes |
 |----|-------|-----------|-------|
+| [FD-043](archive/FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | 2026-06-26 | Fires the reserved `cb_runtime_init` `about_to_exit` hook exactly once on every interpreter exit path; full build runs a coarse Allegro teardown via a core registration seam, SDK-free build is a no-op. |
 | [FD-046](archive/FD-046_STRING_NUMBER_CONVERSION_PRIMITIVES.md) | Core-Runtime String↔Number Conversion Primitives | 2026-06-26 | Moves String-crossing conversions into shared C++ core-runtime symbols so interp and a future native backend can't diverge on float→string formatting. |
 | [FD-045](archive/FD-045_CATALOG_METADATA_DECOUPLING.md) | Catalog Metadata Decoupling | 2026-06-25 | Splits catalog metadata (name/symbol/signature) from the executable binding (`fn_ptr`) so a native backend can type-check and emit calls without linking the Allegro runtime. |
 | [FD-044](archive/FD-044_BACKEND_TRAIT_SEAM.md) | Backend Trait Seam | 2026-06-25 | Replaces the driver's `cfg`-gated match arms with a real `Backend` trait in a new `cb-backend-api` crate; a new backend is now a crate impl + one factory line. |
