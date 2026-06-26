@@ -48,7 +48,7 @@ There are no project-specific build steps yet. Update this section when there ar
 
 **Do not invent CoolBasic semantics from memory.** The original language has quirks (type sigils, `Type ... EndType` blocks, sub vs. function distinction, etc.) that are easy to get subtly wrong.
 
-Authoritative syntax notes live in [`docs/cb_syntax.md`](docs/cb_syntax.md). Consult it before writing lexer/parser/sema code. If something you need isn't documented there yet, ask the user — don't guess — and then add the answer to `cb_syntax.md` so the next session has it.
+Authoritative syntax notes live in `docs/cb_syntax.md`. Consult it before writing lexer/parser/sema code. If something you need isn't documented there yet, ask the user — don't guess — and then add the answer to `cb_syntax.md` so the next session has it.
 
 ## Working notes for future Claude sessions
 

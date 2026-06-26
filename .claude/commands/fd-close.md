@@ -15,7 +15,7 @@ Examples:
 - `/fd-close 3 closed superseded by FD-005` — mark FD-003 as Closed
 - `/fd-close` (no args) — infer from conversation context
 
-Parse the argument: ``
+Parse the argument: `$ARGUMENTS`
 
 ## Inferring the FD
 
@@ -45,6 +45,7 @@ If no FD number provided, infer from conversation context:
 - Add to appropriate section:
   - **Complete** → add to top of `## Completed` table with date and notes
   - **Closed/Deferred** → add to top of `## Deferred / Closed` table with status and notes
+- Keep notes short and they are not necessary if the feature name is descriptive by itself
 
 ### 4. Archive the file
 

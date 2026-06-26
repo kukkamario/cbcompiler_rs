@@ -9,7 +9,7 @@ Parallel exploration of a hard problem from multiple angles, inspired by test-ti
 
 ## Argument
 
-Problem description or context: ``
+Problem description or context: `$ARGUMENTS`
 
 ## Phase 1: Understand the Problem
 

@@ -12,6 +12,7 @@ What we're solving and why it matters.
 ## Solution
 
 How to implement it. Be specific about approach — for compiler work, name the crate(s) affected (e.g., `cb-frontend`, `cb-ir`, `cb-backend-interp`, `cb-backend-llvm`, `cb-driver`).
+Stay brief and high level. The actual code is the low level detail, FDs should describe architecture choices.
 
 ## Files to Create/Modify
 

@@ -6,7 +6,7 @@ Post-implementation workflow: commit, proofread, fix, then propose a verificatio
 
 Optional context about what was implemented. If empty, infer from recent conversation and git diff.
 
-Parse the argument: ``
+Parse the argument: `$ARGUMENTS`
 
 ## Phase 1: Commit (no approval needed)
 

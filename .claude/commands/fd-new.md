@@ -4,7 +4,7 @@ Create a new FD file and add it to the index.
 
 ## Argument
 
-Title or description of the feature: ``
+Title or description of the feature: `$ARGUMENTS`
 
 ## Steps
 
@@ -17,7 +17,7 @@ Title or description of the feature: ``
 
 ### 2. Parse the argument
 
-- Extract a title from ``
+- Extract a title from argument
 - If no argument provided, ask the user for a title and brief description
 - Generate a filename-safe slug from the title (UPPER_SNAKE_CASE)
 
