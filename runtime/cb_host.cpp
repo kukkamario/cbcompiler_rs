@@ -3,7 +3,8 @@
 // CORE TU: stores the host API the backend delivers at startup and exposes it
 // to the functionality `cb_rt_*` functions via cb_host(). Allegro-free and
 // functionality-agnostic, so it belongs in cb_runtime_core (FD-016) — the
-// hooks it returns are currently empty, so it references nothing outside core.
+// about_to_exit hook it returns dispatches only to callbacks registered via the
+// teardown seam below (FD-043), so core still references nothing outside core.
 //
 // Each module that links cb_runtime_core (the main runtime, and each plugin
 // DLL) gets its own g_host; the driver calls cb_runtime_init once per module.
