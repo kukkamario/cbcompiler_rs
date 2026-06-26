@@ -1,6 +1,7 @@
 # FD-048: Basic LLVM Codegen & Tooling Driver
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-26
 **Priority:** High
 **Effort:** High (> 4 hours) — the IR is ignored, but the object-emit + linker plumbing (CRT-aware linking and the runtime closure on Windows) is fiddly and load-bearing.
 **Impact:** First native executable the project produces. Proves the back half of the AOT pipeline end-to-end — in-memory `inkwell::Module` → object file → linked (against the full CoolBasic runtime + Allegro closure, `/MD`-consistent) → runnable exe. No IR is read and no runtime function is *called* yet, but the runtime is on the link line, so later lowering FDs add only codegen, not toolchain work.

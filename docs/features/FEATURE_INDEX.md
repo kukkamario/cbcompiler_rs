@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-048](FD-048_BASIC_LLVM_CODEGEN_AND_TOOLING_DRIVER.md) | Basic LLVM Codegen & Tooling Driver | Pending Verification | High | High |
+| - | - | - | - | No active features |
 
 ## Deferred / Closed
 
@@ -32,6 +32,7 @@ Low-priority or blocked items. Promote to Active when ready to design.
 
 | FD | Title | Completed | Notes |
 |----|-------|-----------|-------|
+| [FD-048](archive/FD-048_BASIC_LLVM_CODEGEN_AND_TOOLING_DRIVER.md) | Basic LLVM Codegen & Tooling Driver | 2026-06-26 | First native exe: in-memory `inkwell` module → native object → CRT-aware driver link (`clang`/`cc`) against the full runtime closure → runnable exe. IR not read yet (fixed empty `main`); `/MD` dynamic CRT on Windows verified (no `libcmt`). `cb --backend llvm <file> [-o out]`; default build/CI stay LLVM-free. |
 | [FD-047](archive/FD-047_LLVM_DEPENDENCY_SETUP.md) | LLVM Dependency Setup | 2026-06-26 | Adds `inkwell`/LLVM 18 as an opt-in, feature-gated dependency (`cb-backend-llvm/codegen`, driver `llvm`); default build/test/CI stay LLVM-free. Linkage smoke test + Linux CI job; Windows toolchain via vcpkg `x64-windows-static-md`. No codegen yet (`--backend llvm`→exit 3 preserved). |
 | [FD-043](archive/FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | 2026-06-26 | Fires the reserved `cb_runtime_init` `about_to_exit` hook exactly once on every interpreter exit path; full build runs a coarse Allegro teardown via a core registration seam, SDK-free build is a no-op. |
 | [FD-046](archive/FD-046_STRING_NUMBER_CONVERSION_PRIMITIVES.md) | Core-Runtime String↔Number Conversion Primitives | 2026-06-26 | Moves String-crossing conversions into shared C++ core-runtime symbols so interp and a future native backend can't diverge on float→string formatting. |
