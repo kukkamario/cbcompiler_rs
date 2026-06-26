@@ -105,6 +105,18 @@ pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
         cmd.arg("-lstdc++");
     }
 
+    // libm, after the archives that use it (GNU ld resolves left-to-right). The
+    // runtime's math TUs reference `floor`/`pow`/…; the C driver does not pull in
+    // libm, so a whole-archived `cb_math.o` fails to link without it ("DSO
+    // missing from command line") — and real codegen calling runtime math will
+    // need it even on the lazy path. cb-runtime-sys never names libm itself: the
+    // interp binary gets it transitively from Rust's std, but this standalone
+    // link drives its own libs. Skipped on Windows (the CRT supplies math); a
+    // harmless no-op on macOS, where libm lives in libSystem.
+    if cfg!(not(target_os = "windows")) {
+        cmd.arg("-lm");
+    }
+
     let output = cmd
         .output()
         .map_err(|e| format!("failed to run link driver {}: {e}", driver.display()))?;
