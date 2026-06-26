@@ -42,7 +42,42 @@ cargo clippy --workspace --all-targets -- -D warnings   # lint (when clippy is d
 cargo fmt --all                   # format
 ```
 
-There are no project-specific build steps yet. Update this section when there are.
+### Building the LLVM backend (opt-in)
+
+The default build is LLVM-free: `cargo build` / `cargo test --workspace` need no LLVM toolchain (`cb-backend-llvm` compiles as a stub, `inkwell` stays unbuilt). LLVM codegen is opt-in via the driver's `llvm` feature, which enables `cb-backend-llvm/codegen` and pulls in `inkwell` (FD-047).
+
+```sh
+cargo build --features llvm                       # driver with the llvm backend
+cargo test -p cb-backend-llvm --features codegen  # llvm-backend linkage smoke test
+```
+
+Requirements for the `llvm`/`codegen` feature (only then):
+
+- **LLVM 18** — pinned via inkwell `0.9` feature `llvm18-1` → `llvm-sys 181.x`, matching the vendored vcpkg `llvm` port (18.1.6). Point `llvm-sys` at the install with the `LLVM_SYS_181_PREFIX` env var (set it via a user env var or a **git-ignored** `.cargo/config.toml [env]` — never commit a machine-specific path):
+  - Windows: build LLVM via the vendored vcpkg with the **dynamic-CRT** triplet — `runtime/vcpkg/vcpkg.exe install llvm:x64-windows-static-md` (static LLVM libs, `/MD` CRT). The `static-md` triplet matches Rust's default CRT (no `libcmt`/`msvcrt` conflict) and is required so a future plugin DLL (`CallDLL`) shares one CRT with the EXE; it's the same triplet the Allegro runtime uses. Use the **MSVC** Rust toolchain. vcpkg puts `llvm-config.exe` under `…/tools/llvm/`, but `llvm-sys` wants `<prefix>/bin/llvm-config.exe`, so expose it with a one-time junction placed directly under the install root, then point the env var at that prefix:
+
+    ```sh
+    # <inst> = runtime\vcpkg\installed\x64-windows-static-md
+    mkdir <inst>\llvm-sys-prefix
+    mklink /J <inst>\llvm-sys-prefix\bin <inst>\tools\llvm
+    # then set (user env var, or a git-ignored .cargo/config.toml [env]):
+    #   LLVM_SYS_181_PREFIX=<inst>\llvm-sys-prefix
+    ```
+
+    With `LLVM_SYS_181_PREFIX` set, `llvm-sys` ignores `PATH`, so any stale LLVM elsewhere on `PATH` won't interfere.
+  - Linux/CI: `apt-get install llvm-18-dev`, `LLVM_SYS_181_PREFIX=/usr/lib/llvm-18`.
+- **Do not use a static-CRT (`/MT`) LLVM** (e.g. a stock prebuilt) — it conflicts with Rust's dynamic CRT and breaks the plugin-DLL model. Stick to the `x64-windows-static-md` triplet, the same one the Allegro runtime uses.
+
+Keep the default `cargo test --workspace` / CI path LLVM-free — never add `--all-features` to the workspace-wide job (it would force `inkwell` and require an LLVM toolchain everywhere).
+
+### AOT codegen & linking (FD-048)
+
+With `--features llvm`, `cb --backend llvm <file>.cb [-o <out>]` emits a **native executable**. (The IR is not read yet — a fixed empty `main` returning 0 is emitted; real IR→LLVM lowering is a later FD. The full runtime closure is still linked, so that FD adds only codegen, not toolchain work.) The artifact defaults to the source stem + the platform exe suffix, next to the source; `-o`/`--output` overrides it.
+
+- **Link driver.** Linking goes through a compiler *driver* (`clang.exe` on Windows, `cc` on Unix), not a bare `ld`/`lld`, so the CRT/SDK lib paths are auto-discovered (no `vcvars`). On Windows the driver is found via `LLVM_SYS_181_PREFIX` (`<prefix>/bin/clang.exe`, then `<prefix>/tools/llvm/clang.exe`) before any PATH clang — so the pinned LLVM 18 clang is used, never a stray newer clang on PATH.
+- **Runtime closure.** The CoolBasic runtime is linked from whatever `cb-runtime-sys` built — the full Allegro closure, or the SDK-free core (CI / no-Allegro). `cb-runtime-sys` (manifest `links = "cb_runtime"`) publishes the lib dir, archive names, and closure-list path as `DEP_CB_RUNTIME_*`; `cb-backend-llvm`'s build script re-exports them as `CB_RT_*` env so the link step never hardcodes a lib list.
+- **Unix system libs.** Because the runtime is C++, the link step names `-lstdc++` (`-lc++` on macOS) **and `-lm`** explicitly — the `cc` driver pulls in neither, and the SDK-free closure list is empty, so a whole-archived `cb_math.o` (or real codegen calling runtime math) otherwise fails with `floor … DSO missing from command line`. `cb-runtime-sys` never names libm itself (the interp binary gets it from Rust's std); the standalone AOT link drives its own libs. Windows needs neither (the MSVC CRT supplies math).
+- **Windows `/MD` recipe (refined).** To keep the dynamic CRT (matching Rust + the plugin-DLL model): `-Xlinker /nodefaultlib:libcmt` (drop clang's static-CRT default) **plus explicit** `-Xlinker /defaultlib:msvcrt /defaultlib:vcruntime /defaultlib:ucrt`. The explicit defaultlibs are load-bearing: `-fms-runtime-lib=dll` only sets a clang *compile*-phase dependent-lib, and no compile phase runs when linking a pre-built LLVM object — without them `mainCRTStartup` (which calls `main`) is unresolved (LNK2001) for a lazily-linked empty `main`. The produced exe imports `VCRUNTIME140.dll` + `api-ms-win-crt-*` (dynamic CRT), no `libcmt`.
 
 ## Language reference
 

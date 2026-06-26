@@ -7,7 +7,7 @@
 //! so a future second binary can reuse them (FD-044). Selecting the LLVM backend
 //! reports "not yet implemented" (exit 3) until codegen lands (FD-025).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cb_backend_api::{BackendErrorKind, BackendOutcome};
@@ -41,6 +41,12 @@ struct Cli {
     /// skips execution).
     #[arg(long)]
     dump_ir: bool,
+
+    /// Output path for the compiled artifact (AOT backends only). Defaults to
+    /// the source file's stem next to it, plus the platform exe suffix. Accepted
+    /// but ignored by the interpreter backend.
+    #[arg(short = 'o', long = "output", value_name = "PATH")]
+    output: Option<PathBuf>,
 
     /// CoolBasic source file to compile.
     #[arg(value_name = "FILE")]
@@ -83,12 +89,24 @@ fn default_backend() -> Option<Backend> {
 /// single feature-gated dispatch point: the run site below calls
 /// `backend.execute(...)` with no backend-specific `match`. In a no-backend
 /// build `Backend` is uninhabited, so the body is an empty (diverging) match.
-fn make_backend(sel: Backend) -> Box<dyn cb_backend_api::Backend> {
+///
+/// `source`/`output` are injected here (FD-048 decision 3): the AOT (llvm)
+/// backend needs the artifact path, which the `Backend::execute` signature does
+/// not carry. The interpreter ignores them.
+fn make_backend(
+    sel: Backend,
+    source: &Path,
+    output: Option<PathBuf>,
+) -> Box<dyn cb_backend_api::Backend> {
+    // Bind both so the interp arm and a no-backend build (uninhabited `Backend`,
+    // empty match) don't warn on the unused injected paths; the llvm arm
+    // consumes them below.
+    let _ = (source, &output);
     match sel {
         #[cfg(feature = "interp")]
         Backend::Interp => Box::new(cb_backend_interp::InterpBackend),
         #[cfg(feature = "llvm")]
-        Backend::Llvm => Box::new(cb_backend_llvm::LlvmBackend),
+        Backend::Llvm => Box::new(cb_backend_llvm::LlvmBackend::new(source.to_owned(), output)),
     }
 }
 
@@ -122,6 +140,7 @@ fn main() -> ExitCode {
         backend: backend_arg,
         dump_ast,
         dump_ir,
+        output,
         file: path,
     } = Cli::parse();
 
@@ -132,13 +151,13 @@ fn main() -> ExitCode {
     // deferred to the point a program would actually run (below).
     let backend: Option<Box<dyn cb_backend_api::Backend>> = match backend_arg {
         Some(name) => match parse_backend(&name) {
-            Ok(b) => Some(make_backend(b)),
+            Ok(b) => Some(make_backend(b, &path, output.clone())),
             Err(msg) => {
                 eprintln!("cb: {msg}");
                 return ExitCode::from(exit::USAGE);
             }
         },
-        None => default_backend().map(make_backend),
+        None => default_backend().map(|b| make_backend(b, &path, output.clone())),
     };
 
     // Run the shared front-end pipeline. It prints diagnostics and any AST/IR
