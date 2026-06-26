@@ -204,6 +204,19 @@ unsafe extern "C" {
     /// and receive the hook table back. See [`runtime_init`] for the safe
     /// wrapper. Each plugin DLL exports this alongside `cb_runtime_get_catalog`.
     pub fn cb_runtime_init(host: *const CbHostApi) -> *const CbRuntimeHooks;
+
+    /// Teardown-registration seam (FD-043). A functionality module registers an
+    /// at-exit teardown the `about_to_exit` hook will dispatch to, without core
+    /// referencing its Allegro symbols. Bare symbol like the conversion/refcount
+    /// primitives above — not a catalog row. Currently registered only on the
+    /// C++ side (graphics init); declared here for completeness/tests.
+    pub fn cb_runtime_register_teardown(fn_ptr: extern "C" fn());
+
+    /// Instrumentation hook — how many times the `about_to_exit` teardown
+    /// dispatch has run. Bare symbol; used by tests to assert the teardown
+    /// channel fires (FD-043). Defined in the Allegro-free `cb_host` TU, so it
+    /// links in both the full and SDK-free builds.
+    pub fn cb_rt_test_teardown_count() -> i32;
 }
 
 /// Fetch the catalog pointer the linked runtime exports and null-check it.
@@ -1520,8 +1533,9 @@ mod tests {
     #[test]
     fn runtime_init_roundtrip() {
         // FD-015: handing the runtime a host API returns a non-null hook table
-        // whose size guard matches our mirror struct; about_to_exit is
-        // reserved (null) for now.
+        // whose size guard matches our mirror struct. FD-043: about_to_exit is
+        // now wired (the teardown-dispatch entry point), so the slot is
+        // non-null in every build, and invoking it bumps the teardown counter.
         extern "C" fn noop_exit(_code: i32) {}
         extern "C" fn noop_error(_msg: *const CbString) {}
         static HOST: CbHostApi = CbHostApi {
@@ -1532,7 +1546,15 @@ mod tests {
         };
         let hooks = runtime_init(&HOST).expect("runtime_init should return a hook table");
         assert_eq!(hooks.size as usize, std::mem::size_of::<CbRuntimeHooks>());
-        assert!(hooks.about_to_exit.is_none());
+        let about_to_exit = hooks
+            .about_to_exit
+            .expect("FD-043: about_to_exit is wired to the teardown dispatch");
+        // Firing the hook runs the (possibly empty) teardown list exactly once.
+        // Nothing else in this test binary fires it, so the delta is exact.
+        let before = unsafe { cb_rt_test_teardown_count() };
+        about_to_exit();
+        let after = unsafe { cb_rt_test_teardown_count() };
+        assert_eq!(after - before, 1, "about_to_exit should dispatch once");
     }
 
     #[test]

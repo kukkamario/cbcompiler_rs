@@ -626,6 +626,63 @@ fn observer_sees_runtime_error() {
     assert_eq!(*seen.borrow(), vec!["boom".to_string()]);
 }
 
+// FD-043: the runtime teardown hook fires `on_exit` exactly once on every
+// termination path, carrying the resolved process exit code.
+struct ExitRecorder {
+    exits: std::rc::Rc<std::cell::RefCell<Vec<i32>>>,
+}
+
+impl Observer for ExitRecorder {
+    fn on_exit(&mut self, exit_code: i32) {
+        self.exits.borrow_mut().push(exit_code);
+    }
+}
+
+/// Run `src` with an [`ExitRecorder`] attached and return the recorded exit
+/// codes — one entry per `on_exit` firing, so a correct run yields exactly one.
+/// The interpreter owns the observer, so we clone the shared cell to read it
+/// after `run` (which may be `Ok` or `Err` — we don't care which here).
+fn run_record_exits(src: &str) -> Vec<i32> {
+    let (ir, interner) = compile_program(src);
+    let recorder = ExitRecorder {
+        exits: Default::default(),
+    };
+    let seen = recorder.exits.clone();
+    let mut output = Vec::new();
+    {
+        let mut interp = cb_backend_interp::Interpreter::new(&ir, &interner)
+            .with_stdout(Box::new(&mut output as &mut dyn Write))
+            .with_observer(recorder);
+        let _ = interp.run();
+    }
+    seen.borrow().clone()
+}
+
+#[test]
+fn on_exit_fires_once_normal_completion() {
+    assert_eq!(run_record_exits("Print Str(1)"), vec![0]);
+}
+
+#[test]
+fn on_exit_fires_once_end() {
+    assert_eq!(run_record_exits("End"), vec![0]);
+}
+
+#[test]
+fn on_exit_fires_once_request_exit() {
+    assert_eq!(run_record_exits("TestRequestExit(7)"), vec![7]);
+}
+
+#[test]
+fn on_exit_fires_once_div_by_zero_trap() {
+    assert_eq!(run_record_exits("Print Str(1 / 0)"), vec![1]);
+}
+
+#[test]
+fn on_exit_fires_once_make_error() {
+    assert_eq!(run_record_exits("MakeError(\"boom\")"), vec![1]);
+}
+
 // ── Trap / error tests ────────────────────────────────────────────
 
 fn run_err(src: &str) -> InterpError {

@@ -145,6 +145,12 @@ private:
 // DrawScreen frame hook (cb_gfx.cpp) can call it without including audio headers.
 void reap();
 
+// At-exit flush (FD-043, defined in cb_sound.cpp): destroy every live channel
+// unconditionally — the teardown counterpart to reap(). Called from the
+// graphics about_to_exit teardown before al_uninstall_system tears audio down.
+// Allegro-free declaration so cb_gfx.cpp can call it without audio headers.
+void flush_all();
+
 }  // namespace cb::sound
 
 #endif  // CB_SOUND_H

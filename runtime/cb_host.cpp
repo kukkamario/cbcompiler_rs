@@ -3,7 +3,8 @@
 // CORE TU: stores the host API the backend delivers at startup and exposes it
 // to the functionality `cb_rt_*` functions via cb_host(). Allegro-free and
 // functionality-agnostic, so it belongs in cb_runtime_core (FD-016) — the
-// hooks it returns are currently empty, so it references nothing outside core.
+// about_to_exit hook it returns dispatches only to callbacks registered via the
+// teardown seam below (FD-043), so core still references nothing outside core.
 //
 // Each module that links cb_runtime_core (the main runtime, and each plugin
 // DLL) gets its own g_host; the driver calls cb_runtime_init once per module.
@@ -14,12 +15,55 @@
 // callers null-check before use.
 static const CbHostApi* g_host = nullptr;
 
-// The hook table handed back to the host. about_to_exit is reserved (null) for
-// now — wiring it to a subsystem teardown would pull a functionality symbol
-// into core, so window-close tears down its own display inline instead.
+// Teardown-registration seam (FD-043). Functionality modules (e.g. graphics)
+// register an at-exit teardown here during their lazy init; about_to_exit
+// dispatches to all of them via run_teardowns(). Keeping the array in core
+// means about_to_exit never references an Allegro symbol, so the
+// cb_runtime_core / functionality split (FD-016) holds and the SDK-free build
+// — which registers nothing — gets a clean no-op. Single-threaded by the same
+// contract as the trap channel; no synchronization needed.
+static constexpr int CB_MAX_TEARDOWNS = 8;
+static void (*g_teardowns[CB_MAX_TEARDOWNS])(void) = {};
+static int g_teardown_count = 0;
+static int g_teardown_runs = 0;
+
+extern "C" void cb_runtime_register_teardown(void (*fn)(void)) {
+    if (fn == nullptr) {
+        return;
+    }
+    // De-dupe by pointer so multiple init sites registering the same coarse
+    // teardown is harmless; silently drop once the fixed array is full.
+    for (int i = 0; i < g_teardown_count; ++i) {
+        if (g_teardowns[i] == fn) {
+            return;
+        }
+    }
+    if (g_teardown_count < CB_MAX_TEARDOWNS) {
+        g_teardowns[g_teardown_count++] = fn;
+    }
+}
+
+// The about_to_exit hook (FD-043): fire every registered teardown. The host
+// interpreter calls this at most once per run, but each registered callback is
+// independently idempotent so the inline window-close path (which exits before
+// the hook) can coexist with it.
+static void run_teardowns(void) {
+    ++g_teardown_runs;
+    for (int i = 0; i < g_teardown_count; ++i) {
+        g_teardowns[i]();
+    }
+}
+
+extern "C" int32_t cb_rt_test_teardown_count(void) {
+    return g_teardown_runs;
+}
+
+// The hook table handed back to the host. about_to_exit dispatches to the
+// teardown seam above; in the SDK-free build nothing registers, so it is an
+// empty no-op (FD-043).
 static const CbRuntimeHooks g_hooks = {
     /* size          */ sizeof(CbRuntimeHooks),
-    /* about_to_exit */ nullptr,
+    /* about_to_exit */ run_teardowns,
 };
 
 extern "C" const CbRuntimeHooks* cb_runtime_init(const CbHostApi* host) {

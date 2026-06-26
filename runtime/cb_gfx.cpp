@@ -158,6 +158,24 @@ void apply_alpha_blender(void) {
                             ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ONE);
 }
 
+// FD-043: coarse at-exit teardown, registered with the core teardown seam the
+// first time Allegro comes up (ensure_init). The about_to_exit hook dispatches
+// here on a clean program exit: flush any live audio channels, then let Allegro
+// release the display, addons, and audio subsystem in one call — mirroring the
+// cbEnchanted reference (cleanup() + al_uninstall_system()). Guarded to run at
+// most once: the window-close path in DrawScreen already destroys the display
+// inline and exits, after which about_to_exit still fires this, and
+// al_uninstall_system() is not safe to call twice.
+static void allegro_teardown(void) {
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    done = true;
+    cb::sound::flush_all();
+    al_uninstall_system();
+}
+
 // Lazily initialize the Allegro subsystems the graphics runtime needs. Safe to
 // call repeatedly. Image functions call this too, so images work (on memory
 // bitmaps) before any window is opened.
@@ -205,6 +223,16 @@ static void ensure_init(void) {
     // an alpha channel and source-over blending.
     apply_bitmap_defaults();
     apply_alpha_blender();
+
+    // FD-043: now that Allegro is up, register the at-exit teardown so a clean
+    // program exit releases the display/audio instead of leaning on process
+    // teardown. The seam de-dupes by pointer; the static guard skips the
+    // re-registration cost on every later ensure_init call.
+    static bool teardown_registered = false;
+    if (!teardown_registered) {
+        teardown_registered = true;
+        cb_runtime_register_teardown(&allegro_teardown);
+    }
 }
 
 // ─── Screen management ─────────────────────────────────────────────────
@@ -358,12 +386,14 @@ static void do_draw_screen(bool clear_after) {
         cb::input::handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
             // FD-015: route window-close through the trap channel for a clean
-            // Halt/Ok(0) termination instead of exit(0). Tear down our own
-            // display here (about_to_exit is reserved/null), ask the host to
-            // exit, and return — the interpreter drains the pending Exit(0)
-            // right after this runtime call returns. The `return` is essential:
-            // `display` is now null and the code below would deref it. Fall
-            // back to exit(0) only if no host is connected.
+            // Halt/Ok(0) termination instead of exit(0). Destroy our display
+            // here, ask the host to exit, and return — the interpreter drains
+            // the pending Exit(0) right after this runtime call returns, and the
+            // FD-043 about_to_exit teardown (al_uninstall_system) runs then. The
+            // `return` is essential: `display` is now null and the code below
+            // would deref it. The inline destroy can't wait for about_to_exit
+            // for that reason; the teardown's al_uninstall_system tolerates an
+            // already-destroyed display. Fall back to exit(0) with no host.
             al_destroy_display(g_display);
             g_display = nullptr;
             const CbHostApi* h = cb_host();

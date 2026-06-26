@@ -111,12 +111,15 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     /// literals/coercions and to dispatch concat. Lives in .rodata of the
     /// loaded runtime library; never moves, never drops.
     string_api: &'static CbStringApi,
-    /// Hook table returned by the FD-015 `cb_runtime_init` handshake. Held for
-    /// the reserved `about_to_exit` teardown the design leaves room for; null
-    /// for now, but stashing it keeps the channel wired end-to-end and proves
-    /// the handshake succeeded at construction.
-    #[allow(dead_code)]
+    /// Hook table returned by the FD-015 `cb_runtime_init` handshake. The
+    /// reserved `about_to_exit` teardown (FD-043) is fired from `run` via
+    /// [`Interpreter::fire_about_to_exit`]; the slot is null in the SDK-free
+    /// build (nothing to tear down) and non-null in the full Allegro build.
     runtime_hooks: &'static cb_runtime_sys::CbRuntimeHooks,
+    /// FD-043: guards `about_to_exit`/`on_exit` to fire at most once. `run`
+    /// takes `&mut self` and is re-runnable in principle, so latch on first
+    /// termination.
+    about_to_exit_fired: bool,
     /// Runtime function bindings: the `symbol → fn_ptr` overlay the interpreter
     /// dispatches through (FD-045). The IR carries only symbols; this table,
     /// resolved once at startup from the linked executable runtime, supplies the
@@ -170,6 +173,7 @@ impl<'a> Interpreter<'a, NoopObserver> {
             observer: NoopObserver,
             string_api,
             runtime_hooks,
+            about_to_exit_fired: false,
             bindings,
         }
     }
@@ -194,6 +198,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             observer,
             string_api: self.string_api,
             runtime_hooks: self.runtime_hooks,
+            about_to_exit_fired: self.about_to_exit_fired,
             bindings: self.bindings,
         }
     }
@@ -201,7 +206,45 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     /// Run the program. `Ok(code)` is the process exit code (0 for normal
     /// completion / `End`, the `MakeError` code for an aborting program);
     /// `Err` is a genuine interpreter trap or internal error.
+    ///
+    /// FD-043: this is a thin wrapper that fires the runtime teardown hook
+    /// exactly once, on every termination path, after [`run_inner`] returns.
+    /// The whole body lives in `run_inner` so the hook is not bypassed by the
+    /// early `?`/`return` paths that precede `exec_loop` (`find_main`,
+    /// non-user-`@main`, `push_frame`).
+    ///
+    /// [`run_inner`]: Interpreter::run_inner
     pub fn run(&mut self) -> Result<i32, InterpError> {
+        let result = self.run_inner();
+        // The driver maps a trap/runtime error to process exit 1; surface that
+        // same code to the teardown hook so a clean exit and an aborting exit
+        // are distinguishable. `request_exit`/`Halt` already fold into `Ok`.
+        let exit_code = match &result {
+            Ok(code) => *code,
+            Err(_) => 1,
+        };
+        self.fire_about_to_exit(exit_code);
+        result
+    }
+
+    /// FD-043: notify the runtime that the program is about to exit. Fires the
+    /// observer's `on_exit` and the runtime's `about_to_exit` C hook, latched
+    /// to run at most once. The hook must not free the string/heap allocator:
+    /// the interpreter's own `CbStringHandle`s drop *after* `run` returns, so
+    /// the string ABI must stay live. Coarse Allegro teardown (display/audio)
+    /// touches neither, so this is safe.
+    fn fire_about_to_exit(&mut self, exit_code: i32) {
+        if self.about_to_exit_fired {
+            return;
+        }
+        self.about_to_exit_fired = true;
+        self.observer.on_exit(exit_code);
+        if let Some(about_to_exit) = self.runtime_hooks.about_to_exit {
+            about_to_exit();
+        }
+    }
+
+    fn run_inner(&mut self) -> Result<i32, InterpError> {
         let main_id = self.find_main()?;
         let body_index = match &self.program.func_table[main_id.0 as usize].kind {
             FuncKind::UserDefined { body_index } => *body_index,

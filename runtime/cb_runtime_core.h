@@ -210,6 +210,19 @@ const CbRuntimeHooks* cb_runtime_init(const CbHostApi* host);
    cb_runtime_init has run. */
 const CbHostApi* cb_host(void);
 
+/* Teardown-registration seam (FD-043). `about_to_exit` (the hook table slot)
+   dispatches to every callback registered here, so a functionality module can
+   register an at-exit teardown without core referencing its Allegro symbols —
+   preserving the cb_runtime_core / functionality split (FD-016). Registration
+   is de-duped by pointer, so multiple init sites registering the same callback
+   is safe. The SDK-free build registers nothing, so about_to_exit is a no-op. */
+void cb_runtime_register_teardown(void (*fn)(void));
+
+/* Instrumentation hook for tests — number of times the about_to_exit dispatch
+   has run. Bare symbol like cb_rt_string_test_refcount; not a CB_FN, not in any
+   catalog. Lets a Rust-side test assert the teardown channel fired. */
+int32_t cb_rt_test_teardown_count(void);
+
 #ifdef __cplusplus
 }
 #endif
