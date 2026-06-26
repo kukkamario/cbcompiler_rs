@@ -1,6 +1,6 @@
 # FD-047: LLVM Dependency Setup
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** Medium — Cargo/CI wiring is quick, but the Windows toolchain requires a one-time (multi-hour) vcpkg build of LLVM 18 with the dynamic-CRT `x64-windows-static-md` triplet.
 **Impact:** Unblocks the first real LLVM codegen FD by adding `inkwell`/LLVM as an *opt-in* dependency without breaking the default LLVM-free build, test, or CI paths.
@@ -33,7 +33,14 @@ Affected crates:
 
 ### Known snags / risks
 
-- **vcpkg `llvm-config` layout.** vcpkg installs `llvm-config.exe` under `installed/x64-windows-static-md/tools/llvm/`, but `llvm-sys` looks for `$LLVM_SYS_181_PREFIX/bin/llvm-config.exe`. Point the prefix at a directory whose `bin/` exposes `llvm-config` (a junction/copy into the install's `bin/`, or add `tools/llvm` to `PATH` and leave the prefix unset). Exact value finalized once the vcpkg build lands.
+- **vcpkg `llvm-config` layout (resolved).** vcpkg installs `llvm-config.exe` under `installed/x64-windows-static-md/tools/llvm/`, but `llvm-sys` looks for `$LLVM_SYS_181_PREFIX/bin/llvm-config.exe`. A plain copy into another `bin/` breaks llvm-config's relative path computation (it derives the prefix as its own grandparent, so it would report the wrong `libdir`). The working recipe: a directory junction placed **directly under the install root** so both the junction path and the real `tools/llvm` path resolve their grandparent to the same install root:
+  ```sh
+  # <inst> = runtime\vcpkg\installed\x64-windows-static-md
+  mkdir <inst>\llvm-sys-prefix
+  mklink /J <inst>\llvm-sys-prefix\bin <inst>\tools\llvm
+  # LLVM_SYS_181_PREFIX = <inst>\llvm-sys-prefix
+  ```
+  Verified: with this env var set, `llvm-sys` links the vcpkg LLVM 18 and ignores a stale LLVM 22 still on `PATH`.
 - **One-time vcpkg LLVM build is heavy** (multi-hour, tens of GB), but cached in vcpkg's binary cache afterward and reproducible from the pinned baseline. libxml2/zlib/etc. arrive as vcpkg dependencies, so there is no hand-managed `xml2s.lib` (the earlier prebuilt-`G:\tools` path hit a missing `xml2s.lib` because that distribution listed libxml2 in `--system-libs` without shipping it).
 - **`Cargo.lock` regen under `--locked`.** Adding `inkwell` changes the resolved graph; the lockfile (currently inkwell-free) must be regenerated and committed in the same change or CI's `cargo test --workspace --locked` fails. The lock lists `inkwell`/`llvm-sys` as nodes, but they are still not *built* in the default path.
 - **No `unsafe_code` exception needed yet.** The smoke path (`Context::create()` + `create_module`) is entirely *safe* inkwell API, so `cb-backend-llvm` keeps `[lints] workspace = true` (inherits `deny`). A later lowering FD that trips `unsafe` can mirror `cb-runtime-sys`'s local `unsafe_code = "allow"`.
@@ -53,7 +60,7 @@ Affected crates:
 ## Verification
 
 - **Default build untouched:** `cargo build --workspace` and `cargo test --workspace --locked` succeed on a machine with **no** LLVM installed (the core invariant this FD must not break). `inkwell`/`llvm-sys` appear in `Cargo.lock` but are not fetched or built.
-- **Feature build links LLVM:** with `LLVM_SYS_181_PREFIX` set (the vcpkg `x64-windows-static-md` install on Windows, `/usr/lib/llvm-18` on Linux), `cargo test -p cb-backend-llvm --features codegen` and `cargo build -p cb-driver --features llvm` both compile and link — no `libcmt`/`msvcrt` CRT conflict (the `static-md` triplet's dynamic CRT matches Rust's default).
+- **Feature build links LLVM (verified locally):** with `LLVM_SYS_181_PREFIX` set (the vcpkg `x64-windows-static-md` junction prefix on Windows, `/usr/lib/llvm-18` on Linux), `cargo test -p cb-backend-llvm --features codegen` passes the smoke test and `cargo build -p cb-driver --features llvm` links — no `libcmt`/`msvcrt` CRT conflict (the `static-md` triplet's dynamic CRT matches Rust's default), no missing STL symbol, no `xml2s.lib` (this LLVM build has libxml2 off).
 - **Runtime behavior unchanged:** `cb --backend llvm <file>` still exits 3 (`unimplemented`) — this FD adds the dependency, not codegen. The existing FD-025 exit-code test stays green.
 - **Linkage smoke:** a `#[cfg(all(test, feature = "codegen"))]` unit test that constructs an `inkwell::Context` and an empty `Module` passes (`cargo test -p cb-backend-llvm --features codegen`). Keep it in a gated `mod` so the no-feature build has no dead code.
 - **CI guard:** the new Linux smoke job goes green; the existing `linux-sdk-free` job is unchanged and still runs LLVM-free.
