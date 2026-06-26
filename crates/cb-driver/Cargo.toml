@@ -12,7 +12,7 @@ path = "src/main.rs"
 [features]
 default = ["interp"]
 interp = ["dep:cb-backend-interp"]
-llvm = ["dep:cb-backend-llvm"]
+llvm = ["dep:cb-backend-llvm", "cb-backend-llvm/codegen"]
 
 [dependencies]
 cb-backend-api = { path = "../cb-backend-api" }

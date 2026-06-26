@@ -31,3 +31,16 @@ impl Backend for LlvmBackend {
         ))
     }
 }
+
+// Linkage smoke test (FD-047): proves `inkwell` and the underlying LLVM 18
+// toolchain link and a context/module can be constructed. Gated on `codegen`
+// so the default LLVM-free build has no dead code and needs no LLVM install.
+#[cfg(all(test, feature = "codegen"))]
+mod codegen_smoke {
+    #[test]
+    fn context_and_module_boot() {
+        let ctx = inkwell::context::Context::create();
+        let module = ctx.create_module("cb_smoke");
+        assert_eq!(module.get_name().to_str(), Ok("cb_smoke"));
+    }
+}
