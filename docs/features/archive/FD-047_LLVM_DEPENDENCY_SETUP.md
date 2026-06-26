@@ -1,6 +1,7 @@
 # FD-047: LLVM Dependency Setup
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-26
 **Priority:** Medium
 **Effort:** Medium — Cargo/CI wiring is quick, but the Windows toolchain requires a one-time (multi-hour) vcpkg build of LLVM 18 with the dynamic-CRT `x64-windows-static-md` triplet.
 **Impact:** Unblocks the first real LLVM codegen FD by adding `inkwell`/LLVM as an *opt-in* dependency without breaking the default LLVM-free build, test, or CI paths.
