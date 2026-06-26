@@ -23,7 +23,7 @@ Under `#[cfg(feature = "codegen")]`, replace the stub `execute` with a minimal A
 1. **Build module** — `Context`/`Module`, define `i32 @main() { ret i32 0 }`. (`program` is accepted but unread; the empty `main` is independent of it.)
 2. **Emit object** — `Target::initialize_native`, build a `TargetMachine` for the host triple (default reloc/codegen model; `RelocMode::PIC` on Linux), write `.obj`/`.o` via `TargetMachine::write_to_file`.
 3. **Link** — invoke the `clang`/`cc` driver (decision 1) to link the object + CRT startup + the CoolBasic runtime closure (decision 2) into a native exe, `/MD`-consistent on Windows. The generated `main` calls nothing, so the runtime is present but inert.
-4. **Return `BackendOutcome::Produced { artifact }`** — the driver already prints `cb: wrote <path>` and exits 0 (`main.rs:160`).
+4. **Return `BackendOutcome::Produced { artifact }`** — the driver already prints `cb: wrote <path>` and exits 0 (`main.rs:179`).
 
 The no-`codegen` stub still returns `unimplemented`. Frontend/sema/IR are untouched; the `interp` path is unaffected (all new code is gated on `codegen`).
 
