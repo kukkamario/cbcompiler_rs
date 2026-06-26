@@ -42,7 +42,23 @@ cargo clippy --workspace --all-targets -- -D warnings   # lint (when clippy is d
 cargo fmt --all                   # format
 ```
 
-There are no project-specific build steps yet. Update this section when there are.
+### Building the LLVM backend (opt-in)
+
+The default build is LLVM-free: `cargo build` / `cargo test --workspace` need no LLVM toolchain (`cb-backend-llvm` compiles as a stub, `inkwell` stays unbuilt). LLVM codegen is opt-in via the driver's `llvm` feature, which enables `cb-backend-llvm/codegen` and pulls in `inkwell` (FD-047).
+
+```sh
+cargo build --features llvm                       # driver with the llvm backend
+cargo test -p cb-backend-llvm --features codegen  # llvm-backend linkage smoke test
+```
+
+Requirements for the `llvm`/`codegen` feature (only then):
+
+- **LLVM 18** — pinned via inkwell `0.9` feature `llvm18-1` → `llvm-sys 181.x`, matching the vendored vcpkg `llvm` port (18.1.6). Point `llvm-sys` at the install with the `LLVM_SYS_181_PREFIX` env var (set it via a user env var or a **git-ignored** `.cargo/config.toml [env]` — never commit a machine-specific path):
+  - Windows: build LLVM via the vendored vcpkg with the **dynamic-CRT** triplet — `runtime/vcpkg/vcpkg.exe install llvm:x64-windows-static-md` (static LLVM libs, `/MD` CRT). The `static-md` triplet matches Rust's default CRT (no `libcmt`/`msvcrt` conflict) and is required so a future plugin DLL (`CallDLL`) shares one CRT with the EXE. Use the **MSVC** Rust toolchain. vcpkg puts `llvm-config.exe` under `installed/x64-windows-static-md/tools/llvm/`; `llvm-sys` expects `<prefix>/bin/llvm-config.exe`, so set `LLVM_SYS_181_PREFIX` to a dir whose `bin/` exposes `llvm-config` (junction/copy) or put `tools/llvm` on `PATH`.
+  - Linux/CI: `apt-get install llvm-18-dev`, `LLVM_SYS_181_PREFIX=/usr/lib/llvm-18`.
+- **Do not use a static-CRT (`/MT`) LLVM** (e.g. a stock prebuilt) — it conflicts with Rust's dynamic CRT and breaks the plugin-DLL model. Stick to the `x64-windows-static-md` triplet, the same one the Allegro runtime uses.
+
+Keep the default `cargo test --workspace` / CI path LLVM-free — never add `--all-features` to the workspace-wide job (it would force `inkwell` and require an LLVM toolchain everywhere).
 
 ## Language reference
 

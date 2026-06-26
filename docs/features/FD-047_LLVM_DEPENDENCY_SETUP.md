@@ -2,7 +2,7 @@
 
 **Status:** Open
 **Priority:** Medium
-**Effort:** Low–Medium (1-2 hours) — pure Cargo/CI wiring; the Windows LLVM toolchain is already installed (`G:\tools\llvm-22.1.0`), so there is no acquisition work.
+**Effort:** Medium — Cargo/CI wiring is quick, but the Windows toolchain requires a one-time (multi-hour) vcpkg build of LLVM 18 with the dynamic-CRT `x64-windows-static-md` triplet.
 **Impact:** Unblocks the first real LLVM codegen FD by adding `inkwell`/LLVM as an *opt-in* dependency without breaking the default LLVM-free build, test, or CI paths.
 
 ## Problem
@@ -21,19 +21,21 @@ Add `inkwell` as an **optional** dependency of `cb-backend-llvm`, gated behind a
 Affected crates:
 - **`cb-backend-llvm`** — add optional `inkwell` dep + `codegen` feature; `#[cfg(feature = "codegen")]` a minimal "context boots" path (build a `Context`, an empty `Module`) to prove linkage; keep the no-feature stub as the default-build path.
 - **`cb-driver`** — chain its `llvm` feature to `cb-backend-llvm/codegen`. No behavior change when `llvm` is off.
-- **Workspace `Cargo.toml`** — add `inkwell` to `[workspace.dependencies]` pinned to LLVM 22: `inkwell = { version = "0.9", features = ["llvm22-1"], default-features = false }`. (Note the `-1` suffix: LLVM 18+ uses `llvmNN-1`, not `llvmNN-0`. Real codegen will later add a target feature such as `target-x86`; the linkage smoke needs none.)
+- **Workspace `Cargo.toml`** — add `inkwell` to `[workspace.dependencies]` pinned to LLVM 18: `inkwell = { version = "0.9", features = ["llvm18-1"], default-features = false }`. (Note the `-1` suffix: LLVM 18+ uses `llvmNN-1`, not `llvmNN-0`. Real codegen will later add a target feature such as `target-x86`; the linkage smoke needs none.)
 - **Docs/CI** — document the `LLVM_SYS_<ver>_PREFIX` setup for Windows + Linux; decide on a CI job that builds (not necessarily runs) `--features llvm`.
 
-### Decisions (resolved — FD-deep analysis 2026-06-26)
+### Decisions (resolved — FD-deep analysis + implementation 2026-06-26)
 
-1. **LLVM/inkwell version → LLVM 22.** Pin inkwell `0.9` with feature `llvm22-1` → `llvm-sys 221.x`. This is inkwell's newest supported major *and* exactly matches the LLVM 22.1.0 already installed on the dev box, so there is zero acquisition friction. Env var is `LLVM_SYS_221_PREFIX`. Fallback if Linux CI can't provision 22: pin one major back (`llvm21-1`), at the cost of a second local install.
-2. **CI scope → Linux-only, build-only smoke job.** Add `cargo build -p cb-backend-llvm --features codegen` on Linux, provisioning LLVM 22 via apt.llvm.org and setting `LLVM_SYS_221_PREFIX=/usr/lib/llvm-22`. **No Windows CI** (not worth it for a link check). The existing `linux-sdk-free` job must **never** gain `--all-features`/`--features llvm` — that's the one realistic way the LLVM-free invariant regresses. This guard is what makes adding the dep *now* worthwhile rather than dead weight ahead of codegen.
-3. **Windows toolchain source → consume the existing install.** A complete MSVC-ABI static LLVM 22.1.0 distribution (246 static `.lib`s + headers + `llvm-config`, `--shared-mode = static`) is already at `G:\tools\llvm-22.1.0`. No install needed — just set `LLVM_SYS_221_PREFIX=G:\tools\llvm-22.1.0` via a user env var or a **git-ignored** `.cargo/config.toml [env]` (never commit the machine-specific absolute path). Must use the **MSVC** Rust toolchain (matches the MSVC-built LLVM); a `-gnu`/MinGW toolchain or a stray MinGW `llvm-config` on PATH would fail to link.
+1. **LLVM/inkwell version → LLVM 18.1.6 via vcpkg.** Pin inkwell `0.9` with feature `llvm18-1` → `llvm-sys 181.x` (env var `LLVM_SYS_181_PREFIX`). The version is dictated by the project's vendored vcpkg baseline, which pins the `llvm` port at **18.1.6**; building LLVM through the existing vcpkg keeps the toolchain reproducible and consistent with the Allegro runtime. LLVM 18 is also more battle-tested in inkwell than 22. (Originally scoped to LLVM 22 against a prebuilt `G:\tools` install — rejected, see Decision 3.)
+2. **CI scope → Linux-only smoke job that links LLVM.** Add `cargo test -p cb-backend-llvm --features codegen` on Linux, provisioning LLVM 18 via apt (`llvm-18-dev`) and setting `LLVM_SYS_181_PREFIX=/usr/lib/llvm-18`. Use `cargo test`, **not** `cargo build`: building the rlib alone compiles against `inkwell` but never *links* LLVM, so a build-only job would miss link breakage — the trivial smoke test forces the link. **No Windows CI** (not worth it for a link check). The existing `linux-sdk-free` job must **never** gain `--all-features`/`--features llvm` — that's the one realistic way the LLVM-free invariant regresses. This guard is what makes adding the dep *now* worthwhile rather than dead weight ahead of codegen.
+3. **Windows toolchain source → build LLVM via the vendored vcpkg, `x64-windows-static-md` triplet.** That triplet is static library linkage + **dynamic CRT (`/MD`)**: static LLVM libs embedded into the `cb` binary (no LLVM DLL to ship) but the dynamic CRT, which (a) matches the Rust MSVC default — no `libcmt`/`msvcrt` conflict — and (b) is required for a future plugin-DLL system (`CallDLL`) so the EXE and plugin DLLs share one CRT heap. It is the same triplet the Allegro runtime already uses, landing the whole project on one CRT model. Point `LLVM_SYS_181_PREFIX` at the vcpkg install (with `bin/llvm-config.exe` available — see snags).
+   *Rejected — the prebuilt `G:\tools\llvm-22.1.0`:* it is a **static-CRT (`/MT`)** build (wrong for the plugin-DLL direction) and was built with a newer MSVC toolset than the local one, leaving an unresolved STL symbol (`__std_find_first_of_trivial_pos_1`) at link. Using it would force `+crt-static` on the entire Rust build.
 
 ### Known snags / risks
 
-- **`xml2s.lib` first-build failure (verified).** `llvm-config --system-libs` on the installed LLVM emits `xml2s.lib` (static libxml2), which is **not** present in `G:\tools\llvm-22.1.0\lib`. The first `cargo build --features codegen` will likely fail at link with an unresolved `xml2s.lib`. Mitigate by either supplying a static libxml2 on the lib path (the repo already vendors vcpkg → `vcpkg install libxml2:x64-windows-static-md`) or, cleaner, using an LLVM built with `-DLLVM_ENABLE_LIBXML2=OFF`.
-- **`Cargo.lock` regen under `--locked`.** Adding `inkwell` changes the resolved graph; the lockfile (currently inkwell-free) must be regenerated and committed in the same change or CI's `cargo test --workspace --locked` fails. The lock will then list `inkwell`/`llvm-sys` as nodes, but they are still not *built* in the default path.
+- **vcpkg `llvm-config` layout.** vcpkg installs `llvm-config.exe` under `installed/x64-windows-static-md/tools/llvm/`, but `llvm-sys` looks for `$LLVM_SYS_181_PREFIX/bin/llvm-config.exe`. Point the prefix at a directory whose `bin/` exposes `llvm-config` (a junction/copy into the install's `bin/`, or add `tools/llvm` to `PATH` and leave the prefix unset). Exact value finalized once the vcpkg build lands.
+- **One-time vcpkg LLVM build is heavy** (multi-hour, tens of GB), but cached in vcpkg's binary cache afterward and reproducible from the pinned baseline. libxml2/zlib/etc. arrive as vcpkg dependencies, so there is no hand-managed `xml2s.lib` (the earlier prebuilt-`G:\tools` path hit a missing `xml2s.lib` because that distribution listed libxml2 in `--system-libs` without shipping it).
+- **`Cargo.lock` regen under `--locked`.** Adding `inkwell` changes the resolved graph; the lockfile (currently inkwell-free) must be regenerated and committed in the same change or CI's `cargo test --workspace --locked` fails. The lock lists `inkwell`/`llvm-sys` as nodes, but they are still not *built* in the default path.
 - **No `unsafe_code` exception needed yet.** The smoke path (`Context::create()` + `create_module`) is entirely *safe* inkwell API, so `cb-backend-llvm` keeps `[lints] workspace = true` (inherits `deny`). A later lowering FD that trips `unsafe` can mirror `cb-runtime-sys`'s local `unsafe_code = "allow"`.
 
 ## Files to Create/Modify
@@ -43,15 +45,15 @@ Affected crates:
 | `crates/cb-backend-llvm/Cargo.toml` | MODIFY | Add optional `inkwell` dep + `codegen` feature; replace the "kept out for now" comment |
 | `crates/cb-backend-llvm/src/lib.rs` | MODIFY | `#[cfg(feature = "codegen")]` path that constructs an `inkwell::Context`/empty `Module` to prove linkage; keep the no-feature stub returning `unimplemented` |
 | `crates/cb-driver/Cargo.toml` | MODIFY | `llvm` feature also enables `cb-backend-llvm/codegen` |
-| `Cargo.toml` (workspace) | MODIFY | Add `inkwell = { version = "0.9", features = ["llvm22-1"], default-features = false }` to `[workspace.dependencies]` |
-| `Cargo.lock` | MODIFY | Regenerate (now resolves `inkwell`/`llvm-sys`) so CI's `--locked` stays green |
-| `.github/workflows/ci.yml` | MODIFY | Add a Linux-only build-only smoke job: provision LLVM 22 (apt.llvm.org), set `LLVM_SYS_221_PREFIX=/usr/lib/llvm-22`, run `cargo build -p cb-backend-llvm --features codegen`. Leave the existing `linux-sdk-free` job untouched (no `--all-features`). |
-| `CLAUDE.md` / `docs/` | MODIFY | Document `LLVM_SYS_221_PREFIX` setup (Windows: `G:\tools\llvm-22.1.0`; Linux: `/usr/lib/llvm-22`), the MSVC-toolchain requirement, the `xml2s.lib` workaround, and the `--features llvm` build path |
+| `Cargo.toml` (workspace) | MODIFY | Add `inkwell = { version = "0.9", features = ["llvm18-1"], default-features = false }` to `[workspace.dependencies]` |
+| `Cargo.lock` | MODIFY | Regenerate (now resolves `inkwell`/`llvm-sys 181.x`) so CI's `--locked` stays green |
+| `.github/workflows/ci.yml` | MODIFY | Add a Linux-only smoke job: provision LLVM 18 (`llvm-18-dev`), set `LLVM_SYS_181_PREFIX=/usr/lib/llvm-18`, run `cargo test -p cb-backend-llvm --features codegen` (links LLVM + runs the trivial smoke test). Leave the existing `linux-sdk-free` job untouched (no `--all-features`). |
+| `CLAUDE.md` / `docs/` | MODIFY | Document the `LLVM_SYS_181_PREFIX` setup (Windows: vcpkg `x64-windows-static-md` install; Linux: `/usr/lib/llvm-18`), the dynamic-CRT rationale, and the `--features llvm` build path |
 
 ## Verification
 
 - **Default build untouched:** `cargo build --workspace` and `cargo test --workspace --locked` succeed on a machine with **no** LLVM installed (the core invariant this FD must not break). `inkwell`/`llvm-sys` appear in `Cargo.lock` but are not fetched or built.
-- **Feature build links LLVM:** with `LLVM_SYS_221_PREFIX` set (`G:\tools\llvm-22.1.0` on Windows, `/usr/lib/llvm-22` on Linux), `cargo build -p cb-backend-llvm --features codegen` and `cargo build -p cb-driver --features llvm` both compile and link. (First Windows build may hit the `xml2s.lib` snag above — apply the mitigation.)
+- **Feature build links LLVM:** with `LLVM_SYS_181_PREFIX` set (the vcpkg `x64-windows-static-md` install on Windows, `/usr/lib/llvm-18` on Linux), `cargo test -p cb-backend-llvm --features codegen` and `cargo build -p cb-driver --features llvm` both compile and link — no `libcmt`/`msvcrt` CRT conflict (the `static-md` triplet's dynamic CRT matches Rust's default).
 - **Runtime behavior unchanged:** `cb --backend llvm <file>` still exits 3 (`unimplemented`) — this FD adds the dependency, not codegen. The existing FD-025 exit-code test stays green.
 - **Linkage smoke:** a `#[cfg(all(test, feature = "codegen"))]` unit test that constructs an `inkwell::Context` and an empty `Module` passes (`cargo test -p cb-backend-llvm --features codegen`). Keep it in a gated `mod` so the no-feature build has no dead code.
 - **CI guard:** the new Linux smoke job goes green; the existing `linux-sdk-free` job is unchanged and still runs LLVM-free.
