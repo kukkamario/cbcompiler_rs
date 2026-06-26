@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Planned | Low–Medium | Low |
+| [FD-043](FD-043_INTERPRETER_TEARDOWN_HOOK.md) | Interpreter Runtime Teardown Hook (`about_to_exit`) | Pending Verification | Low–Medium | Low |
 
 ## Deferred / Closed
 

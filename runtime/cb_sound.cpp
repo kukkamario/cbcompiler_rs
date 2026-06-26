@@ -166,6 +166,19 @@ void reap() {
     }
 }
 
+// At-exit flush (FD-043): like reap(), but destroys EVERY live channel
+// regardless of play state, so still-playing samples/streams release their
+// Allegro objects before al_uninstall_system runs. Safe to call repeatedly —
+// freed slots are skipped, so a second call is a no-op.
+void flush_all() {
+    for (uint32_t idx = 0; idx < g_channels.capacity(); ++idx) {
+        if (!g_channels.occupied(idx)) continue;
+        ChannelState& c = g_channels.at(idx);
+        destroy_channel(c);
+        g_channels.free(g_channels.handle_at(idx));
+    }
+}
+
 }  // namespace cb::sound
 
 using namespace cb::sound;
