@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-047](FD-047_LLVM_DEPENDENCY_SETUP.md) | LLVM Dependency Setup | Open | Medium | Medium |
 
 ## Deferred / Closed
 
