@@ -70,6 +70,14 @@ Requirements for the `llvm`/`codegen` feature (only then):
 
 Keep the default `cargo test --workspace` / CI path LLVM-free — never add `--all-features` to the workspace-wide job (it would force `inkwell` and require an LLVM toolchain everywhere).
 
+### AOT codegen & linking (FD-048)
+
+With `--features llvm`, `cb --backend llvm <file>.cb [-o <out>]` emits a **native executable**. (The IR is not read yet — a fixed empty `main` returning 0 is emitted; real IR→LLVM lowering is a later FD. The full runtime closure is still linked, so that FD adds only codegen, not toolchain work.) The artifact defaults to the source stem + the platform exe suffix, next to the source; `-o`/`--output` overrides it.
+
+- **Link driver.** Linking goes through a compiler *driver* (`clang.exe` on Windows, `cc` on Unix), not a bare `ld`/`lld`, so the CRT/SDK lib paths are auto-discovered (no `vcvars`). On Windows the driver is found via `LLVM_SYS_181_PREFIX` (`<prefix>/bin/clang.exe`, then `<prefix>/tools/llvm/clang.exe`) before any PATH clang — so the pinned LLVM 18 clang is used, never a stray newer clang on PATH.
+- **Runtime closure.** The CoolBasic runtime is linked from whatever `cb-runtime-sys` built — the full Allegro closure, or the SDK-free core (CI / no-Allegro). `cb-runtime-sys` (manifest `links = "cb_runtime"`) publishes the lib dir, archive names, and closure-list path as `DEP_CB_RUNTIME_*`; `cb-backend-llvm`'s build script re-exports them as `CB_RT_*` env so the link step never hardcodes a lib list.
+- **Windows `/MD` recipe (refined).** To keep the dynamic CRT (matching Rust + the plugin-DLL model): `-Xlinker /nodefaultlib:libcmt` (drop clang's static-CRT default) **plus explicit** `-Xlinker /defaultlib:msvcrt /defaultlib:vcruntime /defaultlib:ucrt`. The explicit defaultlibs are load-bearing: `-fms-runtime-lib=dll` only sets a clang *compile*-phase dependent-lib, and no compile phase runs when linking a pre-built LLVM object — without them `mainCRTStartup` (which calls `main`) is unresolved (LNK2001) for a lazily-linked empty `main`. The produced exe imports `VCRUNTIME140.dll` + `api-ms-win-crt-*` (dynamic CRT), no `libcmt`.
+
 ## Language reference
 
 **Do not invent CoolBasic semantics from memory.** The original language has quirks (type sigils, `Type ... EndType` blocks, sub vs. function distinction, etc.) that are easy to get subtly wrong.

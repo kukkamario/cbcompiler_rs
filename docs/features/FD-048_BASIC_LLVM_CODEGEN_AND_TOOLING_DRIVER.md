@@ -1,6 +1,6 @@
 # FD-048: Basic LLVM Codegen & Tooling Driver
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** High
 **Effort:** High (> 4 hours) — the IR is ignored, but the object-emit + linker plumbing (CRT-aware linking and the runtime closure on Windows) is fiddly and load-bearing.
 **Impact:** First native executable the project produces. Proves the back half of the AOT pipeline end-to-end — in-memory `inkwell::Module` → object file → linked (against the full CoolBasic runtime + Allegro closure, `/MD`-consistent) → runnable exe. No IR is read and no runtime function is *called* yet, but the runtime is on the link line, so later lowering FDs add only codegen, not toolchain work.
@@ -40,6 +40,8 @@ A runnable exe needs CRT startup glue, so we need a compiler/linker *driver* tha
 ```
 
 `-fms-runtime-lib=dll` alone is **not** enough: it only sets the compile-phase `--dependent-lib=msvcrt`, while the clang driver still hardcodes `-defaultlib:libcmt` (static CRT) on the link line. The two collide (`LNK4098`) and static `libucrt.lib` wins → a mixed/static CRT, violating the `/MD` rule. `-Xlinker /nodefaultlib:libcmt` neutralizes the static default so the object's dynamic `msvcrt.lib` directive wins (the exe then imports `VCRUNTIME140.dll` / `api-ms-win-crt-*` / `MSVCP140.dll`). Use `clang.exe` (gnu-style driver), **not** `clang-cl.exe`. clang auto-discovers MSVC + the Windows SDK and delegates the actual link to MSVC `link.exe` — no `vcvars` environment needed.
+
+> **Implementation refinement (recipe as shipped).** Because we link a *pre-built* LLVM object (`emit.rs`'s `TargetMachine::write_to_file`), clang runs **no compile phase**, so `-fms-runtime-lib=dll` is a no-op and the object carries no `/DEFAULTLIB:msvcrt` directive of its own. With only `/nodefaultlib:libcmt`, a lazily-linked empty `main` then has **no CRT at all** → `LNK2001: unresolved external symbol mainCRTStartup`. The shipped recipe therefore names the dynamic CRT import libs **explicitly**: `-Xlinker /nodefaultlib:libcmt -Xlinker /defaultlib:msvcrt -Xlinker /defaultlib:vcruntime -Xlinker /defaultlib:ucrt`. (The spike's "0 unresolved symbols" held only because it whole-archived the /MD runtime objects, whose own `/DEFAULTLIB:msvcrt` directives masked the gap — the production *lazy* link cannot rely on that.)
 
 **Linux/CI:** invoke the platform `cc` (gcc). Emit objects with `RelocMode::PIC` (gcc links PIE by default). `cc` is a C driver, so name the C++ runtime explicitly (`-lstdc++`), mirroring `cb-runtime-sys/build.rs`. The CI `linux-llvm-smoke` job has `gcc`/`cc` but not clang, so defaulting to `cc` needs no CI change.
 

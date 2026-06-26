@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+# Declares this crate "owns" the `cb_runtime` native libs so the build script's
+# `cargo:KEY=VALUE` metadata flows to direct dependents as `DEP_CB_RUNTIME_<KEY>`
+# (FD-048). `cb-backend-llvm` reads these to locate the runtime closure for the
+# AOT link step. Cargo enforces this name is unique across the dependency graph.
+links = "cb_runtime"
 
 [dependencies]
 cb-ir = { path = "../cb-ir" }

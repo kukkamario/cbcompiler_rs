@@ -111,7 +111,7 @@ fn main() {
     //                                  to the SDK-free cc build so a plain
     //                                  `cargo test` works on any machine.
     if force_sdk_free {
-        build_sdk_free(&runtime_src);
+        build_sdk_free(&out_dir, &runtime_src);
         return;
     }
 
@@ -140,7 +140,7 @@ fn main() {
         );
     }
 
-    build_sdk_free(&runtime_src);
+    build_sdk_free(&out_dir, &runtime_src);
 }
 
 /// True when a `cmake` executable is callable. Cheap probe so the auto path can
@@ -158,7 +158,7 @@ fn cmake_available() -> bool {
 /// string primitives. `cc` emits the `rustc-link-lib` for the archive and links
 /// the C++ standard library itself. Signals `cb_no_allegro` to dependents so
 /// graphics-dependent tests can skip cleanly.
-fn build_sdk_free(runtime_src: &Path) {
+fn build_sdk_free(out_dir: &Path, runtime_src: &Path) {
     let mut build = cc::Build::new();
     build
         .cpp(true)
@@ -171,6 +171,16 @@ fn build_sdk_free(runtime_src: &Path) {
     build.compile("cb_runtime_sdkfree");
 
     println!("cargo:rustc-cfg=cb_no_allegro");
+
+    // FD-048: advertise this single core archive to dependents (cb-backend-llvm)
+    // as `DEP_CB_RUNTIME_*` so the AOT link step links whatever runtime was
+    // actually built — here the Allegro-free core, with no transitive closure.
+    // `cc` already emitted the `rustc-link-*` directives for our own binary; this
+    // metadata is purely additive. The archive lands in OUT_DIR (`cb_runtime_sdkfree.lib`
+    // on MSVC, `libcb_runtime_sdkfree.a` on Unix).
+    println!("cargo:flavor=sdkfree");
+    println!("cargo:lib_dir={}", out_dir.display());
+    println!("cargo:runtime_libs=cb_runtime_sdkfree");
 
     // FD-045: the metadata catalog must match this SDK-free runtime's catalog,
     // so compile it under the same CB_NO_ALLEGRO switch.
@@ -354,6 +364,17 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
     // FD-045: emit the matching metadata-only catalog object (full catalog, no
     // CB_NO_ALLEGRO) so sema can read the catalog without the executable runtime.
     build_meta(runtime_src, false);
+
+    // FD-048: surface the full runtime link closure to dependents (cb-backend-llvm)
+    // via `DEP_CB_RUNTIME_*` so the AOT link step replays the same libs onto
+    // clang/cc. Additive — the `rustc-link-*` directives above are unchanged.
+    // The CB archives land in OUT_DIR (under `Release/` on the MSVC multi-config
+    // generator); the Allegro/transitive closure is the absolute/bare-name list
+    // CMake generated, which we hand straight to the linker driver.
+    println!("cargo:flavor=full");
+    println!("cargo:lib_dir={}", out_dir.display());
+    println!("cargo:runtime_libs=cb_runtime,cb_runtime_core");
+    println!("cargo:closure_list={}", link_list.display());
 
     Ok(())
 }

@@ -148,7 +148,10 @@ dependencies = [
  "cb-backend-api",
  "cb-diagnostics",
  "cb-ir",
+ "cb-runtime-sys",
+ "cc",
  "inkwell",
+ "tempfile",
 ]
 
 [[package]]

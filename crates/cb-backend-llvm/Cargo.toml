@@ -6,16 +6,28 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# Pulls in `inkwell`/LLVM. Off by default so `cargo build --workspace` and CI
-# stay LLVM-free; the driver's `llvm` feature turns this on (FD-047). Building
-# this feature needs an LLVM 18 install located via `LLVM_SYS_181_PREFIX`.
-codegen = ["dep:inkwell"]
+# Pulls in `inkwell`/LLVM and the runtime closure metadata. Off by default so
+# `cargo build --workspace` and CI stay LLVM-free; the driver's `llvm` feature
+# turns this on (FD-047). Building this feature needs an LLVM 18 install located
+# via `LLVM_SYS_181_PREFIX`. `cb-runtime-sys` is pulled in only here so its
+# `DEP_CB_RUNTIME_*` link metadata (FD-048) reaches this crate's build script.
+codegen = ["dep:inkwell", "dep:cb-runtime-sys", "dep:tempfile"]
 
 [dependencies]
 cb-backend-api = { path = "../cb-backend-api" }
 cb-diagnostics = { path = "../cb-diagnostics" }
 cb-ir = { path = "../cb-ir" }
 inkwell = { workspace = true, optional = true }
+# Normal (not build-) dependency: that is what makes Cargo expose the
+# `DEP_CB_RUNTIME_*` link metadata to this crate's build script (FD-048).
+cb-runtime-sys = { workspace = true, optional = true }
+# Auto-cleaned temp dir for the intermediate object file.
+tempfile = { workspace = true, optional = true }
+
+[build-dependencies]
+# Host C/C++ compiler discovery for the AOT link-driver fallback (FD-048); the
+# same crate `cb-runtime-sys` uses to build the runtime.
+cc = "1"
 
 [lints]
 workspace = true

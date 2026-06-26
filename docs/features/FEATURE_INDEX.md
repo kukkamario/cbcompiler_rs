@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| [FD-048](FD-048_BASIC_LLVM_CODEGEN_AND_TOOLING_DRIVER.md) | Basic LLVM Codegen & Tooling Driver | Open | High | High |
+| [FD-048](FD-048_BASIC_LLVM_CODEGEN_AND_TOOLING_DRIVER.md) | Basic LLVM Codegen & Tooling Driver | Pending Verification | High | High |
 
 ## Deferred / Closed
 
