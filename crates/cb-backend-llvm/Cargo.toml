@@ -8,7 +8,7 @@ publish.workspace = true
 [features]
 # Pulls in `inkwell`/LLVM. Off by default so `cargo build --workspace` and CI
 # stay LLVM-free; the driver's `llvm` feature turns this on (FD-047). Building
-# this feature needs an LLVM 22 install located via `LLVM_SYS_221_PREFIX`.
+# this feature needs an LLVM 18 install located via `LLVM_SYS_181_PREFIX`.
 codegen = ["dep:inkwell"]
 
 [dependencies]

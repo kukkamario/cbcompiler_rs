@@ -32,7 +32,7 @@ impl Backend for LlvmBackend {
     }
 }
 
-// Linkage smoke test (FD-047): proves `inkwell` and the underlying LLVM 22
+// Linkage smoke test (FD-047): proves `inkwell` and the underlying LLVM 18
 // toolchain link and a context/module can be constructed. Gated on `codegen`
 // so the default LLVM-free build has no dead code and needs no LLVM install.
 #[cfg(all(test, feature = "codegen"))]
