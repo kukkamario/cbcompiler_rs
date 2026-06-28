@@ -2,10 +2,10 @@
 a$ = "hi"
 
 // Escaped string with newline, tab, and an escaped quote.
-b$ = "a\nb\tc\""
+b$ = $"a\nb\tc\""
 
 // Escaped string with a `\xFF` byte escape.
-c$ = "\xFF byte"
+c$ = $"\xFF byte"
 
 // Raw multi-line (triple-quoted) string — closer's indent strips the content.
 d$ = """

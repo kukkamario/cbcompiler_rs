@@ -1,6 +1,7 @@
 //! Decoding of `StrLit` tokens into their concrete `String` value per
-//! `docs/cb_syntax.md` §1.6: C-style escapes for `Plain`/`Escaped`, no escapes
-//! plus indent stripping for `Raw`.
+//! `docs/cb_syntax.md` §1.6: `Plain` (`"..."`) is verbatim, `Escaped`
+//! (`$"..."`) runs C-style escapes, `Raw` (`"""..."""`) has no escapes plus
+//! indent stripping.
 //!
 //! `decode` is total — it always returns a best-effort `String` even when
 //! diagnostics are produced. This lets the parser continue building the AST
@@ -40,8 +41,9 @@ fn slice(src: &str, span: Span) -> &str {
     }
 }
 
-/// `Plain`: source has the form `"...body..."` with no `\` characters in the
-/// body. Strip the outer quotes and return the body verbatim.
+/// `Plain`: source has the form `"...body..."` and is verbatim (FD-051) — the
+/// body may contain `\`, which carries no special meaning. Strip the outer
+/// quotes and return the body unchanged.
 fn decode_plain(raw: &str) -> (String, Vec<Diagnostic>) {
     let body = strip_single_quotes(raw);
     (body.to_string(), Vec::new())
@@ -58,20 +60,29 @@ fn strip_single_quotes(raw: &str) -> &str {
     }
 }
 
-/// `Escaped`: walk the body character by character; on `\` consume an escape
-/// sequence per §1.6. Unknown escapes copy the offending characters verbatim
-/// into the output and produce an `E0208 InvalidEscape` diagnostic so the
-/// parser can keep going.
+/// `Escaped`: the source slice has the form `$"...body..."` (FD-051). Strip the
+/// leading `$` mode marker and the outer quotes, then walk the body character
+/// by character; on `\` consume an escape sequence per §1.6. Unknown escapes
+/// copy the offending characters verbatim into the output and produce an
+/// `E0208 InvalidEscape` diagnostic so the parser can keep going.
 fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
-    let body = strip_single_quotes(raw);
-    // Offset of `body` inside the original literal (1 byte past the leading
-    // `"`). This MUST use the same predicate as `strip_single_quotes`: if it
-    // didn't strip (e.g. a start quote but no end quote), `body == raw` starts
-    // at offset 0, and a `1` here would misalign every escape span by one byte
-    // (F-L14). `core::ptr` comparison can't span the borrow cleanly, so re-test
-    // the identical condition.
-    let stripped = raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"');
-    let body_offset_in_lit: u32 = if stripped { 1 } else { 0 };
+    // Strip the `$` mode marker first, then the quotes. The `$` adds one byte
+    // to the literal-relative offset of every escape span (load-bearing for the
+    // E0208 span alignment the F-L14 regression guards).
+    let dollar_stripped = raw.strip_prefix('$');
+    let after_dollar = dollar_stripped.unwrap_or(raw);
+    let body = strip_single_quotes(after_dollar);
+    // Offset of `body` inside the original literal. This MUST use the same
+    // predicates as the stripping above: if a step didn't strip (e.g. a `$`
+    // with no leading `$`, or a start quote but no end quote), the offset must
+    // not advance past the bytes that are still present in `body`, or every
+    // escape span would misalign (F-L14). For a well-formed `$"..."` token the
+    // offset is 2 (`$` + `"`); for a defensive partial token it is less.
+    let dollar_len: u32 = if dollar_stripped.is_some() { 1 } else { 0 };
+    let stripped =
+        after_dollar.len() >= 2 && after_dollar.starts_with('"') && after_dollar.ends_with('"');
+    let quote_len: u32 = if stripped { 1 } else { 0 };
+    let body_offset_in_lit: u32 = dollar_len + quote_len;
 
     let mut out = String::with_capacity(body.len());
     let mut diags = Vec::new();
@@ -443,16 +454,33 @@ mod tests {
     }
 
     #[test]
+    fn plain_keeps_backslash_verbatim() {
+        // FD-051: `"a\nb"` is verbatim — the `\n` stays two characters.
+        let (s, d) = decode_at(StrLitKind::Plain, "\"a\\nb\"");
+        assert_eq!(s, "a\\nb");
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn plain_windows_path_verbatim() {
+        // FD-051 motivating case: `"C:\new"` decodes to the literal path, NOT
+        // `C:<LF>ew`.
+        let (s, d) = decode_at(StrLitKind::Plain, "\"C:\\new\"");
+        assert_eq!(s, "C:\\new");
+        assert!(d.is_empty());
+    }
+
+    #[test]
     fn escaped_newline_and_tab() {
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"a\\nb\\tc\"");
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"a\\nb\\tc\"");
         assert_eq!(s, "a\nb\tc");
         assert!(d.is_empty());
     }
 
     #[test]
     fn escaped_backslash_quote() {
-        // Source bytes: " \ " \ \ "  → decoded `\"\\` is `"\` (one quote, one backslash).
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"\\\"\\\\\"");
+        // Source bytes: $ " \ " \ \ "  → decoded `\"\\` is `"\` (one quote, one backslash).
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\\"\\\\\"");
         assert_eq!(s, "\"\\");
         assert!(d.is_empty());
     }
@@ -460,7 +488,7 @@ mod tests {
     #[test]
     fn escaped_hex_ff() {
         // `\xFF` is the Unicode code point U+00FF.
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"\\xFF\"");
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\xFF\"");
         assert_eq!(s, "\u{FF}");
         assert!(d.is_empty());
     }
@@ -468,15 +496,32 @@ mod tests {
     #[test]
     fn escaped_hex_short() {
         // `\x` followed by only one hex digit is invalid.
-        let (_s, d) = decode_at(StrLitKind::Escaped, "\"\\xF\"");
+        let (_s, d) = decode_at(StrLitKind::Escaped, "$\"\\xF\"");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
     }
 
     #[test]
+    fn escaped_quote() {
+        // FD-051: a literal `"` inside an escaped string is written `\"`.
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\\"\"");
+        assert_eq!(s, "\"");
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn escaped_non_ascii_char_verbatim() {
+        // A non-escape character (here a multi-byte `é`) passes through
+        // unchanged inside `$"..."`.
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"é\"");
+        assert_eq!(s, "é");
+        assert!(d.is_empty());
+    }
+
+    #[test]
     fn escaped_unicode_scalar() {
         // U+00E9 = é.
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"\\u00E9\"");
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\u00E9\"");
         assert_eq!(s, "é");
         assert!(d.is_empty());
     }
@@ -484,7 +529,7 @@ mod tests {
     #[test]
     fn escaped_unicode_surrogate_rejected() {
         // D83D is a high surrogate — not a valid scalar value.
-        let (_s, d) = decode_at(StrLitKind::Escaped, "\"\\uD83D\"");
+        let (_s, d) = decode_at(StrLitKind::Escaped, "$\"\\uD83D\"");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
     }
@@ -494,7 +539,7 @@ mod tests {
         // F-L13: an invalid-scalar `\u` escape now copies the source verbatim
         // (like `\x` invalid-digits and the unknown-escape arm), rather than
         // dropping the escape entirely.
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"\\uD83D\"");
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\uD83D\"");
         assert_eq!(s, "\\uD83D");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
@@ -502,27 +547,29 @@ mod tests {
 
     #[test]
     fn escaped_body_offset_with_unterminated_literal() {
-        // F-L14: a token with a leading `"` but NO trailing `"` must not strip,
-        // so the body offset is 0 and the escape span aligns with the `\`.
-        // `"\q` (no closing quote): `\` is at literal byte index 1.
-        let lit = "\"\\q";
+        // F-L14: a `$"` token with NO trailing `"` must not strip the (absent)
+        // closing quote, so the body offset advances only past `$` (the
+        // un-stripped `"` stays in the body) and the escape span still aligns
+        // with the `\`. `$"\q` (no closing quote): `\` is at literal byte index 2.
+        let lit = "$\"\\q";
         let span = Span::new(0, lit.len() as u32, FileId(0));
         let (s, d) = decode(StrLitKind::Escaped, lit, span);
-        // strip_single_quotes returns the input verbatim (no trailing quote),
-        // so the leading `"` stays in the body and the unknown escape `\q`
-        // recovers to `q` → `"q`.
+        // strip_single_quotes returns the post-`$` slice verbatim (no trailing
+        // quote), so the leading `"` stays in the body and the unknown escape
+        // `\q` recovers to `q` → `"q`.
         assert_eq!(s, "\"q");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
-        // `\` is at index 1; span covers `\q` (2 bytes): 1..3, NOT 2..4.
-        assert_eq!(d[0].primary.span.start, 1);
-        assert_eq!(d[0].primary.span.end, 3);
+        // `\` is at index 2 (after `$` and `"`); span covers `\q` (2 bytes):
+        // 2..4, NOT 3..5.
+        assert_eq!(d[0].primary.span.start, 2);
+        assert_eq!(d[0].primary.span.end, 4);
     }
 
     #[test]
     fn escaped_unknown_escape_recovers() {
         // `\q` is unknown — emit E0208 and recover as `q`.
-        let (s, d) = decode_at(StrLitKind::Escaped, "\"a\\qb\"");
+        let (s, d) = decode_at(StrLitKind::Escaped, "$\"a\\qb\"");
         assert_eq!(s, "aqb");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
@@ -535,7 +582,7 @@ mod tests {
         // at 0, so a missing base offset was invisible — place the literal at a
         // non-zero start and assert the label span lands on the real `\`.
         let prefix = "xxxxxxxx"; // 8 bytes before the literal
-        let lit = "\"ab\\qcd\""; // `\q` unknown; `\` is at literal byte index 3
+        let lit = "$\"ab\\qcd\""; // `\q` unknown; `\` is at literal byte index 4
         let src = format!("{prefix}{lit}");
         let start = prefix.len() as u32;
         let span = Span::new(start, src.len() as u32, FileId(0));
@@ -543,9 +590,10 @@ mod tests {
         assert_eq!(s, "abqcd");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].code, Some(E_INVALID_ESCAPE));
-        // `\` at literal index 3 → absolute start+3; the `\q` span is 2 bytes.
-        assert_eq!(d[0].primary.span.start, start + 3);
-        assert_eq!(d[0].primary.span.end, start + 5);
+        // `\` at literal index 4 (after `$"ab`) → absolute start+4; the `\q`
+        // span is 2 bytes.
+        assert_eq!(d[0].primary.span.start, start + 4);
+        assert_eq!(d[0].primary.span.end, start + 6);
     }
 
     #[test]

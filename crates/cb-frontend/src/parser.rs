@@ -3400,13 +3400,29 @@ mod expr_tests {
 
     #[test]
     fn str_lit_escaped() {
-        let src = "\"a\\nb\"";
+        // FD-051: `$"..."` is the escape-aware form; `\n` decodes to a newline.
+        let src = "$\"a\\nb\"";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
         match expr_of(&arena, root) {
             Expr::StrLit { value, kind } => {
                 assert_eq!(value, "a\nb");
                 assert_eq!(*kind, StrLitKind::Escaped);
+            }
+            other => panic!("expected StrLit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn str_lit_plain_is_verbatim() {
+        // FD-051: a plain `"..."` is verbatim — `\n` stays two characters.
+        let src = "\"a\\nb\"";
+        let (arena, root, diags) = parse_expr(src);
+        assert!(diags.is_empty());
+        match expr_of(&arena, root) {
+            Expr::StrLit { value, kind } => {
+                assert_eq!(value, "a\\nb");
+                assert_eq!(*kind, StrLitKind::Plain);
             }
             other => panic!("expected StrLit, got {other:?}"),
         }

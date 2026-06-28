@@ -166,7 +166,20 @@ A float literal must contain a decimal point or an exponent (or both). A leading
 
 #### String literals
 
-Single-line strings use `"…"` and process C-style escapes:
+Single-line strings use `"…"` and are **verbatim**: a backslash is an ordinary
+character and the first unescaped `"` always closes the literal. There is no
+escape processing, so a Windows path writes naturally:
+
+```cb
+path$ = "C:\new"     // the six characters C : \ n e w — no newline
+```
+
+Because `"` always closes a verbatim string, a literal double quote inside a
+string needs either the escaped form `$"\""` or a raw `"""…"""` string.
+
+**Escaped strings** use the `$"…"` form, which processes C-style escapes. The
+`$` is a **mode marker only — it is not interpolation**; nothing inside the
+string is evaluated. The escape set is:
 
 | Escape   | Meaning                          |
 | -------- | -------------------------------- |
@@ -178,6 +191,11 @@ Single-line strings use `"…"` and process C-style escapes:
 | `\0`     | null character                   |
 | `\xNN`   | code point U+0000–U+00FF (2 hex digits) |
 | `\uNNNN` | Unicode code point (4 hex digits)|
+
+```cb
+msg$ = $"line one\nline two"   // an actual LF between the two halves
+q$   = $"she said \"hi\""      // embeds two literal double quotes
+```
 
 > **String model — Unicode code points, not bytes.** CoolBasic-rs strings are
 > sequences of **Unicode code points**: from CB code's point of view a string
@@ -192,7 +210,7 @@ Single-line strings use `"…"` and process C-style escapes:
 > string serialises to two UTF-8 bytes). Choosing Unicode semantics up front
 > avoids byte-vs-character ambiguity across the whole language and runtime.
 
-A literal newline inside a `"…"` string is a compile error — use `\n` or a multi-line string.
+A literal newline inside a single-line string (`"…"` or `$"…"`) is a compile error — use `$"\n"` for an escaped newline, or a multi-line `"""…"""` string.
 
 **Multi-line strings** use triple double-quotes `"""…"""` and are **raw**: no escape processing, no interpolation. The closing delimiter must appear on its own line, and the common leading whitespace of the content lines is stripped:
 
