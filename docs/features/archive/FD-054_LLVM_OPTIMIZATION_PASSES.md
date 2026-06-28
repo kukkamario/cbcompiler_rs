@@ -1,6 +1,7 @@
 # FD-054: LLVM Optimization Passes & `-O` Flag
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-29
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** The LLVM/AOT backend actually optimizes. Today it emits whatever the IR→LLVM lowering produces with **both** optimizers off, so native code is needlessly slow despite the LLVM backend existing specifically "for AOT/optimized native codegen."
