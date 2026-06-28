@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
+| [FD-051](FD-051_STRING_LITERAL_ESCAPE_SYNTAX.md) | String Literal Syntax — Verbatim `"..."`, Escapes Move to `$"..."` | Open | Medium | Medium |
 
 ## Deferred / Closed
 
