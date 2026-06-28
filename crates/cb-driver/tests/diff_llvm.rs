@@ -139,3 +139,15 @@ diff_tests! {
     type_first_each_delete,
     type_ref_equality,
 }
+
+// Value structs (FD-049 Phase 3b): inline LLVM aggregates with value semantics —
+// scalar field read/write, value-copy independence, nested `a.b.c`, struct array
+// elements, String-field copy/reassign refcount, and by-value param copy.
+diff_tests! {
+    struct_field_rw,
+    struct_copy_value,
+    struct_nested,
+    struct_array_elem,
+    struct_string_field,
+    struct_param_value,
+}

@@ -1,0 +1,22 @@
+Struct Point
+    Field x As Float
+    Field y As Float
+EndStruct
+
+' By-value param: the callee mutating its copy must not affect the caller.
+Function Shift(p As Point)
+    p.x = p.x + 100.0
+EndFunction
+
+Function FormatPoint(p As Point) As String
+    Return "(" + Str(p.x) + ", " + Str(p.y) + ")"
+EndFunction
+
+Dim a As Point
+a.x = 1.0
+a.y = 2.0
+
+Shift(a)
+Print FormatPoint(a)
+
+Print FormatPoint(a)

@@ -1,0 +1,20 @@
+Struct Inner
+    Field v As Int
+EndStruct
+
+Struct Outer
+    Field cell As Inner
+    Field tag As Int
+EndStruct
+
+Dim o As Outer
+o.cell.v = 5
+o.tag = 7
+Print Str(o.cell.v)
+Print Str(o.tag)
+
+' A full copy deep-copies the inline nested struct.
+Dim p As Outer = o
+p.cell.v = 50
+Print Str(o.cell.v)
+Print Str(p.cell.v)

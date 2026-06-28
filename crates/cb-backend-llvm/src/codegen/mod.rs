@@ -88,7 +88,12 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             } else {
                 format!("cb_user_fn{idx}")
             };
-            let fty = types::fn_type(self.ctx, &func.params, &func.return_type)?;
+            let fty = types::fn_type(
+                self.ctx,
+                &self.program.struct_defs,
+                &func.params,
+                &func.return_type,
+            )?;
             let fv = self.module.add_function(&name, fty, None);
             self.user_funcs.push(fv);
             if is_main {
@@ -105,7 +110,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
     /// locals.)
     fn declare_globals(&mut self) -> Result<(), String> {
         for (i, g) in self.program.globals.iter().enumerate() {
-            let ty = types::basic_type(self.ctx, &g.ty)?;
+            let ty = types::basic_type(self.ctx, &self.program.struct_defs, &g.ty)?;
             let gv = self.module.add_global(ty, None, &format!("cb_global{i}"));
             gv.set_linkage(Linkage::Internal);
             match &g.ty {
@@ -116,6 +121,15 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 IrType::Float => gv.set_initializer(&self.ctx.f64_type().const_zero()),
                 IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
                     gv.set_initializer(&self.ptr_t().const_null())
+                }
+                // A value-struct global is zero-initialized (FD-049 Phase 3b).
+                // Its String sub-fields stay null rather than the empty sentinel
+                // — there is no runtime global-init hook to set them, and every
+                // string primitive null-checks (the same scoped simplification
+                // Phase 1 made for String globals; top-level `Dim` lowers to
+                // `@main` locals, where the sentinel IS set, so this is rare).
+                IrType::StructVal(_) => {
+                    gv.set_initializer(&ty.into_struct_type().const_zero())
                 }
                 other => {
                     return Err(format!(

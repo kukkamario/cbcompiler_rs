@@ -1,0 +1,11 @@
+Struct Vec2
+    Field x As Float
+    Field y As Float
+EndStruct
+
+Dim p As Vec2
+p.x = 1.5
+p.y = -3.0
+Print Str(p.x)
+Print Str(p.y)
+Print Str(p.x + p.y)

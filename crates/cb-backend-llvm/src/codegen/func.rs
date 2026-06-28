@@ -17,13 +17,13 @@ use std::collections::HashMap;
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
-    PointerValue,
+    PointerValue, StructValue,
 };
 use inkwell::{FloatPredicate, IntPredicate};
 
 use cb_diagnostics::Symbol;
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
-use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg, TypeDefId};
+use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg, StructDefInfo, TypeDefId};
 
 use super::Codegen;
 use super::regtypes::{self, RegInfo};
@@ -116,7 +116,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
 
         // One alloca per local.
         for (i, local) in func.locals.iter().enumerate() {
-            let lty = basic_type(self.cg.ctx, &local.ty)?;
+            let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, &local.ty)?;
             let slot = self
                 .cg
                 .builder
@@ -144,16 +144,22 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             self.idx_scratch = Some((buf, buf_ty));
         }
         // Default-init every slot (interp default-inits all locals; String slots
-        // MUST be initialized before any release-on-store sees garbage).
+        // MUST be initialized before any release-on-store sees garbage). A
+        // value-struct slot's String sub-fields are set to the empty sentinel.
         for (i, local) in func.locals.iter().enumerate() {
             let zero = self.default_value(&local.ty)?;
             self.cg
                 .builder
                 .build_store(self.locals[i], zero)
                 .map_err(berr)?;
+            if let IrType::StructVal(name) = &local.ty {
+                self.init_struct_strings(self.locals[i], *name)?;
+            }
         }
         // Store incoming params into their slots (in declaration order). A String
-        // param is retained into its slot — the caller passed it borrowed.
+        // param is retained into its slot — the caller passed it borrowed; a
+        // value-struct param's String fields are likewise retained (the caller
+        // passed the aggregate by value, a borrowed view).
         let mut p = 0u32;
         for (i, local) in func.locals.iter().enumerate() {
             if !local.is_param {
@@ -164,17 +170,26 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 .get_nth_param(p)
                 .ok_or_else(|| format!("missing LLVM param {p}"))?;
             p += 1;
-            if matches!(local.ty, IrType::String) {
-                let retained = self.call_value(self.cg.rt_string_retain(), &[param.into()])?;
-                self.cg
-                    .builder
-                    .build_store(self.locals[i], retained)
-                    .map_err(berr)?;
-            } else {
-                self.cg
-                    .builder
-                    .build_store(self.locals[i], param)
-                    .map_err(berr)?;
+            match &local.ty {
+                IrType::String => {
+                    let retained =
+                        self.call_value(self.cg.rt_string_retain(), &[param.into()])?;
+                    self.cg
+                        .builder
+                        .build_store(self.locals[i], retained)
+                        .map_err(berr)?;
+                }
+                IrType::StructVal(_) => {
+                    // store_slot_value retains the param's String fields into the
+                    // slot and releases the just-init'd sentinels (no-op).
+                    self.store_slot_value(self.locals[i], &local.ty, param)?;
+                }
+                _ => {
+                    self.cg
+                        .builder
+                        .build_store(self.locals[i], param)
+                        .map_err(berr)?;
+                }
             }
         }
 
@@ -199,6 +214,14 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
                 self.cg.ptr_t().const_null().into()
             }
+            // A value struct default-inits to a zeroed aggregate (FD-049 Phase
+            // 3b); its String sub-fields are then set to the empty sentinel by
+            // `init_struct_strings` (const-zero gives null, violating the
+            // never-null-`CbString*` invariant).
+            IrType::StructVal(_) => basic_type(self.cg.ctx, &self.cg.program.struct_defs, ty)?
+                .into_struct_type()
+                .const_zero()
+                .into(),
             other => {
                 return Err(format!(
                     "local of type {other:?} is out of scope for the Phase-1 LLVM backend"
@@ -443,27 +466,54 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         slot: PointerValue<'ctx>,
         ty: &IrType,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let lty = basic_type(self.cg.ctx, ty)?;
+        let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, ty)?;
         let v = self.cg.builder.build_load(lty, slot, "").map_err(berr)?;
         if matches!(ty, IrType::String) {
             // A loaded String is an independently-owned reg (+1).
             Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
         } else {
+            // A loaded value-struct aggregate is a borrowed view (FD-049 Phase
+            // 3b): its String sub-fields stay owned by the source slot; the
+            // store that takes ownership (`store_slot`/param entry) retains them.
             Ok(v)
         }
     }
 
     fn store_slot(&self, slot: PointerValue<'ctx>, ty: &IrType, value: Reg) -> Result<(), String> {
-        if matches!(ty, IrType::String) {
-            // Release the slot's prior contents, then move the reg's +1 in.
-            let old = self
-                .cg
-                .builder
-                .build_load(self.cg.ptr_t(), slot, "")
-                .map_err(berr)?;
-            self.call_void(self.cg.rt_string_release(), &[old.into()])?;
+        self.store_slot_value(slot, ty, self.regs[&value])
+    }
+
+    /// Store a computed value into `slot` with the FD-049 refcount discipline.
+    /// `String`: release the slot's old contents, move the reg's +1 in.
+    /// `StructVal`: a struct slot OWNS +1 per String sub-field, so retain the
+    /// incoming aggregate's String fields and release the slot's old ones
+    /// (retain-before-release tolerates a self-store). Non-ref: plain store.
+    fn store_slot_value(
+        &self,
+        slot: PointerValue<'ctx>,
+        ty: &IrType,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
+        match ty {
+            IrType::String => {
+                let old = self
+                    .cg
+                    .builder
+                    .build_load(self.cg.ptr_t(), slot, "")
+                    .map_err(berr)?;
+                self.call_void(self.cg.rt_string_release(), &[old.into()])?;
+            }
+            IrType::StructVal(name) => {
+                let def = self.cg.struct_def_by_name(*name)?;
+                // Retain the incoming aggregate's String fields (slot takes +1).
+                self.retain_struct_strings(val.into_struct_value(), def)?;
+                // Release the slot's old String fields.
+                let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, ty)?;
+                let old = self.cg.builder.build_load(lty, slot, "").map_err(berr)?;
+                self.release_struct_strings(old.into_struct_value(), def)?;
+            }
+            _ => {}
         }
-        let val = self.regs[&value];
         self.cg.builder.build_store(slot, val).map_err(berr)?;
         Ok(())
     }
@@ -544,7 +594,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         elem_ptr: PointerValue<'ctx>,
         elem: &IrType,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let lty = basic_type(self.cg.ctx, elem)?;
+        let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, elem)?;
         let v = self.cg.builder.build_load(lty, elem_ptr, "").map_err(berr)?;
         if matches!(elem, IrType::String) {
             Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
@@ -560,10 +610,9 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         elem_type: &IrType,
         dims: &[Reg],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (elem_size, elem_is_ref) = elem_layout(elem_type)?;
+        let (esize, elem_is_ref) = self.elem_layout(elem_type)?;
         let buf = self.i64_buf(dims)?;
         let rank = self.cg.ctx.i64_type().const_int(dims.len() as u64, false);
-        let esize = self.cg.ctx.i64_type().const_int(elem_size, false);
         let eref = self
             .cg
             .ctx
@@ -573,6 +622,38 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             self.cg.rt_array_new(),
             &[rank.into(), buf.into(), esize.into(), eref.into()],
         )
+    }
+
+    /// Array element layout: `(elem_size_bytes, elem_is_ref)` for `cb_rt_array_new`.
+    /// The size matches the element's LLVM type width (so a plain element
+    /// store/load writes exactly one slot). `elem_is_ref` flags String elements,
+    /// whose slots default to the empty sentinel and follow the retain/release
+    /// discipline; reference handles (`TypeRef`) and value structs are *not*
+    /// ref-flagged (they default to null/zero, CB `Null`/zeroed). A value-struct
+    /// element is sized by its inline aggregate (FD-049 Phase 3b); its String
+    /// sub-fields stay null in the array backing — no per-element sentinel init
+    /// (a scoped limit, like value-struct globals; no fixture stores Strings in a
+    /// struct array element).
+    fn elem_layout(&self, elem: &IrType) -> Result<(IntValue<'ctx>, bool), String> {
+        let i64t = self.cg.ctx.i64_type();
+        Ok(match elem {
+            IrType::Byte => (i64t.const_int(1, false), false),
+            IrType::Short => (i64t.const_int(2, false), false),
+            IrType::Int => (i64t.const_int(4, false), false),
+            IrType::Long | IrType::Float => (i64t.const_int(8, false), false),
+            IrType::String => (i64t.const_int(8, false), true),
+            IrType::TypeRef(_) => (i64t.const_int(8, false), false),
+            IrType::StructVal(name) => {
+                let st = self.cg.struct_llvm_type(*name)?;
+                let size = st.size_of().ok_or("unsized value-struct array element")?;
+                (size, false)
+            }
+            other => {
+                return Err(format!(
+                    "array element type {other:?} is out of scope for the LLVM backend"
+                ));
+            }
+        })
     }
 
     /// Lower a `StorePlace`: walk the projection path from the root slot,
@@ -650,10 +731,19 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                             .map_err(berr)?;
                         ty = fty;
                     }
-                    IrType::StructVal(_) => {
-                        return Err(
-                            "StorePlace field on a value struct is out of Phase-3a scope".into(),
-                        );
+                    // A value-struct field is inline at `addr` (FD-049 Phase 3b)
+                    // — GEP directly, no load/check (struct values are stored in
+                    // place). Composes with the array/TypeRef steps for mixed
+                    // `arr[i].field = v` / `s.a.b = v` paths.
+                    IrType::StructVal(name) => {
+                        let struct_ty = self.cg.struct_llvm_type(*name)?;
+                        let (idx, fty) = self.cg.struct_field(*name, *field)?;
+                        addr = self
+                            .cg
+                            .builder
+                            .build_struct_gep(struct_ty, addr, idx, "")
+                            .map_err(berr)?;
+                        ty = fty;
                     }
                     other => {
                         return Err(format!("StorePlace Field on a non-object: {other:?}"));
@@ -662,15 +752,31 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             }
         }
 
-        // String target: release the slot's prior contents, then move the reg's
-        // +1 in. Non-String: plain store.
-        if matches!(ty, IrType::String) {
-            let old = self
-                .cg
-                .builder
-                .build_load(self.cg.ptr_t(), addr, "")
-                .map_err(berr)?;
-            self.call_void(self.cg.rt_string_release(), &[old.into()])?;
+        // Final store with the FD-049 refcount discipline.
+        match &ty {
+            // String target: release the slot's prior contents, then move +1 in.
+            IrType::String => {
+                let old = self
+                    .cg
+                    .builder
+                    .build_load(self.cg.ptr_t(), addr, "")
+                    .map_err(berr)?;
+                self.call_void(self.cg.rt_string_release(), &[old.into()])?;
+            }
+            // Whole-struct target (`s.inner = otherInner`, `arr[i] = aStruct`):
+            // retain the incoming aggregate's String fields, release the old.
+            IrType::StructVal(name) => {
+                let def = self.cg.struct_def_by_name(*name)?;
+                self.retain_struct_strings(self.pval_struct(value)?, def)?;
+                let struct_ty = self.cg.struct_llvm_type(*name)?;
+                let old = self
+                    .cg
+                    .builder
+                    .build_load(struct_ty, addr, "")
+                    .map_err(berr)?;
+                self.release_struct_strings(old.into_struct_value(), def)?;
+            }
+            _ => {}
         }
         let val = self.regs[&value];
         self.cg.builder.build_store(addr, val).map_err(berr)?;
@@ -738,8 +844,24 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                     .map_err(berr)?;
                 self.load_elem(fptr, field_type)
             }
-            IrType::StructVal(_) => {
-                Err("GetField on a value struct is out of Phase-3a scope".into())
+            // A value-struct object reg holds the aggregate value (from a prior
+            // `LoadLocal`/`GetField`); read the field with `extract_value`. A
+            // String field is retained (an owned +1 reg, like `load_elem`); a
+            // scalar or nested sub-aggregate is extracted raw (a borrowed view),
+            // so `a.b.c` chains compose.
+            IrType::StructVal(name) => {
+                let (idx, fty) = self.cg.struct_field(name, field)?;
+                let agg = self.pval_struct(object)?;
+                let v = self
+                    .cg
+                    .builder
+                    .build_extract_value(agg, idx, "")
+                    .map_err(berr)?;
+                if matches!(fty, IrType::String) {
+                    Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
+                } else {
+                    Ok(v)
+                }
             }
             other => Err(format!("GetField on a non-object: {other:?}")),
         }
@@ -786,6 +908,109 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .builder
             .build_load(self.cg.ptr_t(), empty_field, "")
             .map_err(berr)
+    }
+
+    // ── Value-struct String-field refcount helpers (FD-049 Phase 3b) ─────
+    //
+    // A value struct is an inline aggregate copied by load/store. Its String
+    // sub-fields follow the Phase-1 String discipline per field: a struct SLOT
+    // owns +1 per String sub-field; a struct VALUE in a reg is a borrowed view.
+    // The store that takes ownership retains the incoming aggregate's String
+    // fields and releases the slot's old ones; `Return` releases struct locals'
+    // fields. These walk String fields and recurse into nested-struct fields.
+
+    /// Retain every String sub-field of a value-struct aggregate (+1 each).
+    fn retain_struct_strings(
+        &self,
+        val: StructValue<'ctx>,
+        def: &StructDefInfo,
+    ) -> Result<(), String> {
+        for (i, (_, fty)) in def.fields.iter().enumerate() {
+            match fty {
+                IrType::String => {
+                    let s = self
+                        .cg
+                        .builder
+                        .build_extract_value(val, i as u32, "")
+                        .map_err(berr)?;
+                    self.call_void(self.cg.rt_string_retain(), &[s.into()])?;
+                }
+                IrType::StructVal(sub) => {
+                    let s = self
+                        .cg
+                        .builder
+                        .build_extract_value(val, i as u32, "")
+                        .map_err(berr)?;
+                    let subdef = self.cg.struct_def_by_name(*sub)?;
+                    self.retain_struct_strings(s.into_struct_value(), subdef)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Release every String sub-field of a value-struct aggregate (-1 each).
+    fn release_struct_strings(
+        &self,
+        val: StructValue<'ctx>,
+        def: &StructDefInfo,
+    ) -> Result<(), String> {
+        for (i, (_, fty)) in def.fields.iter().enumerate() {
+            match fty {
+                IrType::String => {
+                    let s = self
+                        .cg
+                        .builder
+                        .build_extract_value(val, i as u32, "")
+                        .map_err(berr)?;
+                    self.call_void(self.cg.rt_string_release(), &[s.into()])?;
+                }
+                IrType::StructVal(sub) => {
+                    let s = self
+                        .cg
+                        .builder
+                        .build_extract_value(val, i as u32, "")
+                        .map_err(berr)?;
+                    let subdef = self.cg.struct_def_by_name(*sub)?;
+                    self.release_struct_strings(s.into_struct_value(), subdef)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Initialize a value-struct slot's String sub-fields to the empty sentinel
+    /// (a const-zero aggregate gives null, violating the never-null invariant),
+    /// recursing into nested-struct fields. Called after each struct slot's
+    /// zero-init in `emit_entry`.
+    fn init_struct_strings(&self, addr: PointerValue<'ctx>, name: Symbol) -> Result<(), String> {
+        let def = self.cg.struct_def_by_name(name)?;
+        let struct_ty = self.cg.struct_llvm_type(name)?;
+        for (i, (_, fty)) in def.fields.iter().enumerate() {
+            match fty {
+                IrType::String => {
+                    let fptr = self
+                        .cg
+                        .builder
+                        .build_struct_gep(struct_ty, addr, i as u32, "")
+                        .map_err(berr)?;
+                    let empty = self.empty_string()?;
+                    self.cg.builder.build_store(fptr, empty).map_err(berr)?;
+                }
+                IrType::StructVal(sub) => {
+                    let fptr = self
+                        .cg
+                        .builder
+                        .build_struct_gep(struct_ty, addr, i as u32, "")
+                        .map_err(berr)?;
+                    self.init_struct_strings(fptr, *sub)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     fn lower_binop(
@@ -1137,6 +1362,10 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                     .ok_or_else(|| format!("untyped call arg {arg}"))?;
                 self.ext_int(self.ival(arg)?, &aty, int_bits(pty))?.into()
             }
+            // A value struct is passed by value (a borrowed view); the callee's
+            // entry retains its String fields (FD-049 Phase 3b). Structs never
+            // reach C runtime functions, so the LLVM ABI is self-consistent.
+            IrType::StructVal(_) => self.regs[&arg].into(),
             other => return Err(format!("call argument of type {other:?} is out of scope")),
         })
     }
@@ -1205,16 +1434,31 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
-    /// Release every String local slot (called before each `Return`).
+    /// Release every String (and value-struct String-field) local slot, called
+    /// before each `Return`. A struct slot owns +1 per String sub-field.
     fn release_string_locals(&self) -> Result<(), String> {
         for (i, local) in self.func.locals.iter().enumerate() {
-            if matches!(local.ty, IrType::String) {
-                let v = self
-                    .cg
-                    .builder
-                    .build_load(self.cg.ptr_t(), self.locals[i], "")
-                    .map_err(berr)?;
-                self.call_void(self.cg.rt_string_release(), &[v.into()])?;
+            match &local.ty {
+                IrType::String => {
+                    let v = self
+                        .cg
+                        .builder
+                        .build_load(self.cg.ptr_t(), self.locals[i], "")
+                        .map_err(berr)?;
+                    self.call_void(self.cg.rt_string_release(), &[v.into()])?;
+                }
+                IrType::StructVal(name) => {
+                    let def = self.cg.struct_def_by_name(*name)?;
+                    let lty =
+                        basic_type(self.cg.ctx, &self.cg.program.struct_defs, &local.ty)?;
+                    let agg = self
+                        .cg
+                        .builder
+                        .build_load(lty, self.locals[i], "")
+                        .map_err(berr)?;
+                    self.release_struct_strings(agg.into_struct_value(), def)?;
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -1248,6 +1492,13 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .get(&reg)
             .ok_or_else(|| format!("undefined reg {reg}"))?
             .into_pointer_value())
+    }
+    fn pval_struct(&self, reg: Reg) -> Result<StructValue<'ctx>, String> {
+        Ok(self
+            .regs
+            .get(&reg)
+            .ok_or_else(|| format!("undefined reg {reg}"))?
+            .into_struct_value())
     }
 
     /// Zero-extend an `i1` predicate result to `i32` (CB booleans are Int 1/0).
@@ -1433,7 +1684,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         let mut elems: Vec<inkwell::types::BasicTypeEnum<'ctx>> =
             vec![p.into(), p.into(), p.into(), i32t.into(), i32t.into()];
         for (_, fty) in &info.fields {
-            elems.push(basic_type(self.ctx, fty)?);
+            elems.push(basic_type(self.ctx, &self.program.struct_defs, fty)?);
         }
         let t = self.ctx.struct_type(&elems, false);
         self.node_types.borrow_mut().insert(type_def.0, t);
@@ -1465,26 +1716,37 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             .map(|(_, t)| t.clone())
             .ok_or_else(|| format!("unknown field {}", self.interner.resolve(field)))
     }
-}
 
-/// Array element layout: `(elem_size_bytes, elem_is_ref)` for the
-/// `cb_rt_array_new` call. The size matches the element's LLVM type width (so a
-/// plain element store/load writes exactly one slot); `elem_is_ref` flags
-/// String elements, whose slots default to the empty sentinel and follow the
-/// retain/release discipline. Non-Phase-2 element types fail loudly (Phase 3).
-fn elem_layout(elem: &IrType) -> Result<(u64, bool), String> {
-    Ok(match elem {
-        IrType::Byte => (1, false),
-        IrType::Short => (2, false),
-        IrType::Int => (4, false),
-        IrType::Long | IrType::Float => (8, false),
-        IrType::String => (8, true),
-        other => {
-            return Err(format!(
-                "array element type {other:?} is out of scope for the Phase-2 LLVM backend"
-            ));
-        }
-    })
+    /// Resolve a value-`Struct` name to its `StructDefInfo` (FD-049 Phase 3b).
+    pub(super) fn struct_def_by_name(&self, name: Symbol) -> Result<&'a StructDefInfo, String> {
+        self.program
+            .struct_defs
+            .iter()
+            .find(|d| d.name == name)
+            .ok_or_else(|| format!("unknown value struct {}", self.interner.resolve(name)))
+    }
+
+    /// The inline LLVM `StructType` for a value `Struct` (for `build_struct_gep`).
+    pub(super) fn struct_llvm_type(
+        &self,
+        name: Symbol,
+    ) -> Result<inkwell::types::StructType<'ctx>, String> {
+        Ok(
+            basic_type(self.ctx, &self.program.struct_defs, &IrType::StructVal(name))?
+                .into_struct_type(),
+        )
+    }
+
+    /// A value-struct field's `(element index, IR type)` — its declaration
+    /// position (no header offset, unlike a `Type` node) and type.
+    pub(super) fn struct_field(&self, name: Symbol, field: Symbol) -> Result<(u32, IrType), String> {
+        let def = self.struct_def_by_name(name)?;
+        def.fields
+            .iter()
+            .position(|(f, _)| *f == field)
+            .map(|i| (i as u32, def.fields[i].1.clone()))
+            .ok_or_else(|| format!("unknown field {}", self.interner.resolve(field)))
+    }
 }
 
 /// Number of bits for a scalar integer IR type.

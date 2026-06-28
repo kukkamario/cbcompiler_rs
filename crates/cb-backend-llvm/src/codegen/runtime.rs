@@ -256,7 +256,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         if let Some(f) = self.runtime.borrow().get(symbol) {
             return Ok(*f);
         }
-        let fty = fn_type(self.ctx, &sig.params, &sig.ret).map_err(|e| {
+        let fty = fn_type(self.ctx, &self.program.struct_defs, &sig.params, &sig.ret).map_err(|e| {
             format!("runtime function {symbol:?} has an unsupported signature: {e}")
         })?;
         let f = self
