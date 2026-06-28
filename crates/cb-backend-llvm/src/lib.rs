@@ -1,13 +1,13 @@
 //! LLVM backend for CoolBasic IR.
 //!
-//! Under the `codegen` feature this drives the **output half** of the AOT
-//! pipeline (FD-048): build an in-memory `inkwell` module, emit a native object,
-//! and link it — against the full CoolBasic runtime closure — into a runnable
-//! executable. It does *not* yet read the IR: it emits a fixed empty program
-//! (`i32 @main() { ret i32 0 }`) so the object-emit + linker plumbing is stood up
-//! independently of IR→LLVM instruction selection (a later FD). Without
-//! `codegen`, [`Backend::execute`] still reports the gap (driver exit 3) so the
-//! driver dispatches through the shared trait (FD-044) ahead of codegen.
+//! Under the `codegen` feature this drives the full AOT pipeline: lower the
+//! CoolBasic IR to an in-memory `inkwell` module (FD-049), emit a native object,
+//! and link it — against the CoolBasic runtime closure — into a runnable
+//! executable (FD-048). Phase 1 lowers the scalar core: user functions, control
+//! flow, runtime calls, strings, and `Print`; the produced exe's stdout + exit
+//! code match the interpreter (the reference oracle). Without `codegen`,
+//! [`Backend::execute`] still reports the gap (driver exit 3) so the driver
+//! dispatches through the shared trait (FD-044) ahead of codegen.
 
 use std::path::PathBuf;
 
@@ -15,6 +15,8 @@ use cb_backend_api::{Backend, BackendError, BackendOutcome};
 use cb_diagnostics::Interner;
 use cb_ir::Program;
 
+#[cfg(feature = "codegen")]
+mod codegen;
 #[cfg(feature = "codegen")]
 mod emit;
 #[cfg(feature = "codegen")]
@@ -58,15 +60,14 @@ impl Backend for LlvmBackend {
         "llvm"
     }
 
-    /// Emit the empty-program object and link it into a runtime-linked exe,
-    /// returning [`BackendOutcome::Produced`]. The `program` is accepted but not
-    /// read (FD-048): the body is independent of the IR. Any emit/link failure
-    /// becomes `BackendError::failed` → driver exit 1.
+    /// Lower the IR to a native object and link it into a runtime-linked exe,
+    /// returning [`BackendOutcome::Produced`]. Any codegen/link failure becomes
+    /// `BackendError::failed` → driver exit 1.
     #[cfg(feature = "codegen")]
     fn execute(
         &self,
-        _program: &Program,
-        _interner: &Interner,
+        program: &Program,
+        interner: &Interner,
     ) -> Result<BackendOutcome, BackendError> {
         let artifact = self.artifact_path();
 
@@ -80,7 +81,7 @@ impl Backend for LlvmBackend {
         };
         let obj = tmp.path().join(obj_name);
 
-        emit::emit_empty_main(&obj).map_err(BackendError::failed)?;
+        codegen::build_object(program, interner, &obj).map_err(BackendError::failed)?;
         link::link(&obj, &artifact, link::WholeArchive::No).map_err(BackendError::failed)?;
 
         Ok(BackendOutcome::Produced { artifact })
@@ -117,14 +118,28 @@ mod codegen_smoke {
     }
 
     #[test]
-    fn empty_program_links_and_runs() {
+    fn trivial_module_links_and_runs() {
+        // A minimal `i32 main() { ret 0 }` built directly, then emit→link→run.
+        // Keeps the FD-048 object-emit + runtime-closure-resolution smoke green
+        // independent of the IR→LLVM lowering (which the diff suite exercises).
+        let ctx = inkwell::context::Context::create();
+        let module = ctx.create_module("cb_smoke");
+        let builder = ctx.create_builder();
+        let i32_t = ctx.i32_type();
+        let main = module.add_function("main", i32_t.fn_type(&[], false), None);
+        let entry = ctx.append_basic_block(main, "entry");
+        builder.position_at_end(entry);
+        builder
+            .build_return(Some(&i32_t.const_int(0, false)))
+            .expect("build return");
+
         let tmp = tempfile::tempdir().expect("temp dir");
         let obj = tmp.path().join(if cfg!(windows) { "m.obj" } else { "m.o" });
         let exe = tmp
             .path()
             .join(format!("m{}", std::env::consts::EXE_SUFFIX));
 
-        emit::emit_empty_main(&obj).expect("emit object");
+        emit::write_module(&module, &obj).expect("emit object");
         // Whole-archive the runtime so the closure must actually resolve, not
         // just parse as link args (FD-048 decision 2).
         link::link(&obj, &exe, link::WholeArchive::Yes).expect("link runtime closure");
@@ -132,6 +147,6 @@ mod codegen_smoke {
         let status = std::process::Command::new(&exe)
             .status()
             .expect("run produced exe");
-        assert_eq!(status.code(), Some(0), "empty program should exit 0");
+        assert_eq!(status.code(), Some(0), "trivial program should exit 0");
     }
 }

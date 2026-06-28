@@ -200,6 +200,13 @@ unsafe extern "C" {
     /// String->Float — lenient strtod-style prefix parse, 0.0 on no valid prefix.
     pub fn cb_rt_string_to_float(s: *const CbString) -> f64;
 
+    /// Lexicographic byte comparison shared by the interpreter and the native
+    /// backend (FD-049 decision C). `<0` / `0` / `>0`; null operands are treated
+    /// as empty. Bare symbol like the conversion primitives above — not a catalog
+    /// row, not in `CbStringApi`. The interpreter repoints its inline string
+    /// relations onto this so there is one ordering oracle.
+    pub fn cb_rt_string_compare(a: *const CbString, b: *const CbString) -> i32;
+
     /// Runtime Trap Channel handshake (FD-015): hand the runtime its host API
     /// and receive the hook table back. See [`runtime_init`] for the safe
     /// wrapper. Each plugin DLL exports this alongside `cb_runtime_get_catalog`.

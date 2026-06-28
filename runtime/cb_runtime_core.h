@@ -188,6 +188,10 @@ CbString* cb_rt_string_retain(CbString* s);
 void cb_rt_string_release(CbString* s);
 CbString* cb_rt_string_from_literal(const uint8_t* data, size_t len);
 size_t cb_rt_string_len(const CbString* s);
+/* Unicode codepoint count (CB `Len(s$)`); distinct from the byte length above.
+   Bare symbol; the native backend lowers `StrLen` onto it to match the
+   interpreter's codepoint count. */
+size_t cb_rt_string_char_len(const CbString* s);
 const uint8_t* cb_rt_string_data(const CbString* s);
 CbString* cb_rt_string_concat(const CbString* a, const CbString* b);
 
@@ -196,7 +200,30 @@ CbString* cb_rt_string_concat(const CbString* a, const CbString* b);
    directly by Rust-side tests via an extern declaration. */
 int32_t cb_rt_string_test_refcount(const CbString* s);
 
+/* Lexicographic byte comparison shared by the interpreter and the native
+   backend (FD-049 decision C). Returns <0 / 0 / >0 (normalized to -1/0/1);
+   null operands are treated as empty. NOT a CB_FN — a bare symbol like the
+   string primitives. */
+int32_t cb_rt_string_compare(const CbString* a, const CbString* b);
+
 extern const CbStringApi cb_runtime_string_api;
+
+/* ─── Standalone (AOT) program lifecycle (FD-049 decision A) ──────────────
+   The native backend emits a tiny `int main()` that calls cb_rt_standalone_run
+   with the lowered top-level body (`cb_user_main`). These build the default
+   host, run the FD-015 handshake, run the body, and exit cleanly. They carry no
+   `main` of their own, so they are dormant/harmless in the interpreter binary
+   (which statically links the runtime and drives cb_runtime_init itself). */
+
+/* No-return clean process exit. Fires the about_to_exit teardown exactly once
+   (latched), then libc exit() — which flushes piped stdio (the test harness
+   captures stdout). Also the target of the default host's request_exit. */
+void cb_rt_exit(int32_t code);
+
+/* Build the default CbHostApi, run cb_runtime_init (null handshake → stderr +
+   exit 1), stash the returned hooks for cb_rt_exit, invoke user_main, then
+   cb_rt_exit(0). Returns 0 only formally (it never returns). */
+int32_t cb_rt_standalone_run(void (*user_main)(void));
 
 /* Runtime Trap Channel handshake (FD-015). The host passes its API by const
    pointer; the runtime stashes it in a file-static and returns the hook table

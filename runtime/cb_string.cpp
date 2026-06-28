@@ -163,10 +163,47 @@ extern "C" CbString* cb_rt_string_concat(const CbString* a, const CbString* b) {
     return out;
 }
 
+// Unicode codepoint count of a UTF-8 string (CB `Len(s$)`): every byte that is
+// NOT a UTF-8 continuation byte (0b10xxxxxx) starts a new codepoint. This MUST
+// match the interpreter's `StrLen` count exactly (cb-backend-interp, which uses
+// the identical `(b & 0xC0) != 0x80` predicate) — the native backend lowers
+// `StrLen` onto this so the two cannot diverge. Distinct from cb_rt_string_len,
+// which is the BYTE length. Null → 0.
+extern "C" std::size_t cb_rt_string_char_len(const CbString* s) {
+    std::size_t n = cb_rt_string_len(s);
+    if (n == 0) return 0;
+    const uint8_t* p = cb_rt_string_data(s);
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if ((p[i] & 0xC0) != 0x80) ++count;
+    }
+    return count;
+}
+
 extern "C" int32_t cb_rt_string_test_refcount(const CbString* s) {
     if (!s) return 0;
     return std::atomic_ref<int32_t>(const_cast<int32_t&>(s->refcount))
         .load(std::memory_order_relaxed);
+}
+
+// Lexicographic comparison over the raw UTF-8 bytes: `memcmp` across the shared
+// prefix, then a length tiebreak. This is exactly Rust's slice `Ord` over the
+// byte slices (`a.as_bytes() < b.as_bytes()`), so it is the single ordering
+// oracle shared by the interpreter's string relations and the native backend
+// (FD-049 decision C). `memcmp` compares unsigned bytes, matching Rust's `u8`
+// ordering. Null operands are treated as empty (len 0) via the len/data helpers.
+// Returns <0 / 0 / >0 (normalized to -1/0/1).
+extern "C" int32_t cb_rt_string_compare(const CbString* a, const CbString* b) {
+    std::size_t la = cb_rt_string_len(a);
+    std::size_t lb = cb_rt_string_len(b);
+    std::size_t n = la < lb ? la : lb;
+    if (n > 0) {
+        int cmp = std::memcmp(cb_rt_string_data(a), cb_rt_string_data(b), n);
+        if (cmp != 0) return cmp < 0 ? -1 : 1;
+    }
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    return 0;
 }
 
 // ─── Catalog wiring ─────────────────────────────────────────────────────

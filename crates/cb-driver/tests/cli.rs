@@ -616,18 +616,34 @@ fn request_exit_negative_clamps_to_zero() {
 
 #[cfg(feature = "llvm")]
 #[test]
-fn backend_llvm_reports_not_implemented() {
-    // Selecting the llvm backend used to parse, lower, verify, then run
-    // nothing and exit 0. It must now fail loudly with a distinct exit code.
+fn backend_llvm_compiles_and_runs() {
+    // The llvm backend now lowers the IR (FD-049): it emits a native exe,
+    // reports `cb: wrote …`, and exits 0. The produced exe runs and prints the
+    // program's output. (The exhaustive interp==llvm parity check is the
+    // `diff_llvm` suite; this is the CLI-contract smoke.)
     let dir = tempdir().unwrap();
-    let path = write_cb(&dir, "ok.cb", "Dim x As Int = 1\n");
+    let path = write_cb(&dir, "ok.cb", "Print \"hi from llvm\"\n");
+    let exe = dir
+        .path()
+        .join(format!("ok{}", std::env::consts::EXE_SUFFIX));
     Command::cargo_bin("cb")
         .unwrap()
-        .args(["--backend", "llvm"])
+        .args(["--backend", "llvm", "-o"])
+        .arg(&exe)
         .arg(&path)
         .assert()
-        .code(3)
-        .stderr(contains("not yet implemented"));
+        .success()
+        .stdout(contains("cb: wrote"));
+
+    let out = std::process::Command::new(&exe)
+        .output()
+        .expect("run produced exe");
+    assert!(out.status.success(), "produced exe should exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("hi from llvm"),
+        "produced exe stdout missing program output: {stdout:?}"
+    );
 }
 
 #[cfg(not(any(feature = "interp", feature = "llvm")))]

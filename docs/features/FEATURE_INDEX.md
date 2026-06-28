@@ -8,7 +8,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
-| - | - | - | - | No active features |
+| [FD-049](FD-049_IR_TO_LLVM_LOWERING.md) | IR → LLVM Lowering | In Progress | High | High |
 
 ## Deferred / Closed
 
