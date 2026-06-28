@@ -1,6 +1,7 @@
 # FD-052: `Repeat … Until` Loop — Loop Until Condition Is Truthy
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-28
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Completes the loop family with the classic CoolBasic post-test loop. `Repeat … Until cond` runs the body, then loops back while `cond` is falsy and exits the moment it becomes truthy — the dual of the existing `Repeat … While`.
