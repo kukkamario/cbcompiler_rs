@@ -91,6 +91,7 @@ macro_rules! diff_tests {
 diff_tests! {
     int_arithmetic,
     shift_mixed_width,
+    byte_short_overflow,
     float_formatting,
     mixed_arithmetic,
     string_ops,
@@ -121,6 +122,10 @@ diff_tests! {
     array_1d,
     array_multidim,
     array_redim,
+    array_redim_grow,
+    array_redim_shrink,
+    array_redim_multidim,
+    array_redim_global,
     array_len,
     array_foreach,
     array_string,
@@ -139,6 +144,7 @@ diff_tests! {
     type_pass_to_function,
     type_inference_fd042,
     type_first_each_delete,
+    type_previous,
     type_ref_equality,
 }
 
@@ -150,6 +156,7 @@ diff_tests! {
     struct_copy_value,
     struct_nested,
     struct_array_elem,
+    struct_array_string,
     struct_string_field,
     struct_param_value,
     struct_return_string,

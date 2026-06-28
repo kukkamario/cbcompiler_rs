@@ -1,0 +1,24 @@
+' Byte/Short arithmetic wraparound via computed values (FD-049 review F16).
+' Byte/Short are storage-only: they widen (unsigned) to Int for arithmetic and
+' narrow back (truncate) only on a store to a Byte/Short slot. Literals out of
+' range are a compile error, so overflow must come from computation.
+
+Dim b As Byte = 200
+Print Str(b)                ' 200 — unsigned zext, not -56
+
+b = b + 100                 ' 300 & 0xFF == 44
+Print Str(b)
+
+Dim c As Byte = 16
+c = c * 16                  ' 256 & 0xFF == 0
+Print Str(c)
+
+Dim s As Short = 60000
+Print Str(s)                ' 60000 — unsigned, not negative
+s = s + 10000               ' 70000 & 0xFFFF == 4464
+Print Str(s)
+
+' A wrapped Byte used in further Int arithmetic (zext-load path).
+Dim d As Byte = 250
+d = d + 10                  ' 260 & 0xFF == 4
+Print Str(d + 1)            ' 4 + 1 == 5 (Int arithmetic)

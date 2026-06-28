@@ -1,0 +1,20 @@
+' Walk the type-instance linked list backward via Previous() (FD-049 review
+' F14), starting from Last and stepping off the first node to Null. CoolBasic
+' uses Previous (not Before).
+Type Node
+    Field v As Int
+EndType
+
+Dim a As Node = New Node
+a.v = 1
+Dim b As Node = New Node
+b.v = 2
+Dim c As Node = New Node
+c.v = 3
+
+Dim it As Node = Last(Node)
+While it <> Null
+    Print Str(it.v)
+    it = Previous(it)
+Wend
+Print "done"

@@ -1,0 +1,10 @@
+' Redim to a SMALLER size (FD-049 review F15): a fresh, zero-initialised array,
+' no stale data carried from the larger original.
+Dim arr As Int[] = New Int[5]
+arr[0] = 1
+arr[4] = 5
+Print "len before: " + Str(Len(arr))
+Redim arr As Int[2]
+Print "len after: " + Str(Len(arr))
+Print Str(arr[0])           ' zero-filled fresh array, not 1
+Print Str(arr[1])
