@@ -21,7 +21,7 @@ use inkwell::values::{
 };
 use inkwell::{FloatPredicate, IntPredicate};
 
-use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, Terminator};
+use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
 use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg};
 
 use super::Codegen;
@@ -46,6 +46,14 @@ pub(super) struct FunctionLowerer<'a, 'ctx, 'f> {
     locals: Vec<PointerValue<'ctx>>,
     /// SSA reg → its LLVM value.
     regs: HashMap<Reg, BasicValueEnum<'ctx>>,
+    /// One reusable entry-block `[maxRank x i64]` scratch buffer for array
+    /// index/dims lists (FD-049 Phase 2). A per-instruction alloca inside a
+    /// loop body would grow the O0 stack each iteration; this single buffer is
+    /// rewritten and consumed synchronously by each `cb_rt_array_*` call. The
+    /// struct-of-i64 layout is contiguous (passed as the `int64_t*` arg) and
+    /// lets us index it with the safe `build_struct_gep`. `None` when the
+    /// function has no array ops.
+    idx_scratch: Option<(PointerValue<'ctx>, inkwell::types::StructType<'ctx>)>,
 }
 
 impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
@@ -72,6 +80,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             blocks,
             locals: Vec::new(),
             regs: HashMap::new(),
+            idx_scratch: None,
         }
     }
 
@@ -113,6 +122,25 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 .build_alloca(lty, &format!("local{i}"))
                 .map_err(berr)?;
             self.locals.push(slot);
+        }
+        // One reusable `[maxRank x i64]` scratch for array index/dims lists
+        // (FD-049 Phase 2). Allocated once in the entry block — never per
+        // instruction — so a loop body with an indexed array does not grow the
+        // O0 stack each iteration. Skipped entirely when the function has no
+        // array ops (max rank 0).
+        let max_rank = self.max_index_rank();
+        if max_rank > 0 {
+            let i64t = self.cg.ctx.i64_type();
+            let buf_ty = self
+                .cg
+                .ctx
+                .struct_type(&vec![i64t.into(); max_rank], false);
+            let buf = self
+                .cg
+                .builder
+                .build_alloca(buf_ty, "idxbuf")
+                .map_err(berr)?;
+            self.idx_scratch = Some((buf, buf_ty));
         }
         // Default-init every slot (interp default-inits all locals; String slots
         // MUST be initialized before any release-on-store sees garbage).
@@ -164,7 +192,11 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             IrType::Int => self.cg.ctx.i32_type().const_zero().into(),
             IrType::Long => self.cg.ctx.i64_type().const_zero().into(),
             IrType::Float => self.cg.ctx.f64_type().const_zero().into(),
-            IrType::String | IrType::Null => self.cg.ptr_t().const_null().into(),
+            // String/Null and an array handle (`CbArray*`) default to a null
+            // pointer (an un-`New`'d array is Null, matching the interpreter).
+            IrType::String | IrType::Null | IrType::Array { .. } => {
+                self.cg.ptr_t().const_null().into()
+            }
             other => {
                 return Err(format!(
                     "local of type {other:?} is out of scope for the Phase-1 LLVM backend"
@@ -253,6 +285,93 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             InstKind::Call { callee, args } => {
                 self.lower_call(inst, *callee, args)?;
             }
+
+            // ── Arrays (FD-049 Phase 2) ────────────────────────────────
+            InstKind::NewArray { elem_type, dims } => {
+                let handle = self.build_new_array(elem_type, dims)?;
+                self.bind(inst, handle);
+            }
+            InstKind::GetElement { array, indices } => {
+                let elem = self.array_elem_type(*array)?;
+                let handle = self.pval(*array)?;
+                let buf = self.i64_buf(indices)?;
+                let rank = self.cg.ctx.i64_type().const_int(indices.len() as u64, false);
+                let elem_ptr = self
+                    .call_value(
+                        self.cg.rt_array_elem_addr(),
+                        &[handle.into(), buf.into(), rank.into()],
+                    )?
+                    .into_pointer_value();
+                let val = self.load_elem(elem_ptr, &elem)?;
+                self.bind(inst, val);
+            }
+            InstKind::GetElementFlat { array, index } => {
+                let elem = self.array_elem_type(*array)?;
+                let handle = self.pval(*array)?;
+                let idx = self.ext_to_i64(*index)?;
+                let elem_ptr = self
+                    .call_value(
+                        self.cg.rt_array_elem_addr_flat(),
+                        &[handle.into(), idx.into()],
+                    )?
+                    .into_pointer_value();
+                let val = self.load_elem(elem_ptr, &elem)?;
+                self.bind(inst, val);
+            }
+            InstKind::Len { array, dim } => {
+                let handle = self.pval(*array)?;
+                let d = match dim {
+                    Some(d) => self.ext_to_i64(*d)?,
+                    None => self.cg.ctx.i64_type().const_zero(),
+                };
+                let len = self
+                    .call_value(self.cg.rt_array_dim_len(), &[handle.into(), d.into()])?
+                    .into_int_value();
+                let trunc = self
+                    .cg
+                    .builder
+                    .build_int_truncate(len, self.cg.ctx.i32_type(), "")
+                    .map_err(berr)?;
+                self.bind(inst, trunc.into());
+            }
+            InstKind::ArrayTotalLen { array } => {
+                let handle = self.pval(*array)?;
+                let total = self
+                    .call_value(self.cg.rt_array_total_len(), &[handle.into()])?
+                    .into_int_value();
+                let trunc = self
+                    .cg
+                    .builder
+                    .build_int_truncate(total, self.cg.ctx.i32_type(), "")
+                    .map_err(berr)?;
+                self.bind(inst, trunc.into());
+            }
+            InstKind::Redim {
+                local,
+                elem_type,
+                dims,
+            } => {
+                // Fresh, zero-initialised array; the slot's old handle leaks
+                // (arrays are not freed/refcounted in Phase 2). No preserve.
+                let handle = self.build_new_array(elem_type, dims)?;
+                self.cg
+                    .builder
+                    .build_store(self.locals[local.0 as usize], handle)
+                    .map_err(berr)?;
+            }
+            InstKind::RedimGlobal {
+                global,
+                elem_type,
+                dims,
+            } => {
+                let handle = self.build_new_array(elem_type, dims)?;
+                let slot = self.cg.globals[global.0 as usize].as_pointer_value();
+                self.cg.builder.build_store(slot, handle).map_err(berr)?;
+            }
+            InstKind::StorePlace { root, path, value } => {
+                self.lower_store_place(root, path, *value)?;
+            }
+
             other => {
                 return Err(format!(
                     "instruction {other:?} is out of scope for the Phase-1 LLVM backend"
@@ -296,6 +415,184 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         }
         let val = self.regs[&value];
         self.cg.builder.build_store(slot, val).map_err(berr)?;
+        Ok(())
+    }
+
+    // ── Array helpers (FD-049 Phase 2) ──────────────────────────────────
+
+    /// The widest array index/dims list across every block — the size of the
+    /// single reusable entry-block scratch buffer. `GetElementFlat`/`Len` pass
+    /// their one index/dim directly (not via the buffer), so they don't count.
+    fn max_index_rank(&self) -> usize {
+        let mut max = 0;
+        for block in &self.func.blocks {
+            for inst in &block.insts {
+                let n = match &inst.kind {
+                    InstKind::NewArray { dims, .. }
+                    | InstKind::Redim { dims, .. }
+                    | InstKind::RedimGlobal { dims, .. } => dims.len(),
+                    InstKind::GetElement { indices, .. } => indices.len(),
+                    InstKind::StorePlace { path, .. } => path
+                        .iter()
+                        .map(|p| match p {
+                            Projection::Index(idxs) => idxs.len(),
+                            Projection::Field(_) => 0,
+                        })
+                        .max()
+                        .unwrap_or(0),
+                    _ => 0,
+                };
+                max = max.max(n);
+            }
+        }
+        max
+    }
+
+    /// Sign-/zero-extend an integer reg to `i64` per its IR type — the width the
+    /// array helpers take index/dim args in.
+    fn ext_to_i64(&self, reg: Reg) -> Result<IntValue<'ctx>, String> {
+        let ty = self
+            .info
+            .type_of(reg)
+            .cloned()
+            .ok_or_else(|| format!("untyped array index/dim reg {reg}"))?;
+        self.ext_int(self.ival(reg)?, &ty, 64)
+    }
+
+    /// Fill the reusable scratch buffer with `regs` (each extended to i64) and
+    /// return its base pointer (== the `int64_t*` arg the array helpers take).
+    fn i64_buf(&self, regs: &[Reg]) -> Result<PointerValue<'ctx>, String> {
+        let (buf, buf_ty) = self
+            .idx_scratch
+            .ok_or("array op without an allocated index scratch (prescan missed it)")?;
+        for (i, r) in regs.iter().enumerate() {
+            let v = self.ext_to_i64(*r)?;
+            let slot = self
+                .cg
+                .builder
+                .build_struct_gep(buf_ty, buf, i as u32, "")
+                .map_err(berr)?;
+            self.cg.builder.build_store(slot, v).map_err(berr)?;
+        }
+        Ok(buf)
+    }
+
+    /// Element type of the array a reg holds (its IR type is `Array { elem }`).
+    fn array_elem_type(&self, array: Reg) -> Result<IrType, String> {
+        match self.info.type_of(array) {
+            Some(IrType::Array { elem, .. }) => Ok((**elem).clone()),
+            other => Err(format!(
+                "expected an array reg for {array}, found {other:?}"
+            )),
+        }
+    }
+
+    /// Load an element through `elem_ptr`, retaining it if it is a String (a
+    /// loaded String is an independently-owned +1 reg), mirroring `load_slot`.
+    fn load_elem(
+        &self,
+        elem_ptr: PointerValue<'ctx>,
+        elem: &IrType,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let lty = basic_type(self.cg.ctx, elem)?;
+        let v = self.cg.builder.build_load(lty, elem_ptr, "").map_err(berr)?;
+        if matches!(elem, IrType::String) {
+            Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
+        } else {
+            Ok(v)
+        }
+    }
+
+    /// Lower a `NewArray`/`Redim` allocation: build the dims into the scratch,
+    /// then call `cb_rt_array_new(rank, dims, elem_size, elem_is_ref)`.
+    fn build_new_array(
+        &self,
+        elem_type: &IrType,
+        dims: &[Reg],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let (elem_size, elem_is_ref) = elem_layout(elem_type)?;
+        let buf = self.i64_buf(dims)?;
+        let rank = self.cg.ctx.i64_type().const_int(dims.len() as u64, false);
+        let esize = self.cg.ctx.i64_type().const_int(elem_size, false);
+        let eref = self
+            .cg
+            .ctx
+            .i32_type()
+            .const_int(elem_is_ref as u64, false);
+        self.call_value(
+            self.cg.rt_array_new(),
+            &[rank.into(), buf.into(), esize.into(), eref.into()],
+        )
+    }
+
+    /// Lower a `StorePlace` (Phase 2 = a single `Index` projection into an
+    /// array element). Resolve the root slot, load the handle, address the
+    /// element, then the Phase-1 String discipline (release the old element,
+    /// move the value reg's +1 in); non-String elements plain-store.
+    fn lower_store_place(
+        &self,
+        root: &PlaceRoot,
+        path: &[Projection],
+        value: Reg,
+    ) -> Result<(), String> {
+        // Phase 2 only handles `arr[idxs] = v` — exactly one Index step. A
+        // field projection (struct/Type fields) is Phase 3.
+        let idxs = match path {
+            [Projection::Index(idxs)] => idxs.as_slice(),
+            [Projection::Field(_)] => {
+                return Err("StorePlace field projection is out of Phase-2 scope".into());
+            }
+            _ => {
+                return Err(format!(
+                    "StorePlace with a {}-step path is out of Phase-2 scope",
+                    path.len()
+                ));
+            }
+        };
+
+        // Resolve the root variable's slot and its (array) IR type.
+        let (slot, root_ty) = match root {
+            PlaceRoot::Local(id) => (
+                self.locals[id.0 as usize],
+                self.func.locals[id.0 as usize].ty.clone(),
+            ),
+            PlaceRoot::Global(id) => (
+                self.cg.globals[id.0 as usize].as_pointer_value(),
+                self.cg.program.globals[id.0 as usize].ty.clone(),
+            ),
+        };
+        let elem = match &root_ty {
+            IrType::Array { elem, .. } => (**elem).clone(),
+            other => return Err(format!("StorePlace root is not an array: {other:?}")),
+        };
+
+        // Load the array handle and address the element.
+        let handle = self
+            .cg
+            .builder
+            .build_load(self.cg.ptr_t(), slot, "")
+            .map_err(berr)?;
+        let buf = self.i64_buf(idxs)?;
+        let rank = self.cg.ctx.i64_type().const_int(idxs.len() as u64, false);
+        let elem_ptr = self
+            .call_value(
+                self.cg.rt_array_elem_addr(),
+                &[handle.into(), buf.into(), rank.into()],
+            )?
+            .into_pointer_value();
+
+        // String element: release the slot's prior contents, then move the
+        // reg's +1 in. Non-String: plain store.
+        if matches!(elem, IrType::String) {
+            let old = self
+                .cg
+                .builder
+                .build_load(self.cg.ptr_t(), elem_ptr, "")
+                .map_err(berr)?;
+            self.call_void(self.cg.rt_string_release(), &[old.into()])?;
+        }
+        let val = self.regs[&value];
+        self.cg.builder.build_store(elem_ptr, val).map_err(berr)?;
         Ok(())
     }
 
@@ -588,7 +885,9 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     /// borrowed (the callee retains into its own slot); numbers are width-cast.
     fn marshal_arg(&self, arg: Reg, pty: &IrType) -> Result<BasicMetadataValueEnum<'ctx>, String> {
         Ok(match pty {
-            IrType::String | IrType::Null => self.pval(arg)?.into(),
+            // String, a null reference, and an array handle are all borrowed
+            // pointers (the callee retains/copies as it needs).
+            IrType::String | IrType::Null | IrType::Array { .. } => self.pval(arg)?.into(),
             IrType::Float => self.fval(arg)?.into(),
             IrType::Byte | IrType::Short | IrType::Int | IrType::Long => {
                 let aty = self
@@ -862,6 +1161,26 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         )?;
         Ok(self.call_value(f, &[x.into()])?.into_int_value())
     }
+}
+
+/// Array element layout: `(elem_size_bytes, elem_is_ref)` for the
+/// `cb_rt_array_new` call. The size matches the element's LLVM type width (so a
+/// plain element store/load writes exactly one slot); `elem_is_ref` flags
+/// String elements, whose slots default to the empty sentinel and follow the
+/// retain/release discipline. Non-Phase-2 element types fail loudly (Phase 3).
+fn elem_layout(elem: &IrType) -> Result<(u64, bool), String> {
+    Ok(match elem {
+        IrType::Byte => (1, false),
+        IrType::Short => (2, false),
+        IrType::Int => (4, false),
+        IrType::Long | IrType::Float => (8, false),
+        IrType::String => (8, true),
+        other => {
+            return Err(format!(
+                "array element type {other:?} is out of scope for the Phase-2 LLVM backend"
+            ));
+        }
+    })
 }
 
 /// Number of bits for a scalar integer IR type.

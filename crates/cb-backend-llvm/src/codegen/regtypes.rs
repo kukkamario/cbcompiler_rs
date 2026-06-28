@@ -92,7 +92,22 @@ fn result_type(
         InstKind::BinOp { op, lhs, .. } => binop_result(*op, types.get(lhs)?),
         InstKind::UnOp { op, operand } => unop_result(*op, types.get(operand)?),
         InstKind::Call { callee, .. } => (*program.func_table[callee.0 as usize].sig.ret).clone(),
-        // Out-of-Phase-1 producers carry no derivable scalar type here; the
+        // ── Arrays (FD-049 Phase 2) ────────────────────────────────────
+        // `Len`/`ArrayTotalLen` yield Int counts; `NewArray` yields the array
+        // handle type; element reads yield the array's element type (resolved
+        // once the array reg's type is known — the fixpoint retries otherwise).
+        InstKind::Len { .. } | InstKind::ArrayTotalLen { .. } => IrType::Int,
+        InstKind::NewArray { elem_type, dims } => IrType::Array {
+            elem: Box::new(elem_type.clone()),
+            rank: dims.len() as u8,
+        },
+        InstKind::GetElement { array, .. } | InstKind::GetElementFlat { array, .. } => {
+            match types.get(array)? {
+                IrType::Array { elem, .. } => (**elem).clone(),
+                _ => return None,
+            }
+        }
+        // Out-of-scope producers carry no derivable scalar type here; the
         // lowerer rejects them when it actually encounters one.
         _ => return None,
     })

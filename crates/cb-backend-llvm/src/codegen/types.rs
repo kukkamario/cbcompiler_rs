@@ -1,9 +1,10 @@
 //! `IrType` → `inkwell` type mapping and function-type construction (FD-049).
 //!
-//! Scalar Phase-1 surface only. Aggregate/reference IR types (`Array`,
-//! `TypeRef`, `StructVal`, `FnPtr`, `RuntimeType`) are deliberately rejected
-//! with an error rather than guessed at — they are out of Phase-1 scope, so a
-//! program that reaches one fails the codegen loudly instead of miscompiling.
+//! Scalar Phase-1 surface plus array handles (FD-049 Phase 2): an `Array`
+//! lowers to an opaque `CbArray*` pointer. The remaining reference IR types
+//! (`TypeRef`, `StructVal`, `FnPtr`, `RuntimeType`) are deliberately rejected
+//! with an error rather than guessed at — they are out of scope, so a program
+//! that reaches one fails the codegen loudly instead of miscompiling.
 
 use inkwell::AddressSpace;
 use inkwell::context::Context;
@@ -23,6 +24,8 @@ pub fn basic_type<'ctx>(ctx: &'ctx Context, ty: &IrType) -> Result<BasicTypeEnum
         IrType::Float => ctx.f64_type().into(),
         // CbString* (opaque) and a null reference both lower to `ptr`.
         IrType::String | IrType::Null => ctx.ptr_type(AddressSpace::default()).into(),
+        // An array handle is an opaque `CbArray*` (FD-049 Phase 2), like String.
+        IrType::Array { .. } => ctx.ptr_type(AddressSpace::default()).into(),
         other => {
             return Err(format!(
                 "IR type {other:?} is out of scope for the Phase-1 LLVM backend \
@@ -95,7 +98,7 @@ mod tests {
     #[test]
     fn aggregate_types_error() {
         let ctx = Context::create();
-        assert!(basic_type(&ctx, &IrType::TypeRef(cb_diagnostics::Symbol::DUMMY)).is_err());
+        // An array handle lowers to an opaque pointer (FD-049 Phase 2)...
         assert!(
             basic_type(
                 &ctx,
@@ -104,8 +107,11 @@ mod tests {
                     rank: 1
                 }
             )
-            .is_err()
+            .unwrap()
+            .is_pointer_type()
         );
+        // ...while the remaining reference IR types are still rejected.
+        assert!(basic_type(&ctx, &IrType::TypeRef(cb_diagnostics::Symbol::DUMMY)).is_err());
     }
 
     #[test]

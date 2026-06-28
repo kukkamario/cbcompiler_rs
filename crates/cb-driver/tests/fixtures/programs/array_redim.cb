@@ -1,0 +1,8 @@
+Dim arr As Int[] = New Int[3]
+arr[0] = 11
+arr[1] = 22
+arr[2] = 33
+Redim arr As Int[3]
+Print Str(arr[0])
+Print Str(arr[1])
+Print Str(arr[2])

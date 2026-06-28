@@ -1,0 +1,6 @@
+Dim grid As Int[,] = New Int[2, 3]
+Print Str(Len(grid))
+Print Str(Len(grid, 0))
+Print Str(Len(grid, 1))
+Dim arr As Int[] = New Int[5]
+Print Str(Len(arr))

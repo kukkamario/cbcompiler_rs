@@ -138,6 +138,53 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         self.declare_rt("cb_rt_standalone_run", fty)
     }
 
+    // ── Array heap helpers (FD-049 Phase 2; cb_array.cpp) ────────────────
+
+    /// `CbArray* cb_rt_array_new(int64_t rank, const int64_t* dims,
+    ///                           int64_t elem_size, int32_t elem_is_ref)`.
+    pub(super) fn rt_array_new(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let i64 = self.ctx.i64_type();
+        let fty = p.fn_type(
+            &[i64.into(), p.into(), i64.into(), self.ctx.i32_type().into()],
+            false,
+        );
+        self.declare_rt("cb_rt_array_new", fty)
+    }
+
+    /// `void* cb_rt_array_elem_addr(CbArray*, const int64_t* indices, int64_t rank)`.
+    pub(super) fn rt_array_elem_addr(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let fty = p.fn_type(&[p.into(), p.into(), self.ctx.i64_type().into()], false);
+        self.declare_rt("cb_rt_array_elem_addr", fty)
+    }
+
+    /// `void* cb_rt_array_elem_addr_flat(CbArray*, int64_t index)`.
+    pub(super) fn rt_array_elem_addr_flat(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let fty = p.fn_type(&[p.into(), self.ctx.i64_type().into()], false);
+        self.declare_rt("cb_rt_array_elem_addr_flat", fty)
+    }
+
+    /// `int64_t cb_rt_array_total_len(const CbArray*)`.
+    pub(super) fn rt_array_total_len(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt(
+            "cb_rt_array_total_len",
+            self.ctx.i64_type().fn_type(&[p.into()], false),
+        )
+    }
+
+    /// `int64_t cb_rt_array_dim_len(const CbArray*, int64_t dim)`.
+    pub(super) fn rt_array_dim_len(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let fty = self
+            .ctx
+            .i64_type()
+            .fn_type(&[p.into(), self.ctx.i64_type().into()], false);
+        self.declare_rt("cb_rt_array_dim_len", fty)
+    }
+
     // ── Catalog functions (Call to a Runtime callee) ────────────────────
 
     /// Declare a catalog runtime function from its IR signature, caching by

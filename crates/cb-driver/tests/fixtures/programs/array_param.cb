@@ -1,0 +1,14 @@
+Function sumArr(arr As Int[]) As Int
+    Dim total As Int = 0
+    For i = 0 To Len(arr) - 1
+        total = total + arr[i]
+    Next i
+    Return total
+EndFunction
+
+Dim xs As Int[] = New Int[4]
+xs[0] = 5
+xs[1] = 10
+xs[2] = 15
+xs[3] = 20
+Print Str(sumArr(xs))

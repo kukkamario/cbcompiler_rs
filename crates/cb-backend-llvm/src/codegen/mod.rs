@@ -5,10 +5,11 @@
 //! it to [`crate::emit::write_module`] for native object emission. The link step
 //! (CRT + runtime closure) stays in [`crate::link`].
 //!
-//! Scope is the Phase-1 scalar core: user functions, control flow, runtime
-//! calls, strings, and `Print`. Aggregates (arrays, user Types/structs) and the
-//! `Trap` hard-fault path are later phases — reaching one fails the codegen
-//! loudly rather than miscompiling.
+//! Scope is the Phase-1 scalar core (user functions, control flow, runtime
+//! calls, strings, `Print`) plus the Phase-2 array surface (`New`/`Dim`,
+//! index/`Redim`/`Len`/`For Each` via the `cb_rt_array_*` heap helpers). User
+//! Types/structs and the `Trap` hard-fault path are later phases — reaching one
+//! fails the codegen loudly rather than miscompiling.
 
 mod func;
 mod regtypes;
@@ -108,7 +109,9 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 IrType::Int => gv.set_initializer(&self.ctx.i32_type().const_zero()),
                 IrType::Long => gv.set_initializer(&self.ctx.i64_type().const_zero()),
                 IrType::Float => gv.set_initializer(&self.ctx.f64_type().const_zero()),
-                IrType::String | IrType::Null => gv.set_initializer(&self.ptr_t().const_null()),
+                IrType::String | IrType::Null | IrType::Array { .. } => {
+                    gv.set_initializer(&self.ptr_t().const_null())
+                }
                 other => {
                     return Err(format!(
                         "global of type {other:?} is out of scope for the Phase-1 LLVM backend"

@@ -5,9 +5,10 @@
 //! stdout and exit code. The driver only *emits* the exe — this harness runs it.
 //!
 //! Gated on both backends being present (`--features llvm` keeps `interp`). The
-//! fixtures are the pure Phase-1 scalar core + control flow + user functions +
-//! Allegro-free runtime calls + strings; arrays / user Types / graphics are out
-//! of Phase-1 scope and excluded.
+//! fixtures are the Phase-1 scalar core + control flow + user functions +
+//! Allegro-free runtime calls + strings, plus the Phase-2 array surface
+//! (Dim/New/index/Redim/Len/For Each); user Types / graphics remain out of
+//! scope and excluded.
 #![cfg(all(feature = "llvm", feature = "interp"))]
 
 use std::path::PathBuf;
@@ -109,4 +110,18 @@ diff_tests! {
     runtime_sqrt,
     runtime_string,
     runtime_string_fd017,
+}
+
+// Arrays (FD-049 Phase 2): Dim/New/index/Redim/Len/For Each over native heap
+// arrays. `array_oob` is a fault fixture — both backends print `before`, then
+// the out-of-bounds index traps and exits 1.
+diff_tests! {
+    array_1d,
+    array_multidim,
+    array_redim,
+    array_len,
+    array_foreach,
+    array_string,
+    array_param,
+    array_oob,
 }
