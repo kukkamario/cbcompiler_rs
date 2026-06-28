@@ -1,0 +1,32 @@
+' Shift width follows the LHS only (FD-049 review F2). A Long shift count must
+' not widen an Int/Byte/Short shift to 64 bits: the count is masked &31 (32-bit
+' width), not &63. sema does not coerce shift operands, so the count stays Long.
+
+Dim cnt As Long = 33
+
+' Int Shl Long: 32-bit, 33 & 31 == 1 → 1 << 1 == 2 (the buggy &63 path would
+' compute 1 << 33 in 64-bit).
+Dim i As Int = 1
+Print Str(i Shl cnt)
+
+' Int Shl Long with count 40: 40 & 31 == 8 → 1 << 8 == 256.
+Dim cnt2 As Long = 40
+Print Str(1 Shl cnt2)
+
+' Byte Shl Long: Byte widens to Int (32-bit), 33 & 31 == 1 → 5 << 1 == 10.
+Dim b As Byte = 5
+Print Str(b Shl cnt)
+
+' Short Shl Long: Short widens to Int → 3 << 1 == 6.
+Dim s As Short = 3
+Print Str(s Shl cnt)
+
+' Long Shl Long is a genuine 64-bit shift: 33 & 63 == 33 → 1 << 33.
+Dim l As Long = 1
+Print Str(l Shl cnt)
+
+' Shr (logical) / Sar (arithmetic) with a Long count on an Int value (32-bit).
+Dim big As Int = 256
+Print Str(big Shr cnt)
+Dim neg As Int = -256
+Print Str(neg Sar cnt)

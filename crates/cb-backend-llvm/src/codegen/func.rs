@@ -1165,7 +1165,16 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .type_of(rhs)
             .cloned()
             .ok_or_else(|| format!("untyped binop rhs {rhs}"))?;
-        let width = if matches!(lty, IrType::Long) || matches!(rty, IrType::Long) {
+        // Shift width follows the LHS (the value being shifted) ONLY — sema does
+        // not coerce shift operands, so the count's `Long`-ness must not widen
+        // the shift (FD-049 review F2). `ext_int` truncates a wider `Long` count
+        // to the LHS width below, then `mask_shift` masks `&31` (Int) / `&63`
+        // (Long), matching the interpreter. Arithmetic / bitwise / comparison
+        // ops keep the `lty||rty` max — sema coerces those to a common type, so
+        // both widths are already equal.
+        let width = if matches!(op, Shl | Shr | Sar) {
+            if matches!(lty, IrType::Long) { 64 } else { 32 }
+        } else if matches!(lty, IrType::Long) || matches!(rty, IrType::Long) {
             64
         } else {
             32

@@ -90,6 +90,7 @@ macro_rules! diff_tests {
 // beyond Print).
 diff_tests! {
     int_arithmetic,
+    shift_mixed_width,
     float_formatting,
     mixed_arithmetic,
     string_ops,
