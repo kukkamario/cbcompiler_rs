@@ -1534,13 +1534,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 // unchanged; a borrowed view (loaded from a slot) is retained
                 // BEFORE `release_string_locals` so the local release can't free
                 // the strings it carries.
-                if let Some(r) = value {
-                    if let Some(IrType::StructVal(name)) = self.info.type_of(*r) {
-                        if !self.info.is_owned_struct_temp(*r) {
-                            let def = self.cg.struct_def_by_name(*name)?;
-                            self.retain_struct_strings(self.pval_struct(*r)?, def)?;
-                        }
-                    }
+                if let Some(r) = value
+                    && let Some(IrType::StructVal(name)) = self.info.type_of(*r)
+                    && !self.info.is_owned_struct_temp(*r)
+                {
+                    let def = self.cg.struct_def_by_name(*name)?;
+                    self.retain_struct_strings(self.pval_struct(*r)?, def)?;
                 }
                 self.release_string_locals()?;
                 match value {
