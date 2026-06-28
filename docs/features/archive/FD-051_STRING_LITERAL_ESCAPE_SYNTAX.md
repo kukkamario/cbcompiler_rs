@@ -1,6 +1,7 @@
 # FD-051: String Literal Syntax — Verbatim `"..."`, Escapes Move to `$"..."`
 
-**Status:** Open
+**Status:** Complete
+**Completed:** 2026-06-28
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** Plain `"..."` strings become verbatim (no escape surprises, e.g. Windows paths); a new `$"..."` form opts into the C-style escapes that `"..."` does today.
