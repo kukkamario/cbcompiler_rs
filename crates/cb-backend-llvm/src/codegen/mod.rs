@@ -162,8 +162,13 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
     }
 }
 
-/// Lower `program` to a native object at `obj_path`.
-pub fn build_object(program: &Program, interner: &Interner, obj_path: &Path) -> Result<(), String> {
+/// Lower `program` to a native object at `obj_path`, optimized at `opt`.
+pub fn build_object(
+    program: &Program,
+    interner: &Interner,
+    obj_path: &Path,
+    opt: crate::OptLevel,
+) -> Result<(), String> {
     let ctx = Context::create();
     let mut cg = Codegen::new(&ctx, program, interner);
 
@@ -183,7 +188,7 @@ pub fn build_object(program: &Program, interner: &Interner, obj_path: &Path) -> 
         )
     })?;
 
-    crate::emit::write_module(&cg.module, obj_path)
+    crate::emit::write_module(&cg.module, obj_path, opt)
 }
 
 /// Lower one function body into its pre-declared `FunctionValue`.
@@ -259,7 +264,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let obj = tmp.path().join(if cfg!(windows) { "t.obj" } else { "t.o" });
-        build_object(&program, &interner, &obj).expect("build_object should succeed");
+        build_object(&program, &interner, &obj, crate::OptLevel::O2)
+            .expect("build_object should succeed");
         assert!(obj.is_file(), "object file should be written");
     }
 }

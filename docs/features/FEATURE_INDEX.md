@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
+| [FD-054](FD-054_LLVM_OPTIMIZATION_PASSES.md) | LLVM Optimization Passes & `-O` Flag | Pending Verification | Medium | Medium |
 
 ## Deferred / Closed
 

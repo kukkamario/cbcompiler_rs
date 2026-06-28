@@ -22,23 +22,58 @@ mod emit;
 #[cfg(feature = "codegen")]
 mod link;
 
-/// The LLVM / AOT backend. The `source`/`output` paths are injected at
+/// Optimization level for the AOT pipeline, selected by the driver's `-O` flag
+/// and injected at construction. It drives **both** knobs together: the IR-level
+/// pass pipeline (`Module::run_passes`) and the codegen-level `TargetMachine`
+/// optimization level — see [`emit::write_module`].
+///
+/// Defined unconditionally (not behind `codegen`) so [`LlvmBackend::new`] keeps a
+/// stable signature in the LLVM-free stub build; the inkwell mappings live next
+/// to the machine in `emit`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum OptLevel {
+    /// No optimization: skip the IR passes and keep the `TargetMachine` at
+    /// `None`. Preserves the rawest lowering output — best for debugging native
+    /// codegen, and exactly the pre-FD-054 behavior.
+    O0,
+    /// Light optimization.
+    O1,
+    /// The default for the LLVM backend — its reason to exist is optimized
+    /// native code.
+    #[default]
+    O2,
+    /// Aggressive optimization.
+    O3,
+    /// Optimize for size.
+    Os,
+    /// Optimize aggressively for size.
+    Oz,
+}
+
+/// The LLVM / AOT backend. The `source`/`output`/`opt` settings are injected at
 /// construction because the IR carries no source path and
 /// the [`Backend::execute`] signature passes only `&Program` +
-/// `&Interner` — so codegen could not otherwise name the artifact. They are
-/// unused in the no-`codegen` stub build.
+/// `&Interner` — so codegen could not otherwise name the artifact or know the
+/// requested optimization level. They are unused in the no-`codegen` stub build.
 pub struct LlvmBackend {
     #[cfg_attr(not(feature = "codegen"), allow(dead_code))]
     source: PathBuf,
     #[cfg_attr(not(feature = "codegen"), allow(dead_code))]
     output: Option<PathBuf>,
+    #[cfg_attr(not(feature = "codegen"), allow(dead_code))]
+    opt: OptLevel,
 }
 
 impl LlvmBackend {
     /// Construct the backend for `source`, writing the artifact to `output` (or,
-    /// when `None`, next to the source as `<stem>` + the platform exe suffix).
-    pub fn new(source: PathBuf, output: Option<PathBuf>) -> Self {
-        Self { source, output }
+    /// when `None`, next to the source as `<stem>` + the platform exe suffix), at
+    /// optimization level `opt`.
+    pub fn new(source: PathBuf, output: Option<PathBuf>, opt: OptLevel) -> Self {
+        Self {
+            source,
+            output,
+            opt,
+        }
     }
 
     /// The executable path to write: the explicit `-o` output, or `<source
@@ -81,7 +116,7 @@ impl Backend for LlvmBackend {
         };
         let obj = tmp.path().join(obj_name);
 
-        codegen::build_object(program, interner, &obj).map_err(BackendError::failed)?;
+        codegen::build_object(program, interner, &obj, self.opt).map_err(BackendError::failed)?;
         link::link(&obj, &artifact, link::WholeArchive::No).map_err(BackendError::failed)?;
 
         Ok(BackendOutcome::Produced { artifact })
@@ -139,7 +174,7 @@ mod codegen_smoke {
             .path()
             .join(format!("m{}", std::env::consts::EXE_SUFFIX));
 
-        emit::write_module(&module, &obj).expect("emit object");
+        emit::write_module(&module, &obj, crate::OptLevel::O2).expect("emit object");
         // Whole-archive the runtime so the closure must actually resolve, not
         // just parse as link args.
         link::link(&obj, &exe, link::WholeArchive::Yes).expect("link runtime closure");
