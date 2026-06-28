@@ -1,4 +1,4 @@
-// FD-036 Phase 2: unit tests for the pure camera affine in cb_camera_math.h. No
+// Unit tests for the pure camera affine in cb_camera_math.h. No
 // display / Allegro needed — the header is self-contained inline math (mirrors
 // test_geom.cpp). These pin the world<->screen transform: centering on the
 // design resolution, the Y-inversion living in the wrappers (not the matrix),

@@ -1,5 +1,5 @@
-// FD-042: an opaque `Object` handle is inferred from the value with no `Dim`.
-// Mirrors the basic-object portion of runtime_object_fd036, but `o` is declared
+// An opaque `Object` handle is inferred from the value with no `Dim`.
+// Mirrors the basic-object portion of runtime_object, but `o` is declared
 // implicitly by `o = MakeObject()` rather than `Dim o As Object`. Headless-safe:
 // asserts deterministic object state, no display.
 

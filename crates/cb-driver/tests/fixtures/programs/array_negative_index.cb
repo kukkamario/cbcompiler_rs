@@ -1,4 +1,4 @@
-' Negative array index (FD-049 review F19): arr[-1] is out of bounds and traps,
+' Negative array index: arr[-1] is out of bounds and traps,
 ' exiting 1 in both backends after the "before trap" line.
 Dim arr As Int[] = New Int[3]
 arr[0] = 1

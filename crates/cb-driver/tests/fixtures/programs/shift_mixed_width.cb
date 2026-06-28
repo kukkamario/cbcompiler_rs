@@ -1,4 +1,4 @@
-' Shift width follows the LHS only (FD-049 review F2). A Long shift count must
+' Shift width follows the LHS only. A Long shift count must
 ' not widen an Int/Byte/Short shift to 64 bits: the count is masked &31 (32-bit
 ' width), not &63. sema does not coerce shift operands, so the count stays Long.
 

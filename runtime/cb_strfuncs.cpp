@@ -1,11 +1,11 @@
-// CoolBasic runtime — String library (FD-013 Batch 2; split out per FD-016).
+// CoolBasic runtime — String library.
 //
 // The CB-visible string functions (Upper/Lower/Trim/Left/Right/StrRemove/
 // InStr/Chr/Hex). These are FUNCTIONALITY built on top of the core string
 // ABI, so they live in the functionality library, not in the core
 // cb_string.cpp.
 //
-// IMPORTANT (FD-016): this TU reaches the string type ONLY through the public
+// IMPORTANT: this TU reaches the string type ONLY through the public
 // core primitives declared in cb_runtime_core.h — `cb_rt_string_from_literal`,
 // `cb_rt_string_len`, `cb_rt_string_data`, `cb_rt_string_retain`, and the
 // immortal empty sentinel via `cb_runtime_string_api.empty`. It deliberately
@@ -14,7 +14,7 @@
 // this library a worked example of how a plugin builds strings using nothing
 // but the core ABI.
 //
-// Two CoolBasic-visible behaviours worth explaining (FD-013):
+// Two CoolBasic-visible behaviours worth explaining:
 //   - CODEPOINT semantics. The v4 ABI stores UTF-8, so Left/Right/StrRemove/
 //     InStr walk the bytes to map a 1-based CHARACTER index to a byte offset
 //     (O(n) in the index, not O(1)). CB strings are UTF-8 (§3.1) and the docs
@@ -39,7 +39,7 @@
 
 namespace {
 
-// cp_len / byte_offset_of_cp / encode_utf8 live in cb_utf8.h (FD-022) so the
+// cp_len / byte_offset_of_cp / encode_utf8 live in cb_utf8.h so the
 // unit tests can exercise them directly.
 
 // Owning reference to the immortal empty sentinel; the canonical "" result.
@@ -206,12 +206,11 @@ extern "C" CbString* cb_rt_hex(int32_t value) {
     return cb_rt_string_from_literal(buf, 8);
 }
 
-// ─── FD-017 completeness pass ─────────────────────────────────────────────
+// ─── Completeness pass ────────────────────────────────────────────────────
 //
 // All char indices/counts are 1-based and measured in Unicode codepoints (the
-// UTF-8 divergence from CoolBasic's single-byte CP-1252 is intentional and
-// documented — FD-017 Q1). Out-of-range arguments clamp or return ""; nothing
-// aborts.
+// UTF-8 divergence from CoolBasic's single-byte CP-1252 is intentional).
+// Out-of-range arguments clamp or return ""; nothing aborts.
 
 // `len` codepoints from 1-based `pos`. pos<=0 or len<=0 -> "" (we clamp instead
 // of erroring); pos past the end -> "". A negative `len` yields "" rather than
@@ -442,7 +441,7 @@ extern "C" int32_t cb_rt_count_words(const CbString* s, const CbString* sep) {
 // The n-th (1-based) `sep`-separated word. Empty `sep` -> space. n past the
 // last word yields the final segment (CoolBasic behaviour). n <= 0 clamps to
 // "" like the other 1-based string functions (Mid/Left), rather than returning
-// the first word (FD-022).
+// the first word.
 extern "C" CbString* cb_rt_get_word(const CbString* s, int32_t n,
                                     const CbString* sep) {
     if (n <= 0) return make_empty();

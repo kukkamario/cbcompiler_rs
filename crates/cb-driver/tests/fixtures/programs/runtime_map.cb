@@ -1,11 +1,11 @@
-// FD-036 Phase 3: tile maps. Headless-safe — asserts deterministic map STATE
+// Tile maps. Headless-safe — asserts deterministic map STATE
 // (dimensions, GetMap2/GetMap/EditMap data) and that LoadMap parses the real
 // CoolBasic asset testmap.til + tileset.bmp (staged into the cwd by the test
 // harness). The on-screen render is exercised by the visual/manual smoke; the
 // world<->tile coordinate math is unit-tested in runtime/tests/test_map.cpp.
 
-// Null-safety: with no map loaded the queries return 0 (cbEnchanted would
-// null-deref tileMap; we guard).
+// Null-safety: with no map loaded the queries return 0 — we guard against the
+// null-deref of tileMap.
 Print Str(MapWidth())           // 0
 
 // MakeMap: an empty grid. Data round-trips through EditMap/GetMap2 (1-based).
@@ -37,4 +37,4 @@ Print Str(GetMap(0, 0.0, 0.0))  // 251  world centre -> tile (10,7)
 
 // Render smoke: DrawScreen composites the map (a no-op without a display).
 DrawScreen
-Print "fd036_map_done"
+Print "map_done"

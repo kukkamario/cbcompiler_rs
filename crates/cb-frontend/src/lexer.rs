@@ -181,7 +181,7 @@ impl<'src> Lexer<'src> {
             }
             b'$' => {
                 if self.peek_byte_at(1) == Some(b'"') {
-                    // `$"` opens an escape-aware string literal (FD-051). `"` is
+                    // `$"` opens an escape-aware string literal. `"` is
                     // not a hex digit, so no valid hex token is shadowed, and a
                     // token-start `$` is never a String sigil (sigils are only
                     // consumed as a trailing byte inside `scan_ident`).
@@ -400,7 +400,7 @@ impl<'src> Lexer<'src> {
 
     // ---------- strings ----------
 
-    /// Verbatim `"…"` literal (FD-051). `\` is an ordinary character and the
+    /// Verbatim `"…"` literal. `\` is an ordinary character and the
     /// first unescaped `"` always closes the literal — there is no escape
     /// processing here. The escape-aware form is `$"…"` (see
     /// [`scan_dollar_string`]).
@@ -443,7 +443,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Escape-aware `$"…"` literal (FD-051). The `$` is a mode marker only, not
+    /// Escape-aware `$"…"` literal. The `$` is a mode marker only, not
     /// interpolation. Inside the quotes, `\` escapes the next character (so
     /// `\"` does not terminate the literal); the actual escape set is validated
     /// later by the decoder. The classification here only sets `Escaped`.

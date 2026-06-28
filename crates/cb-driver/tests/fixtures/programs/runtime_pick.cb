@@ -1,5 +1,5 @@
-// FD-036 Phase 5b: object picking, line of sight, and the object-aware camera
-// funcs (deferred from Phase 2). Headless-safe deterministic state — raycasts,
+// Object picking, line of sight, and the object-aware camera
+// funcs. Headless-safe deterministic state — raycasts,
 // the screen<->world transform (pure cb_camera_math on the 400x300 design size),
 // and camera-from-object snapshots use no display. The raycast/pick/DDA geometry
 // is unit-tested in runtime/tests/test_collision.cpp.
@@ -89,4 +89,4 @@ ObjectPickable(pk, 1)
 CameraPick(250.0, 100.0)                // screen (250,100) -> world (50,50) -> inside pk
 If PickedObject() = pk Then Print "camerapick_ok"
 
-Print "fd036_pick_done"
+Print "pick_done"

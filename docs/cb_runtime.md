@@ -1,19 +1,14 @@
 # CoolBasic Runtime Library Reference
 
-This documents the **complete CoolBasic runtime surface** as implemented by
-**cbEnchanted** — a from-scratch reimplementation of the CoolBasic interpreter
-that is a verified drop-in replacement for the original. cbEnchanted is the
-**reference / implementation target** for the cbcompiler_rs runtime; where the
-two disagree, cbEnchanted is authoritative for the *language surface* (cbcompiler_rs
-may still differ in internal representation — see [Implementation status](#implementation-status-in-cbcompiler_rs)).
-
-> Earlier versions of this file described the much smaller CBCompiler runtime
-> (the `CBF_`-prefixed surface). That implementation was incomplete; this file
-> now reflects the cbEnchanted surface (~345 commands and functions).
+This documents the **complete CoolBasic runtime surface** implemented by
+cbcompiler_rs (~345 commands and functions). It is the authoritative reference
+for the runtime's language surface. Where cbcompiler_rs's internal representation
+diverges from classic CoolBasic, the difference is noted — see
+[Implementation status](#implementation-status-in-cbcompiler_rs).
 
 ## How the runtime is called
 
-In cbEnchanted each runtime entry point is a C++ method named `commandXxx`
+Each runtime entry point is a C++ method named `commandXxx`
 (a **statement**, no return value) or `functionXxx` (returns a value). The
 CB-visible name is the suffix (`commandRandomize` → `Randomize`,
 `functionGetAngle` → `GetAngle`). Arguments are passed on a value stack; the
@@ -38,7 +33,7 @@ Throughout this document:
 |------|-------------|
 | `Integer` | Signed 32-bit integer |
 | `Float` | Single-precision 32-bit floating point |
-| `String` | Byte string. cbEnchanted stores strings as **single-byte CP-1252 / Latin-1** internally (one byte per character); UTF-8 conversion happens only at I/O boundaries. See the [string semantics](#string-semantics) note. |
+| `String` | A string of characters. cbcompiler_rs stores strings internally as **Unicode code points** (UTF-8 storage); position and length operations count code points. See the [string semantics](#string-semantics) note. |
 
 ### Handle types
 
@@ -119,9 +114,9 @@ String positions are **1-based** (CoolBasic convention).
 | `Trim` | `s: String` | `String` | Removes leading and trailing whitespace |
 | `LSet` | `s: String, len: Integer` | `String` | Left-aligns into a field of width `len`, padding spaces on the right |
 | `RSet` | `s: String, len: Integer` | `String` | Right-aligns into width `len`; truncates to rightmost `len` chars if longer |
-| `Chr` | `code: Integer` | `String` | Single character from a byte value (0–255, CP-1252) |
-| `Asc` | `s: String` | `Integer` | Byte value (0–255) of the first character (CP-1252) |
-| `Len` | `s: String` | `Integer` | String length in **bytes** (== characters, since storage is single-byte) |
+| `Chr` | `code: Integer` | `String` | Single character from a character code (inverse of `Asc`) |
+| `Asc` | `s: String` | `Integer` | Character code of the first character (inverse of `Chr`) |
+| `Len` | `s: String` | `Integer` | String length in **characters** |
 | `Hex` | `value: Integer` | `String` | Uppercase hex, zero-padded to 8 characters |
 | `Bin` | `value: Integer` | `String` | 32-bit binary string |
 | `String` | `s: String, count: Integer` | `String` | `s` repeated `count` times |
@@ -134,12 +129,11 @@ String positions are **1-based** (CoolBasic convention).
 
 ### String semantics
 
-- **Single-byte storage.** cbEnchanted holds strings as CP-1252 / Latin-1, one
-  byte per character. Consequently `Len`, `Left`, `Right`, `Mid`, `InStr`, etc.
-  count **bytes**, and `Chr`/`Asc` map a single byte 0–255. UTF-8 is used only
-  when reading/writing to the console or files.
-  *(This differs from cbcompiler_rs, which currently treats strings as UTF-8 and
-  counts Unicode codepoints — a known divergence.)*
+- **Code-point storage.** Strings are held as Unicode code points (UTF-8
+  storage), one element per code point. Consequently `Len`, `Left`, `Right`,
+  `Mid`, `InStr`, etc. count **code points**, and `Chr`/`Asc` map a single code
+  point. This is a deliberate divergence from classic CoolBasic's single-byte
+  CP-1252 / Latin-1 strings, which counted bytes and mapped a single byte 0–255.
 - **1-based indexing** for all position arguments.
 - **`InStr` not-found** returns `0`.
 
@@ -250,7 +244,7 @@ are zero-based.
 | `ResizeImage` | `img: Image, w: Integer, h: Integer` | — | Resizes an image |
 | `RotateImage` | `img: Image, angle: Float` | — | Rotates the image bitmap (degrees, clockwise) |
 | `PickImageColor` | `img: Image, x: Integer, y: Integer` | — | Reads a pixel from an image and makes it the draw color (`PickImageColor2` alias) |
-| `SaveImage` | `img: Image, path: String [, frame: Integer]` | — | Writes the whole image to disk (the extension picks the format); `frame` is accepted but **ignored** in cbEnchanted |
+| `SaveImage` | `img: Image, path: String [, frame: Integer]` | — | Writes the whole image to disk (the extension picks the format); `frame` is accepted but **ignored** |
 | `DeleteImage` | `img: Image` | — | Frees an image |
 | `ImagesOverlap` | `img1: Image, x1: Float, y1: Float, img2: Image, x2: Float, y2: Float` | `Integer` | Axis-aligned bounding-box test between two placed images |
 | `ImagesCollide` | `img1: Image, x1: Float, y1: Float, frame1: Integer, img2: Image, x2: Float, y2: Float, frame2: Integer` | `Integer` | Pixel-precise collision test between two placed image frames |
@@ -265,7 +259,7 @@ drawing commands.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `Print` | `[s: String]` | — | Writes `s` + newline to stdout (UTF-8; CP-1252 on Windows); omit `s` for a blank line. Accepts Integer/Float/String |
+| `Print` | `[s: String]` | — | Writes `s` + newline to stdout (UTF-8); omit `s` for a blank line. Accepts Integer/Float/String |
 | `Write` | `s: String` | — | Writes `s` to stdout without a newline |
 | `Locate` | `x: Integer, y: Integer` | — | Sets the on-screen text cursor for `AddText` |
 | `AddText` | `s: String` | — | Queues on-screen text at the cursor (current font/color), advancing one line |
@@ -292,40 +286,38 @@ drawing commands.
 | `StopSound` | `channel: SoundChannel` | — | Stops a channel |
 | `DeleteSound` | `sound: Sound` | — | Frees a preloaded sound |
 
-**Implemented (FD-041, `runtime/cb_sound.cpp`).** `Sound` is the opaque `CbSound*`
+**Implemented (`runtime/cb_sound.cpp`).** `Sound` is the opaque `CbSound*`
 handle (catalog tag 17, a loaded `ALLEGRO_SAMPLE`); `SoundChannel` is a playing
 instance (catalog tag 18 — a sample-instance or audio-stream). Both are
 Allegro-dependent (`allegro_audio` + `allegro_acodec`), so they are **absent from
-the SDK-free catalog** (like `Image`/`Font`/`Object`/`Map`). Authoritative
-behaviour was taken from the cbEnchanted reference (`soundinterface`/`cbsound`/
-`cbchannel`) and the official CoolBasic Help; deliberate divergences from classic
-CoolBasic:
+the SDK-free catalog** (like `Image`/`Font`/`Object`/`Map`). Deliberate
+divergences from classic CoolBasic:
 
 - **Opaque `Sound`/`SoundChannel` types** (`Null` default / `Null` on load
   failure) instead of classic CB's plain `int32` ids — consistent with
   `Object`/`Map`/`File`. Drops the classic int-handle arithmetic.
 - **The CB-visible channel type is `SoundChannel`, not `Channel`** — the bare
   noun is polysemous (colour/network channel) and stays free for user code.
-- **A finished `SoundChannel` is a safe silent no-op.** Channels are reaped every
-  frame (cbEnchanted's `updateAudio`); a generation-tagged handle pool makes
+- **A finished `SoundChannel` is a safe silent no-op.** Finished channels are
+  reaped every frame; a generation-tagged handle pool makes
   `SetSound`/`StopSound`/`SoundPlaying` on a stale/finished channel a silent
   no-op (return 0), never a use-after-free. An invalid **`Sound`** handle still
-  traps (FD-015 channel, exit 1) — matching cbEnchanted's asymmetry.
-- **Graceful audio-less degradation.** Best-effort init (never aborts, unlike
-  cbEnchanted): with no audio device `LoadSound`/`PlaySound` return `Null`,
-  `SoundPlaying` returns 0, `Set`/`StopSound` no-op, and the null-`Sound` trap is
-  suppressed (so a `Null`-ignoring program runs silently on a headless/CI host).
+  traps (exit 1) — a deliberate asymmetry.
+- **Graceful audio-less degradation.** Best-effort init never aborts: with no
+  audio device `LoadSound`/`PlaySound` return `Null`, `SoundPlaying` returns 0,
+  `Set`/`StopSound` no-op, and the null-`Sound` trap is suppressed (so a
+  `Null`-ignoring program runs silently on a headless/CI host).
 - **`PlaySound`'s polymorphic first arg** is two overloads (preloaded `Sound`
   vs filename `String` → streamed, 3×8192 buffers); the optional
   `volume`/`balance`/`frequency` are arity overloads. `volume`/`balance` are the
   0–100 scale (→ Allegro gain / pan ±1); `frequency` is an absolute target Hz
   (→ a speed ratio; ≤0 leaves the native rate).
-- **No CD-track form** (the Help's integer-track CD path; cbEnchanted never
-  implemented it, CD audio is dead on modern targets); no `Music`/master-volume/
-  3D-positional commands (classic CB has none — "music" is streamed `PlaySound`).
-- **Deferred:** the audible smoke (real playback, looping, pan/pitch sweep,
-  long-file streaming) needs a real audio device; the gain/pan/speed math and the
-  channel-pool liveness are unit-tested headlessly (`runtime/tests/test_sound.cpp`).
+- **No CD-track form** (the Help's integer-track CD path is unimplemented; CD
+  audio is dead on modern targets); no `Music`/master-volume/3D-positional
+  commands (classic CB has none — "music" is streamed `PlaySound`).
+- **Audible playback** (real playback, looping, pan/pitch sweep, long-file
+  streaming) requires a real audio device; the gain/pan/speed math and the
+  channel-pool liveness run headless.
 
 ---
 
@@ -346,13 +338,12 @@ CoolBasic `…Animation` commands play a video file (single active video).
 
 ## Particle Effects
 
-A particle emitter **is an `Object`** (cbEnchanted: `CBParticleEmitter : public
-CBObject`). `MakeEmitter` returns the `Object` handle, so the emitter is moved,
-rotated, given a life, deleted, and enumerated with the ordinary object commands
-below — particles fly in the direction the emitter object faces, within the
-`spread` sector. There is no distinct `Emitter` type (cbcompiler_rs reuses
-`Object`; a distinct type would not type-check against the object commands — see
-FD-038). The four entry points below are the entire public surface.
+A particle emitter **is an `Object`**. `MakeEmitter` returns the `Object` handle,
+so the emitter is moved, rotated, given a life, deleted, and enumerated with the
+ordinary object commands below — particles fly in the direction the emitter
+object faces, within the `spread` sector. There is no distinct `Emitter` type
+(cbcompiler_rs reuses `Object`; a distinct type would not type-check against the
+object commands). The four entry points below are the entire public surface.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
@@ -361,24 +352,20 @@ FD-038). The four entry points below are the entire public surface.
 | `ParticleEmission` | `emitter: Object, density: Integer, count: Integer, spread: Integer` | — | `density` = spawn **interval** in update cycles (smaller = denser; a batch spawns whenever an internal per-frame counter exceeds `density`), `count` = particles per batch, `spread` = the ± angular half-sector in degrees (0..180; 180 = all directions, 0 = a tight stream). Launch direction is **uniform** over the sector |
 | `ParticleAnimation` | `emitter: Object, frameCount: Integer` | — | Animate a `LoadAnimImage` particle sprite as a `frameCount`-long strip, played once over each particle's life (frame 0 at spawn → last at death). Clamped to the strip's real length |
 
-**Behavior notes / cbEnchanted & docs divergences (FD-038):**
+**Behavior notes & divergences from the docs:**
 
 - **Emitters never pick or collide.** Despite the CoolBasic Help ("*even collision
-  and pick commands work with sources*"), the real compiler does neither —
+  and pick commands work with sources*"), emitters do neither —
   `ObjectPickable`/`SetupCollision`/`ObjectsOverlap` are inert on an emitter, and
-  pixel-pick is kept from crashing. cbEnchanted left emitters in both registries
-  (a divergence in the other direction).
+  pixel-pick is kept from crashing.
 - **`ParticleMovement`/`ParticleEmission`/`ParticleAnimation` trap** (clean runtime
   error) if handed a non-emitter `Object` — classic CB blind-casts the handle (UB).
 - **Animation plays forward** (frame 0 → last over the particle's life), per the
-  Help; cbEnchanted played it in reverse. Frame slicing uses the FD-036-correct
-  row/offset math (cbEnchanted's particle slicer carried the same row/offset bugs
-  FD-036 fixed for images).
-- **No `StopEmitting` command** — it is a cbEnchanted extension, not CoolBasic.
-  Deleting an emitter (`DeleteObject`, or `ObjectLife` expiry) lets its live
-  particles finish before the emitter is freed.
-- A non-positive emission `density` spawns nothing (guards cbEnchanted's infinite
-  spawn loop).
+  Help. Frame slicing uses correct row/offset math (`row = frame / framesX`).
+- **No `StopEmitting` command** — it is not part of CoolBasic. Deleting an emitter
+  (`DeleteObject`, or `ObjectLife` expiry) lets its live particles finish before
+  the emitter is freed.
+- A non-positive emission `density` spawns nothing.
 
 ---
 
@@ -387,7 +374,7 @@ FD-038). The four entry points below are the entire public surface.
 The object system represents 2D sprites with position, rotation, scale, optional
 animation, custom data slots, and collision. `Object` is an **opaque handle type**
 (tag 13) — in cbcompiler_rs the handle's bit pattern is the runtime's `CbObject*`,
-mirroring `Image`/`Font`/`Map`; there is no integer id (cbEnchanted's legacy
+mirroring `Image`/`Font`/`Map`; there is no integer id (classic CoolBasic's legacy
 `Integer` handles and shared id space are dropped). "Floor" objects draw before
 regular objects (background layering). Positions are in world space unless noted.
 
@@ -395,13 +382,13 @@ regular objects (background layering). Positions are in world space unless noted
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `LoadObject` | `path: String [, rotQuality: Integer]` | `Object` | Loads a single-frame image as an object. `rotQuality` (1–360, default 1) = facing-direction count; cbEnchanted accepts but ignores it |
+| `LoadObject` | `path: String [, rotQuality: Integer]` | `Object` | Loads a single-frame image as an object. `rotQuality` (1–360, default 1) = facing-direction count; accepted but ignored |
 | `LoadAnimObject` | `path: String, frameW: Integer, frameH: Integer, startFrame: Integer, frameCount: Integer [, rotQuality: Integer]` | `Object` | Loads a sprite-sheet object. `rotQuality` as in `LoadObject` (accepted but ignored) |
 | `MakeObject` | — | `Object` | Creates an empty (imageless) object |
 | `MakeObjectFloor` | — | `Object` | Creates a floor object (drawn before regular objects) |
-| `CloneObject` | `obj: Object` | `Object` | Copies an object's image (shared, reference-counted), mask, frames, animation and range; **position and angle reset to 0** and **visibility is forced on** (`visible=true`, faithful to cbEnchanted — not copied). Map objects can't be cloned |
+| `CloneObject` | `obj: Object` | `Object` | Copies an object's image (shared, reference-counted), mask, frames, animation and range; **position and angle reset to 0** and **visibility is forced on** (`visible=true`, not copied). Map objects can't be cloned |
 | `DeleteObject` | `obj: Object` | — | Deletes an object and clears its collisions |
-| `ClearObjects` | — | — | Deletes all objects and clears the draw chains. **Objects-only — the active tilemap is left alone** (cbcompiler_rs divergence: the map is an independent singleton owned by `LoadMap`/`MakeMap`, not a floor object, so `ClearObjects` does not free it) |
+| `ClearObjects` | — | — | Deletes all objects and clears the draw chains. **Objects-only — the active tilemap is left alone** (the map is an independent singleton owned by `LoadMap`/`MakeMap`, not a floor object, so `ClearObjects` does not free it — a divergence from classic CoolBasic) |
 
 ### Position & movement
 
@@ -448,7 +435,7 @@ regular objects (background layering). Positions are in world space unless noted
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `PlayObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Plays frames once (optional args; `speed` default 0.1, `continuous` default off); `endFrame = -1` stops and resets |
-| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation (each animated tile cycles `tile..tile+animLength`, i.e. `animLength+1` frames); only `speed` applies and tiles do not advance until called. Higher `speed` = slower (it divides the elapsed-time step, faithful to cbEnchanted); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
+| `PlayObject` | `map: Map [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Starts the active tilemap's per-tile animation (each animated tile cycles `tile..tile+animLength`, i.e. `animLength+1` frames); only `speed` applies and tiles do not advance until called. Higher `speed` = slower (it divides the elapsed-time step); `speed = 0` / `endFrame = -1` stops. The `Map` first param selects this overload |
 | `LoopObject` | `obj: Object [, startFrame: Integer] [, endFrame: Integer] [, speed: Float] [, continuous: Integer]` | — | Loops the frame range continuously (optional args; `speed` default 0.1) |
 | `StopObject` | `obj: Object` | — | Stops animation, keeping the current frame |
 | `ObjectPlaying` | `obj: Object` | `Integer` | 1 if an animation is playing |
@@ -486,7 +473,7 @@ See the [collision model](#collision-model) note for types and handling modes.
 |----------|-----------|---------|-------------|
 | `ObjectPickable` | `obj: Object, style: Integer` | — | Marks pickable: 0=off, 1=box, 2=circle, 3=pixel (pixel partial) |
 | `ObjectPick` | `picker: Object` | — | Raycasts from `picker` along its facing angle; stores the nearest hit |
-| `PixelPick` | `picker: Object [, accuracy: Integer]` | — | Pixel-perfect pick from inside `picker` along its facing angle (needs `ObjectPickable obj, 3`). **Registered but a no-op stub in cbEnchanted** |
+| `PixelPick` | `picker: Object [, accuracy: Integer]` | — | Pixel-perfect pick from inside `picker` along its facing angle (needs `ObjectPickable obj, 3`). **Registered but a no-op stub** |
 | `PickedObject` | — | `Object` | Object hit by the last `ObjectPick` (0 if none) |
 | `PickedX` | — | `Float` | World X of the last pick hit |
 | `PickedY` | — | `Float` | World Y of the last pick hit |
@@ -498,7 +485,7 @@ See the [collision model](#collision-model) note for types and handling modes.
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `InitObjectList` | — | — | Resets the shared object iterator |
-| `NextObject` | — | `Object` | Next object handle in creation order, or `Null` at the end; call `InitObjectList` first. (cbcompiler_rs divergence: returns an `Object` handle / `Null` rather than cbEnchanted's id / `0`, and does **not** surface map ids — `Map` is a separate opaque type) |
+| `NextObject` | — | `Object` | Next object handle in creation order, or `Null` at the end; call `InitObjectList` first. (Returns an `Object` handle / `Null` rather than classic CoolBasic's id / `0`, and does **not** surface map ids — `Map` is a separate opaque type) |
 
 ---
 
@@ -513,7 +500,7 @@ screen Y.
 | `PositionCamera` | `x: Float, y: Float, zoom: Float` | — | Sets absolute position and zoom (`zoom > 0.00001`) |
 | `MoveCamera` | `forward: Float, side: Float, dzoom: Float` | — | Moves relative to the camera angle, adjusting zoom |
 | `TranslateCamera` | `dx: Float, dy: Float, dzoom: Float` | — | Moves in absolute world space, adjusting zoom |
-| `RotateCamera` | `logical: Float, render: Float` | — | Sets absolute rotation. `logical` (degrees) is reported by `CameraAngle` and drives `MoveCamera`'s heading; `render` (degrees) is the world-matrix rotation. The two fields are **independent** (faithful to cbEnchanted) and may diverge |
+| `RotateCamera` | `logical: Float, render: Float` | — | Sets absolute rotation. `logical` (degrees) is reported by `CameraAngle` and drives `MoveCamera`'s heading; `render` (degrees) is the world-matrix rotation. The two fields are **independent** and may diverge |
 | `TurnCamera` | `dLogical: Float, dRender: Float` | — | Rotates relatively: `dLogical` (degrees) wraps to 0–360; `dRender` (degrees) accumulates into the world-matrix rotation (stored internally in radians, wrapped to 0–2π) |
 | `PointCamera` | `obj: Object` | — | Rotates the camera to point at an object |
 | `CameraFollow` | `obj: Object, style: Integer, setting: Float` | — | Follows an object. `style` 1=smooth (divide distance by `setting`), 2=margin deadzone (`setting`=px), 3=orbit (`setting`=distance) |
@@ -549,11 +536,10 @@ The map is loaded from a CoolBasic `.til` binary (little-endian; on-disk layer
 order 0, 2, 1, 3; two absolute seeks for editor metadata). The format is
 **compatibility-frozen** and was byte-verified against a real asset; the per-tile
 animation block stores `tileCount` entries but only `tileCount-1` are read (the
-trailing 8 bytes are ignored), matching cbEnchanted. `EditMap`'s `map` argument
-is popped but ignored — the single active map is edited. `SetTile` stores per-tile
-animation params; tile animation advances on the FD-036 Phase 5 game-loop update
-tick — a deterministic **frame-step** (cbEnchanted's was wall-clock-based; the port
-uses a fixed step per tick so headless runs reproduce). The map renders inside the
+trailing 8 bytes are ignored). `EditMap`'s `map` argument is popped but ignored —
+the single active map is edited. `SetTile` stores per-tile animation params; tile
+animation advances on the game-loop update tick — a deterministic **frame-step**
+(a fixed step per tick so headless runs reproduce). The map renders inside the
 object draw order (background layer 0 before objects, foreground layer 1 after).
 
 ---
@@ -577,7 +563,7 @@ went down this frame (edge), `Released` = went up this frame (edge), `Up` = idle
 | `KeyDown` | `scancode: Integer` | `Integer` | 1 if the key is currently held (level) |
 | `KeyHit` | `scancode: Integer` | `Integer` | 1 if pressed this frame (edge) |
 | `KeyUp` | `scancode: Integer` | `Integer` | 1 if released this frame (edge) |
-| `GetKey` | — | `Integer` | Next queued character code (CP-1252), or 0 |
+| `GetKey` | — | `Integer` | Next queued character code, or 0 |
 | `WaitKey` | — | `Integer` / — | Blocks until a key is pressed; function form returns the scancode |
 | `ClearKeys` | — | — | Clears key states; ignores keyboard events until the next frame |
 | `EscapeKey` | — | `Integer` | 1 if Escape is held (level). Only observable when `SafeExit` is OFF — with the default `SafeExit` ON, Escape stops the program before its held state is recorded |
@@ -644,21 +630,20 @@ NumLock/Pause, matching DirectInput and the real CoolBasic `cbKey*` constants:
 
 ## File I/O
 
-**Implemented (FD-040, `runtime/cb_file.cpp`).** `File` is the opaque `CbFile*`
+**Implemented (`runtime/cb_file.cpp`).** `File` is the opaque `CbFile*`
 handle (catalog tag 16): a declared-but-unassigned `File` is `Null`, and a failed
 open returns `Null` — not an integer id (classic CB used integer file ids). The
 subsystem is Allegro-free, so it is present in the SDK-free catalog and runs
-headless. Authoritative behaviour was taken from the cbEnchanted reference and
-the official CoolBasic Help; deliberate divergences from classic CoolBasic, all
-for safety/correctness:
+headless. Deliberate divergences from classic CoolBasic, all for
+safety/correctness:
 
 - **Lenient at end-of-data.** A read at/past EOF returns a zero value
   (`0`/`0.0`/`""`) and zero-fills any missing bytes of a multi-byte read; `EOF`
   stays the guard. Classic CB returned uninitialised garbage (and `ReadByte`
   returned 255 at the end).
 - **Traps on misuse.** A null/closed/invalid `File`, or a wrong-mode op (writing
-  a read handle / reading a write handle), raises a runtime error through the
-  FD-015 trap channel (exit 1). Classic CB is permissive.
+  a read handle / reading a write handle), raises a runtime error (exit 1).
+  Classic CB is permissive.
 - **Little-endian on the wire**, independent of host byte order (byte-compatible
   with classic x86 CB files). `ReadByte`/`ReadShort` are unsigned, `ReadInt`
   signed, and `ReadFloat`/`WriteFloat` are 32-bit on disk.
@@ -671,7 +656,7 @@ for safety/correctness:
   over a single global, non-reentrant cursor on the current directory.
   **`CurrentDir`** keeps a trailing separator. **`CopyFile`** traps if the
   destination already exists. **`Execute`** shells out via `start` (Windows) /
-  `xdg-open` (elsewhere), like cbEnchanted.
+  `xdg-open` (elsewhere).
 
 A `File` is returned into a `File` variable; compare against `Null` to detect a
 failed open.
@@ -728,7 +713,7 @@ failed open.
 
 (Source names use `MEMBlock`; CoolBasic spelling is `MakeMEMBlock` etc.)
 
-**Implemented (FD-039, `runtime/cb_memblock.cpp`).** `Memblock` is the opaque
+**Implemented (`runtime/cb_memblock.cpp`).** `Memblock` is the opaque
 `CbMemblock*` handle (catalog tag 15) — a raw-pointer opaque handle with no
 numeric id space; a declared-but-unassigned `Memblock` is `Null`. The subsystem
 is Allegro-free, so it is present in the SDK-free catalog and runs headless.
@@ -736,8 +721,8 @@ Deliberate divergences from classic CoolBasic:
 
 - **Bounds/handle safety traps.** An out-of-range offset, a null/invalid handle,
   a negative `MakeMEMBlock`/`ResizeMEMBlock` size, or a bad `MemCopy` range
-  raises a runtime error through the FD-015 trap channel (exit 1) instead of the
-  classic blind-cast that walks off the buffer (undefined behaviour).
+  raises a runtime error (exit 1) instead of the classic blind-cast that walks
+  off the buffer (undefined behaviour).
 - **Little-endian on the wire.** Multi-byte `Peek`/`Poke` (`Short`/`Int`/`Float`)
   use little-endian byte order regardless of host architecture, so a memblock's
   contents are platform-independent.
@@ -789,7 +774,7 @@ Instances of a `Type ... EndType` form a per-type linked list.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `SortArray` | `arr: Integer[]` | — | Sorts a 1D array in ascending order. **Not present in cbEnchanted** (original CoolBasic only) |
+| `SortArray` | `arr: Integer[]` | — | Sorts a 1D array in ascending order |
 
 > `Dim`, `ReDim`, and `ClearArray` are language constructs handled by the
 > compiler/bytecode rather than runtime library calls.
@@ -822,8 +807,8 @@ Instances of a `Type ... EndType` form a per-type linked list.
   downward. World coordinates (camera space) invert Y relative to screen space.
 - **Angles** are degrees everywhere.
 - **1-based** string and tilemap indices.
-- **Single-byte strings.** See [string semantics](#string-semantics) — cbEnchanted
-  is byte/CP-1252 oriented, not UTF-8.
+- **Code-point strings.** See [string semantics](#string-semantics) — strings
+  are Unicode code points (UTF-8 storage), not single-byte CP-1252.
 
 ### Collision model
 
@@ -839,87 +824,74 @@ Instances of a `Type ... EndType` form a per-type linked list.
 
 ## Implementation status in cbcompiler_rs
 
-The sections above describe the **full cbEnchanted surface** (the target).
-cbcompiler_rs currently implements a subset, and in places diverges
-intentionally. Known status and divergences as of the latest runtime work
-(FD-013/014/015/016):
+The sections above describe the **full CoolBasic runtime surface**. cbcompiler_rs
+currently implements a subset, and in places diverges intentionally. Known status
+and divergences as of the latest runtime work:
 
-- **String semantics divergence.** cbcompiler_rs strings are **UTF-8** and all
-  char-indexed ops count Unicode **codepoints**, whereas cbEnchanted is
-  single-byte CP-1252 and counts bytes. Out-of-range arguments **clamp** rather
+- **String semantics.** Strings are **UTF-8** and all char-indexed ops count
+  Unicode **code points** (a deliberate divergence from classic CoolBasic's
+  single-byte CP-1252 byte counting). Out-of-range arguments **clamp** rather
   than error (`Left("hi",5)`→`"hi"`; `n<=0`→`""`). `Upper`/`Lower` are ASCII-only
-  for now. The **full String surface is implemented** (FD-017): `Mid`, `Replace`,
-  `LSet`, `RSet`, `Asc`, `Bin`, `String`, `Flip`, `StrInsert`, `StrMove`,
-  `CountWords`, `GetWord` join the FD-013 set. `InStr` not-found returns `0` (per
-  spec). Codepoint-specific notes: `Flip` reverses by codepoint (valid UTF-8 out);
-  `Asc` returns the first **codepoint** (inverse of `Chr`), not a 0–255 byte;
-  `StrInsert` uses proper 1-based indexing (cbEnchanted's StrInsert has an
-  off-by-one its StrRemove/StrMove siblings do not — not reproduced); `String(s,n)`
-  with `n<1` still yields one copy (cbEnchanted parity).
-- **Math.** Full surface implemented (FD-017 adds `CurveValue`, `CurveAngle`,
-  `BoxOverlap`). `Rand(low,high)` is **inclusive** `[low,high]` and `Rnd(low,high)`
-  is `[low,high)` (cbEnchanted parity); the `high < low` branch is the documented
-  special case (Rnd → `randf()*low`, Rand → `rand(low)`), not a swap. `Int(Float)`
-  rounds to the **nearest integer, ties away from zero** (`f64::round`, so
-  `10.5 → 11` and `-1.5 → -2`), and `Int(String)` trims then parses a leading
+  for now. The **full String surface is implemented**. `InStr` not-found returns
+  `0` (per spec). Code-point-specific notes: `Flip` reverses by code point (valid
+  UTF-8 out); `Asc` returns the first **code point** (inverse of `Chr`), not a
+  0–255 byte; `StrInsert` uses proper 1-based indexing; `String(s,n)` with `n<1`
+  still yields one copy.
+- **Math.** Full surface implemented. `Rand(low,high)` is **inclusive**
+  `[low,high]` and `Rnd(low,high)` is `[low,high)`; the `high < low` branch is the
+  documented special case (Rnd → `randf()*low`, Rand → `rand(low)`), not a swap.
+  `Int(Float)` rounds to the **nearest integer, ties away from zero** (`f64::round`,
+  so `10.5 → 11` and `-1.5 → -2`), and `Int(String)` trims then parses a leading
   integer — both via the interpreter's `convert_value` (so explicit `Int()` and
-  implicit Float→Int coercion agree). **Known divergence from cbEnchanted:**
-  cbEnchanted's `Int(Float)` adds `0.5` then truncates toward zero (`-1.5 → -1`,
-  and quirkily `-1.4 → 0`); cbcompiler_rs's `f64::round` (ties away from zero) is
-  *not* bug-for-bug identical here — an intentional divergence, not parity.
+  implicit Float→Int coercion agree). This is an intentional divergence from
+  classic CoolBasic, whose `Int(Float)` adds `0.5` then truncates toward zero
+  (`-1.5 → -1`, and quirkily `-1.4 → 0`).
 - **System / Time.** `Timer` returns monotonic ms since first call
   (`std::chrono::steady_clock`; the legacy used CPU-time `clock()`). `Wait(ms)`
   sleeps (`ms <= 0` is a no-op). `End` is a language statement lowered to an IR
-  `Halt`; `MakeError(msg)` writes to stderr and exits with code 1. FD-017 adds
-  `Date` (`"D Mon YYYY"`), `Time` (`"HH:MM:SS"`), `CommandLine`, and `GetEXEName`;
-  the last two read the running `cb` process (no separate compiled program exists
-  as in cbEnchanted). `FrameLimit`/`Errors`/`SetWindow`/`Crc32` remain deferred
-  (window/loop/error-display plumbing).
-- **Graphics / images** (FD-013 Batch 4, Allegro 5, `runtime/cb_gfx.cpp`).
-  `Image` wraps an Allegro bitmap.
-  `DeleteImage` exists (the legacy leaked image handles until exit). `Circle`'s
-  argument is a diameter; `GetPixel`/`PutPixel` packed form uses 32-bit ARGB.
-  `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap fallback).
-  FD-017 adds `Screen(w,h,depth,mode)` (depth ignored — always 32-bit) and the
-  no-arg `Screen()` (buffer id 0), `ScreenDepth` (32), `GFXModeExists`
+  `Halt`; `MakeError(msg)` writes to stderr and exits with code 1. `Date`
+  (`"D Mon YYYY"`), `Time` (`"HH:MM:SS"`), `CommandLine`, and `GetEXEName` are
+  implemented; the last two read the running `cb` process. `FrameLimit`/`Errors`/
+  `SetWindow`/`Crc32` remain deferred (window/loop/error-display plumbing).
+- **Graphics / images** (Allegro 5, `runtime/cb_gfx.cpp`). `Image` wraps an
+  Allegro bitmap. `DeleteImage` exists (the legacy leaked image handles until
+  exit). `Circle`'s argument is a diameter; `GetPixel`/`PutPixel` packed form uses
+  32-bit ARGB. `MakeImage`/`LoadImage` work before any `Screen()` (memory-bitmap
+  fallback). Implemented: `Screen(w,h,depth,mode)` (depth ignored — always 32-bit)
+  and the no-arg `Screen()` (buffer id 0), `ScreenDepth` (32), `GFXModeExists`
   (best-effort: any positive mode → 1), `DrawScreen(cls,vsync)`, `GetRGB`,
   `PickColor` (reads the current target), `Smooth2D` (linear filtering on new
   bitmaps), `Ellipse`, `CopyBox` (current target only), `PutPixel2`/`GetPixel2`
   (ARGB aliases; the buffer-id arg models only the current target). `ScreenGamma`
   is stored but not applied and `ScreenShot` is a no-op without a window
-  (Allegro 5 has no portable display-gamma ramp). **Image** additions (FD-017):
+  (Allegro 5 has no portable display-gamma ramp). Image additions:
   `CloneImage`, `ResizeImage`, `RotateImage` (rotated bounding box, centered
   hotspot), `PickImageColor`/`PickImageColor2`, `SaveImage` (`frame` ignored),
   `DrawGhostImage` (alpha 0–100), `DrawImageBox`, `DefaultMask`, `ImagesOverlap`
   (AABB), and `ImagesCollide` (pixel-precise via non-zero alpha; `frame` args
   ignored). `MakeImage` now clears to opaque black (defined contents). `CbImage`
   gained a **hotspot** (default top-left); `HotSpot(img, x, y)` is the per-image
-  form (x<0 || y<0 auto-centers) — cbEnchanted's integer-id `0`/`1` default toggle
-  has no analogue since `Image` is an opaque handle, not an int id.
-- **Multi-frame sprite sheets** (FD-036, `runtime/cb_gfx.cpp`). `LoadAnimImage`
-  slices an `Image` into `frameW × frameH` cells; the `frame` parameter is honored
-  by `DrawImage`/`DrawGhostImage`/`DrawImageBox` (overloaded per arity — the
-  catalog has no default-arg mechanism). `frame` is 0-based, taken `% framesX`,
-  and **not clamped**; an image with no anim params (`anim_length == 0`) ignores
-  `frame` and draws whole (single-frame fallback). `MakeImage(w, h, frameCount)`
-  accepts but **ignores** `frameCount` (no frame size to slice by → stays
-  single-frame, matching cbEnchanted). The slice math **deliberately fixes**
-  cbEnchanted's row-index/offset bugs (`cbimage.cpp` used `/framesY` and
-  `*frameWidth`, correct only for square single-row sheets); the port uses
-  `row = frame / framesX` and `top = row * frameHeight`. **`useMask` on
-  `DrawImage`/`DrawImageBox` is accepted but ignored** — this port's masking is
+  form (x<0 || y<0 auto-centers) — classic CoolBasic's integer-id `0`/`1` default
+  toggle has no analogue since `Image` is an opaque handle, not an int id.
+- **Multi-frame sprite sheets** (`runtime/cb_gfx.cpp`). `LoadAnimImage` slices an
+  `Image` into `frameW × frameH` cells; the `frame` parameter is honored by
+  `DrawImage`/`DrawGhostImage`/`DrawImageBox` (overloaded per arity — the catalog
+  has no default-arg mechanism). `frame` is 0-based, taken `% framesX`, and **not
+  clamped**; an image with no anim params (`anim_length == 0`) ignores `frame` and
+  draws whole (single-frame fallback). `MakeImage(w, h, frameCount)` accepts but
+  **ignores** `frameCount` (no frame size to slice by → stays single-frame). The
+  slice math uses `row = frame / framesX` and `top = row * frameHeight`. **`useMask`
+  on `DrawImage`/`DrawImageBox` is accepted but ignored** — masking here is
   destructive (`MaskImage` bakes alpha into the single bitmap, leaving no unmasked
-  copy to select between), with a `// TODO(FD-036)` to revisit by storing
-  masked+unmasked bitmaps. `SaveImage`/`ImagesCollide` `frame` args stay inert
-  (matches cbEnchanted). `HotSpot(-1, -1)` centers on a single frame when a frame
-  size is set, else the whole image. `anim_begin`/`startFrame` is stored but never
-  read (parity with cbEnchanted). `LoadAnimImage` shares `MakeImage`'s
-  memory-bitmap fallback so sheets load without a display.
-- **Input** (FD-013 Batch 5, `runtime/cb_input.cpp`). Keyboard
-  (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the scancode table are ported 1:1.
+  copy to select between). `SaveImage`/`ImagesCollide` `frame` args stay inert.
+  `HotSpot(-1, -1)` centers on a single frame when a frame size is set, else the
+  whole image. `anim_begin`/`startFrame` is stored but never read. `LoadAnimImage`
+  shares `MakeImage`'s memory-bitmap fallback so sheets load without a display.
+- **Input** (`runtime/cb_input.cpp`). Keyboard
+  (`KeyDown`/`KeyUp`/`KeyHit`/`EscapeKey`) and the scancode table are implemented.
   Input advances per frame inside `DrawScreen`. The mouse functions
-  (`MouseDown`/`MouseHit`/`MouseUp`/`MouseZ`/`MouseMove*`) were added on Allegro's
-  mouse model. `EscapeKey` is a pure query (no legacy auto-exit). FD-017 adds
+  (`MouseDown`/`MouseHit`/`MouseUp`/`MouseZ`/`MouseMove*`) are built on Allegro's
+  mouse model. `EscapeKey` is a pure query (no legacy auto-exit). Also implemented:
   `GetKey` (typed-char queue), `LeftKey`/`RightKey`/`UpKey`/`DownKey`,
   `ClearKeys`/`ClearMouse` (swallow events until the next frame), `GetMouse`
   (button-down queue), `PositionMouse`, `ShowMouse` (0=hide/1=show; image cursors
@@ -927,45 +899,42 @@ intentionally. Known status and divergences as of the latest runtime work
   `WaitMouse` (block on the window event queue; with no window they return 0
   immediately rather than hang). `MouseWX`/`MouseWY` and `Input`/`CloseInput`/
   `SafeExit` remain deferred (camera / interactive on-screen entry).
-- **Text / fonts** (FD-018, Allegro font/ttf addons, `runtime/cb_gfx.cpp` +
+- **Text / fonts** (Allegro font/ttf addons, `runtime/cb_gfx.cpp` +
   `runtime/cb_font.cpp`). `Font` is an opaque handle (like `Image`). Immediate
   `Text`/`CenterText`/`VerticalText` draw in the current color onto the active
   target; the `Locate`/`AddText`/`ClearText` queue re-renders every `DrawScreen`
-  until cleared. `LoadFont` takes a system family name (resolved via a ported
-  Windows font table / fontconfig on Linux) or a file path (name containing a
-  `.`); `Smooth2D` toggles antialiased vs monochrome glyphs; `underline` is
-  accepted but not rendered (cbEnchanted TODO). The default font is Courier New
-  12pt, falling back to Allegro's built-in 8×8 font so `Text`/`TextWidth`/
-  `TextHeight` never crash and work headless. `VerticalText` is documented as
-  `(x, y, s)` (cbEnchanted's command pops `(y, x, s)` — a likely label swap).
-- **Pixel-precise ARGB.** Where cbcompiler_rs uses packed 32-bit **ARGB**,
-  cbEnchanted's `PutPixel`/`GetPixel` use packed `0xRRGGBB`. Reconcile when
-  implementing.
-- **Camera** (FD-036 Phase 2 + Phase 5) is implemented: the world↔screen transform
-  core (`PositionCamera`, `MoveCamera`, `TranslateCamera`, `RotateCamera`,
-  `TurnCamera`, `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw
-  command), and `MouseWX`/`MouseWY`. The object-referencing camera funcs
-  (`PointCamera`, `CameraFollow`, `CloneCameraPosition`/`Orientation`, `CameraPick`)
-  landed in **Phase 5** with two cbEnchanted bug fixes: `PointCamera` aims with the
-  object's X (not Y twice), and `CloneCameraOrientation` sets **both** angle fields
-  (cbEnchanted left the render matrix desynced). `CameraFollow`'s style-2 deadzone
-  uses the physical window size; the follow step runs once per `DrawScreen`.
-  Faithful to cbEnchanted, the camera keeps two independent angle fields —
-  `CameraAngle` (degrees, also driving `MoveCamera`'s heading) and the render-matrix
-  angle — which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
-- **Tile maps** (FD-036 Phase 3, `runtime/cb_map.cpp`) are implemented: a single
-  active tilemap (`LoadMap`/`MakeMap`, `MapWidth`/`MapHeight`, `GetMap`/`GetMap2`,
-  `EditMap`, `SetMap`, `SetTile`) with the four-layer model and the `.til` binary
-  format, rendered in world space via the Phase 2 camera. The `.til` format was
-  byte-verified against a real CoolBasic asset (`testmap.til`). Defensive
-  divergences from cbEnchanted: all funcs null-guard the active map (cbEnchanted
-  null-derefs), layer indices are bounds-checked (0 / no-op out of range), and
-  `SetTile`'s array-grow bug is fixed. The map renders inside the object draw order
-  (Phase 4) and, since **Phase 5**, layer 2 backs object map-collision (type 4) and
-  `ObjectSight` (a DDA wall walk). Tile animation advances on the Phase 5 game-loop
-  update tick — a deterministic **frame-step** (cbEnchanted scales by a wall-clock
-  timestep; the port uses a fixed step per tick so headless runs reproduce).
-- **Objects / sprites** (FD-036 Phase 4, `runtime/cb_object.cpp`) are implemented:
+  until cleared. `LoadFont` takes a system family name (resolved via a Windows
+  font table / fontconfig on Linux) or a file path (name containing a `.`);
+  `Smooth2D` toggles antialiased vs monochrome glyphs; `underline` is accepted but
+  not rendered (a known TODO). The default font is Courier New 12pt, falling back
+  to Allegro's built-in 8×8 font so `Text`/`TextWidth`/`TextHeight` never crash
+  and work headless. `VerticalText` is documented as `(x, y, s)`.
+- **Pixel-precise ARGB.** `PutPixel`/`GetPixel` use packed 32-bit **ARGB** (vs
+  the `0xRRGGBB` packing classic CoolBasic used).
+- **Camera** is implemented: the world↔screen transform core (`PositionCamera`,
+  `MoveCamera`, `TranslateCamera`, `RotateCamera`, `TurnCamera`,
+  `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw command), and
+  `MouseWX`/`MouseWY`. The object-referencing camera funcs (`PointCamera`,
+  `CameraFollow`, `CloneCameraPosition`/`Orientation`, `CameraPick`) are
+  implemented with two bug fixes over classic CoolBasic: `PointCamera` aims with
+  the object's X (not Y twice), and `CloneCameraOrientation` sets **both** angle
+  fields (classic CB left the render matrix desynced). `CameraFollow`'s style-2
+  deadzone uses the physical window size; the follow step runs once per
+  `DrawScreen`. The camera keeps two independent angle fields — `CameraAngle`
+  (degrees, also driving `MoveCamera`'s heading) and the render-matrix angle —
+  which `RotateCamera`/`TurnCamera` set from separate args and may diverge.
+- **Tile maps** (`runtime/cb_map.cpp`) are implemented: a single active tilemap
+  (`LoadMap`/`MakeMap`, `MapWidth`/`MapHeight`, `GetMap`/`GetMap2`, `EditMap`,
+  `SetMap`, `SetTile`) with the four-layer model and the `.til` binary format,
+  rendered in world space via the camera. The `.til` format was byte-verified
+  against a real CoolBasic asset (`testmap.til`). Defensive divergences from
+  classic CoolBasic: all funcs null-guard the active map (classic CB null-derefs),
+  layer indices are bounds-checked (0 / no-op out of range), and `SetTile`'s
+  array-grow bug is fixed. The map renders inside the object draw order, and
+  layer 2 backs object map-collision (type 4) and `ObjectSight` (a DDA wall walk).
+  Tile animation advances on the game-loop update tick — a deterministic
+  **frame-step** (a fixed step per tick so headless runs reproduce).
+- **Objects / sprites** (`runtime/cb_object.cpp`) are implemented:
   creation/lifecycle (`LoadObject`/`LoadAnimObject`/`MakeObject`/`MakeObjectFloor`/
   `CloneObject`/`DeleteObject`/`ClearObjects`), position/movement, rotation/angle
   (incl. `GetAngle2`/`Distance2`/`PointObject`), appearance (`PaintObject` — three
@@ -978,49 +947,49 @@ intentionally. Known status and divergences as of the latest runtime work
   **shared and reference-counted**: `CloneObject` shares the bitmap (resets pos/
   angle, forces `visible=true`); `PaintObject`/`MaskObject` mutate the shared
   bitmap in place so all clones see the change; `MirrorObject` repoints the one
-  object to a fresh private bitmap. The render pass now reproduces cbEnchanted's
-  `drawObjects` order under one world transform — map background → floor objects →
-  regular objects → map foreground — replacing Phase 3's standalone map pass.
-- **Collision, picking & game loop** (FD-036 Phase 5, `runtime/cb_object.cpp` +
+  object to a fresh private bitmap. The render pass follows the CoolBasic draw
+  order under one world transform — map background → floor objects → regular
+  objects → map foreground.
+- **Collision, picking & game loop** (`runtime/cb_object.cpp` +
   `runtime/cb_collision_data.h`) are implemented. **Collision**: `SetupCollision`
   is a *persistent* registration re-tested every update tick (object-object, plus a
   `Map`-handle overload for type-4 map walls); box-box, circle-circle, box-map and
   circle-map geometry with report/stop/slide handling; `ObjectRange`,
   `ResetObjectCollision`, `ClearCollisions`, `CountCollisions`, the 1-based
-  `GetCollision`/`CollisionX`/`Y`/`Angle`, and `ObjectsOverlap`. Faithful quirks:
-  `Stop` handling is circle-only, box↔circle object pairs never collide
-  (cbEnchanted's dead `CircleRect`/`RectCircle` tests), `MakeObject`/`MakeObjectFloor`
-  leave `ObjectRange` 0×0 (so their collisions are inert until set), and pixel
-  overlap is unimplemented (→ 0). `GetCollision` returns an `Object` handle (or
-  `Null`), never an integer; a map-wall hit yields `Null` (a `Map` is not an
-  `Object`). **Picking**: `ObjectPickable`/`ObjectPick` (nearest raycast hit),
-  `PickedObject`/`X`/`Y`/`Angle` (`PickedAngle` fixed to degrees-from-hit, vs
-  cbEnchanted's stale radians), `PixelPick` (registered no-op stub), `ObjectSight`,
-  and `ScreenPositionObject`/`CameraPick` (screen→world then test). **Game loop**:
-  `UpdateGame`/`DrawGame` run the built-in update/draw with `gameUpdated`/`gameDrawn`
-  dedup against `DrawScreen`'s implicit pass — there are **no user CB callbacks**
-  (cbEnchanted's hooks are defined but never registered). The update tick advances
-  animation and `ObjectLife` (auto-deleting at 0), wipes per-frame collision lists,
-  steps map-tile animation, and re-runs every collision check.
-- **Particle emitters** (FD-038, `runtime/cb_object.cpp` + `runtime/cb_particle.h`)
-  are implemented: `MakeEmitter`/`ParticleMovement`/`ParticleEmission`/
+  `GetCollision`/`CollisionX`/`Y`/`Angle`, and `ObjectsOverlap`. Inherited
+  classic-CoolBasic quirks: `Stop` handling is circle-only, box↔circle object pairs
+  never collide (classic CoolBasic's dead `CircleRect`/`RectCircle` tests),
+  `MakeObject`/`MakeObjectFloor` leave `ObjectRange` 0×0 (so their collisions are
+  inert until set), and pixel overlap is unimplemented (→ 0). `GetCollision`
+  returns an `Object` handle (or `Null`), never an integer; a map-wall hit yields
+  `Null` (a `Map` is not an `Object`). **Picking**: `ObjectPickable`/`ObjectPick`
+  (nearest raycast hit), `PickedObject`/`X`/`Y`/`Angle` (`PickedAngle` reports
+  degrees-from-hit, a fix over classic CoolBasic's stale radians), `PixelPick`
+  (registered no-op stub), `ObjectSight`, and `ScreenPositionObject`/`CameraPick`
+  (screen→world then test). **Game loop**: `UpdateGame`/`DrawGame` run the built-in
+  update/draw with `gameUpdated`/`gameDrawn` dedup against `DrawScreen`'s implicit
+  pass — there are **no user CB callbacks**. The update tick advances animation and
+  `ObjectLife` (auto-deleting at 0), wipes per-frame collision lists, steps
+  map-tile animation, and re-runs every collision check.
+- **Particle emitters** (`runtime/cb_object.cpp` + `runtime/cb_particle.h`) are
+  implemented: `MakeEmitter`/`ParticleMovement`/`ParticleEmission`/
   `ParticleAnimation`. An emitter is a `CbObject` carrying an emitter payload (the
   kind discriminator), so it reuses the `Object` type (tag 13) — every object
   command drives it, with zero frontend/catalog-type changes. It renders its
-  particles and steps them on the Phase-5 update tick, defers `DeleteObject` until
-  the particles drain, and is **excluded from picking and collision** (real CB does
+  particles and steps them on the update tick, defers `DeleteObject` until the
+  particles drain, and is **excluded from picking and collision** (real CB does
   neither, contradicting the Help docs). The pure simulation (uniform launch
   direction, gravity/acceleration integration, cull, forward+clamped animation
-  frame) lives in the Allegro-free `cb_particle.h` and is unit-tested headlessly.
-  Divergences from cbEnchanted: forward animation (it played reverse), trap on a
-  non-emitter handle (it blind-cast → UB), no `StopEmitting` (its own extension),
-  and a non-positive-density spawn guard.
+  frame) lives in the Allegro-free `cb_particle.h`. Safety and correctness
+  behaviors: a non-emitter handle traps instead of being blind-cast (classic CB's
+  UB), animation plays forward per the Help, there is no `StopEmitting`, and a
+  non-positive emission density spawns nothing.
 - **Not yet implemented** in cbcompiler_rs: video playback, `Read`/`Restore`,
   `Encrypt`/`Decrypt`, `CallDLL`, and the plumbing-heavy System funcs (`Crc32`,
-  `SetWindow`, `FrameLimit`, `Errors`). (Sound is implemented — FD-041; file I/O
-  — FD-040; memblocks — FD-039.)
+  `SetWindow`, `FrameLimit`, `Errors`). (Sound, file I/O, and memblocks are
+  implemented.)
 
-### Runtime library architecture (cbcompiler_rs, FD-016)
+### Runtime library architecture (cbcompiler_rs)
 
 The cbcompiler_rs C++ runtime is split into two static libraries with a strict,
 one-directional dependency (functionality → core; core depends on nothing
@@ -1029,8 +998,8 @@ functional):
 - **`cb_runtime_core`** — the irreducible, plugin-facing ABI: the opaque
   `CbString` type and its primitives, the `CbStringApi` table, the catalog
   descriptor structs (`CbTypeTag`, `CbTypeDesc`, `CbParamDesc`, `CbFuncDesc`,
-  `CbCatalog`), `CB_CATALOG_VERSION`, and `cb_runtime_get_catalog`. FD-015 adds
-  the `CbHostApi`/`CbRuntimeHooks`/`cb_runtime_init` trap-channel handshake.
+  `CbCatalog`), `CB_CATALOG_VERSION`, and `cb_runtime_get_catalog`, plus the
+  `CbHostApi`/`CbRuntimeHooks`/`cb_runtime_init` trap-channel handshake.
   **Zero Allegro dependency.** Header: `runtime/cb_runtime_core.h`; single TU:
   `runtime/cb_string.cpp`.
 - **`cb_runtime`** (functionality) — the feature subsystems built on core: the
@@ -1043,7 +1012,7 @@ headers; it will be removed once every TU migrates.
 
 #### Plugin ABI contract
 
-Plugins (separate DLLs, per FD-009) handle `String` parameters by **statically
+Plugins (separate DLLs) handle `String` parameters by **statically
 linking `cb_runtime_core`** and calling its primitives directly — no
 function-pointer indirection on the hot path. This relies on value-based
 `CbString` identity across modules:
@@ -1057,12 +1026,12 @@ function-pointer indirection on the hot path. This relies on value-based
   `CB_EMPTY_STRING_INSTANCE` address is only an intra-module shortcut — never
   compare a string pointer against `cb_runtime_string_api.empty` for correctness.
 
-#### SDK-free build (FD-033)
+#### SDK-free build
 
 `cb-runtime-sys` builds on machines that have **only a Rust toolchain** — no
 CMake, vcpkg, or Allegro SDK — so `cargo test --workspace` runs the interpreter
 (the reference implementation) and the driver fixtures anywhere, including CI and
-cloud sessions. It does this by leaning on the FD-016 split: the Allegro-free TUs
+cloud sessions. It does this by leaning on the runtime's two-library split: the Allegro-free TUs
 (`cb_string.cpp`, `cb_host.cpp`, `cb_math.cpp`, `cb_strfuncs.cpp`,
 `cb_system.cpp`) plus `catalog.cpp` compiled with **`-DCB_NO_ALLEGRO`** are built
 directly via the `cc` crate. Under that define, `catalog.cpp` guards out only the

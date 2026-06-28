@@ -86,7 +86,6 @@ impl Source {
         // would otherwise make `slice_end` land mid-codepoint and panic the
         // slice below. Floor `slice_end` down to the nearest boundary; since
         // `slice_start` is always a line start (a boundary), this terminates.
-        // FD-021.
         let mut slice_end = slice_start + byte_col as usize;
         while slice_end > slice_start && !self.text.is_char_boundary(slice_end) {
             slice_end -= 1;
@@ -319,5 +318,5 @@ impl LineIndex {
 
 // Unit tests for `LineIndex` and `Source::offset_to_line_char_col` live in the
 // `tests/line_index.rs` integration suite (CRLF / bare-`\r` / LF terminators,
-// past-EOF clamping, multi-byte char columns, and FD-021 mid-codepoint
+// past-EOF clamping, multi-byte char columns, and mid-codepoint
 // flooring), exercised against the public crate API rather than from here.

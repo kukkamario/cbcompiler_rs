@@ -1,4 +1,4 @@
-// FD-013 Batch 4: graphics / image runtime, headless coverage.
+// Graphics / image runtime, headless coverage.
 //
 // `Image` is the first real runtime opaque-handle type. MakeImage falls back to
 // a memory bitmap when no window is open, so the handle round-trip and pixel

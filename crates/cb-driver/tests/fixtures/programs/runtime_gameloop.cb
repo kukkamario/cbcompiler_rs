@@ -1,4 +1,4 @@
-// FD-036 Phase 5c: the game loop (UpdateGame) driving the per-update-tick
+// The game loop (UpdateGame) driving the per-update-tick
 // advancement of ObjectLife, animation, and the PERSISTENT collision checks
 // registered by SetupCollision (which 5a could not exercise without a tick).
 // Headless-safe: asserts deterministic state. The animated object is built from a
@@ -108,4 +108,4 @@ SetupCollision(cw, mp, 2, 4, 2)     // circle-map, slide -> pushed out to the wa
 UpdateGame
 If Abs(ObjectX(cw) + 6.0) < 0.01 Then Print "circlemap_slide_ok"   // edge 0 - radius 6
 
-Print "fd036_gameloop_done"
+Print "gameloop_done"

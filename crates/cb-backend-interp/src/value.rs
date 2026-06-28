@@ -51,7 +51,7 @@ impl Value {
     /// Coerce any value to a CbString handle. For Value::String this is
     /// a refcount-bumped clone of the existing handle (no allocation). For
     /// the numeric types the formatting is delegated to the shared core-runtime
-    /// `cb_rt_*_to_string` symbols (FD-046) so the interpreter and a future
+    /// `cb_rt_*_to_string` symbols so the interpreter and a future
     /// native backend cannot diverge — most importantly on `Float` (CB's
     /// 6-significant-digit format). Other types format inline (debug-only forms).
     /// Used by `Convert(String)` and any other site that needs a string
@@ -81,7 +81,7 @@ impl Value {
     /// conversions. Integers convert directly; `Float` truncates toward zero;
     /// a `String` parses a leading integer after trimming (`"3x"` → 3, 0 on no
     /// leading digits) — delegated to the shared core-runtime
-    /// `cb_rt_string_to_long` (FD-046), the one string→int rule used for array
+    /// `cb_rt_string_to_long`, the one string→int rule used for array
     /// indices/dims and arithmetic alike. Non-numeric variants yield 0; under
     /// well-typed IR they never reach here (sema inserts a `Convert`). Single
     /// source of truth for both the interpreter and the FFI marshaller (II-V10).
@@ -107,7 +107,7 @@ impl Value {
     /// `String` uses a lenient `strtod`-style prefix parse — skip leading
     /// whitespace, optional sign, parse a float incl. exponent, stop at the
     /// first invalid char, 0.0 on no valid prefix (`"22yo"` → 22.0) — delegated
-    /// to the shared core-runtime `cb_rt_string_to_float` (FD-046, matching the
+    /// to the shared core-runtime `cb_rt_string_to_float` (matching the
     /// real CoolBasic). Non-numeric variants yield 0.0 (unreachable under
     /// well-typed IR). Single source of truth for the interpreter and FFI
     /// marshaller (II-V10).

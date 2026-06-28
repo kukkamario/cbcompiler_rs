@@ -156,7 +156,7 @@ fn multi_byte_utf8_byte_col_vs_char_col() {
     assert_eq!(src.offset_to_line_char_col(7), (1, 3));
 }
 
-/// FD-021 #3: a mid-codepoint byte offset must not panic. Before the fix,
+/// A mid-codepoint byte offset must not panic. Before the fix,
 /// `offset_to_line_char_col` clamped to `text_len` but did not snap to a
 /// `char` boundary, so slicing `text[..mid_codepoint]` panicked with
 /// "byte index N is not a char boundary". The boundary floor now makes a

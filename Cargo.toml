@@ -28,7 +28,7 @@ clap = { version = "4", features = ["derive"] }
 codespan-reporting = "0.11"
 # LLVM bindings for the (opt-in) llvm backend. `llvm18-1` pins LLVM 18 to match
 # the vcpkg-vendored toolchain (port 18.1.6); only built when
-# `cb-backend-llvm/codegen` is enabled (FD-047).
+# `cb-backend-llvm/codegen` is enabled.
 inkwell = { version = "0.9", features = ["llvm18-1"], default-features = false }
 insta = "1"
 phf = { version = "0.11", features = ["macros"] }

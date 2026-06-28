@@ -1,13 +1,13 @@
 #ifndef CB_RUNTIME_CORE_H
 #define CB_RUNTIME_CORE_H
 
-/* Runtime CORE ABI (FD-016).
+/* Runtime CORE ABI.
  *
  * The irreducible runtime surface that the compiler/backends cannot function
  * without and that PLUGINS must reference to accept/return String parameters
  * and to register catalog entries: the type-tag vocabulary, the opaque
  * `CbString` type and its primitives, the catalog descriptor structs, and
- * (added by FD-015) the host/hook handshake types.
+ * the host/hook handshake types.
  *
  * This header has ZERO Allegro / functionality dependency — it is the plugin
  * SDK header. A plugin includes only this and statically links the
@@ -23,7 +23,7 @@
 
 #define CB_CATALOG_VERSION 6
 
-/* Host trap-channel ABI version (FD-015). Versions the CbHostApi/CbRuntimeHooks
+/* Host trap-channel ABI version. Versions the CbHostApi/CbRuntimeHooks
  * handshake independently of the catalog data format: a catalog bump (e.g. v6
  * for runtime constants) must NOT force hosts to re-version when CbHostApi is
  * unchanged. cb_runtime_init rejects hosts whose abi_version != this. */
@@ -109,7 +109,7 @@ typedef struct {
 } CbFuncDesc;
 
 /* A global constant predeclared by the runtime and seeded into the compiler's
-   global scope (FD-029). The compiler folds these like a user `Const`, so they
+   global scope. The compiler folds these like a user `Const`, so they
    never reach the backend at runtime. `tag` is restricted to CB_TYPE_INT and
    CB_TYPE_FLOAT for now; the union grows (and other tags become legal) behind a
    future CB_CATALOG_VERSION bump. */
@@ -135,7 +135,7 @@ typedef struct {
     const CbStringApi*  strings;
 } CbCatalog;
 
-/* ─── Runtime Trap Channel (FD-015) ──────────────────────────────────────
+/* ─── Runtime Trap Channel ───────────────────────────────────────────────
    A cooperative, runtime-originated signalling channel. A `cb_rt_*` function
    asks the host to terminate cleanly or raise a runtime error by calling back
    through `CbHostApi`; the callback records the intent and RETURNS (it never
@@ -165,7 +165,7 @@ typedef struct {
    this bit. */
 #define CB_FUNC_CAN_TRAP 0x1u
 
-/* ABI layout pins (FD-024). These sizes are mirrored by `const`-assertions in
+/* ABI layout pins. These sizes are mirrored by `const`-assertions in
    crates/cb-runtime-sys/src/lib.rs; any drift fails the build on both sides
    before a mismatched struct can reach the FFI boundary. Sizes are the LP64 /
    Win64 repr(C) layout (8-byte pointers, natural alignment). */
@@ -201,17 +201,17 @@ CbString* cb_rt_string_concat(const CbString* a, const CbString* b);
 int32_t cb_rt_string_test_refcount(const CbString* s);
 
 /* Lexicographic byte comparison shared by the interpreter and the native
-   backend (FD-049 decision C). Returns <0 / 0 / >0 (normalized to -1/0/1);
+   backend. Returns <0 / 0 / >0 (normalized to -1/0/1);
    null operands are treated as empty. NOT a CB_FN — a bare symbol like the
    string primitives. */
 int32_t cb_rt_string_compare(const CbString* a, const CbString* b);
 
 extern const CbStringApi cb_runtime_string_api;
 
-/* ─── Standalone (AOT) program lifecycle (FD-049 decision A) ──────────────
+/* ─── Standalone (AOT) program lifecycle ──────────────────────────────────
    The native backend emits a tiny `int main()` that calls cb_rt_standalone_run
    with the lowered top-level body (`cb_user_main`). These build the default
-   host, run the FD-015 handshake, run the body, and exit cleanly. They carry no
+   host, run the handshake, run the body, and exit cleanly. They carry no
    `main` of their own, so they are dormant/harmless in the interpreter binary
    (which statically links the runtime and drives cb_runtime_init itself). */
 
@@ -225,14 +225,14 @@ void cb_rt_exit(int32_t code);
    cb_rt_exit(0). Returns 0 only formally (it never returns). */
 int32_t cb_rt_standalone_run(void (*user_main)(void));
 
-/* No-return trap for a null function-pointer call (FD-049): raise the FD-015
+/* No-return trap for a null function-pointer call: raise the
    error "null function pointer call" (matching the interpreter's NullFnPtr
    trap message) through the host channel, then exit 1. The LLVM backend's
    CallIndirect null-check branches here instead of a bare cb_rt_exit(1), so the
    native exe writes the same stderr trap message as the interpreter. */
 void cb_rt_trap_null_fnptr(void);
 
-/* Runtime Trap Channel handshake (FD-015). The host passes its API by const
+/* Runtime Trap Channel handshake. The host passes its API by const
    pointer; the runtime stashes it in a file-static and returns the hook table
    it wants connected (null hooks = not connected). Kept separate from
    cb_runtime_get_catalog, which must stay retrievable as pure data before
@@ -244,10 +244,10 @@ const CbRuntimeHooks* cb_runtime_init(const CbHostApi* host);
    cb_runtime_init has run. */
 const CbHostApi* cb_host(void);
 
-/* Teardown-registration seam (FD-043). `about_to_exit` (the hook table slot)
+/* Teardown-registration seam. `about_to_exit` (the hook table slot)
    dispatches to every callback registered here, so a functionality module can
    register an at-exit teardown without core referencing its Allegro symbols —
-   preserving the cb_runtime_core / functionality split (FD-016). Registration
+   preserving the cb_runtime_core / functionality split. Registration
    is de-duped by pointer, so multiple init sites registering the same callback
    is safe. The SDK-free build registers nothing, so about_to_exit is a no-op. */
 void cb_runtime_register_teardown(void (*fn)(void));

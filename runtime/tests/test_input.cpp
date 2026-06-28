@@ -1,4 +1,4 @@
-// FD-022: unit tests for the input edge-state machine. Drives the Allegro-free
+// Unit tests for the input edge-state machine. Drives the Allegro-free
 // state functions in cb_input.cpp with synthetic ALLEGRO_EVENTs — no display,
 // no al_init. cb::input::frame_begin/handle_event read event fields and mutate
 // file-static state only, so this runs fully headless.

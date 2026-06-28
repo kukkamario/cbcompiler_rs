@@ -168,7 +168,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.extend_from_slice(indices);
             }
             Expr::Field { target, .. } => {
-                // FD-004 #12: field name is a bare Span, not a child node.
+                // Field name is a bare Span, not a child node.
                 out.push(*target);
             }
             Expr::Paren { inner } => out.push(*inner),
@@ -452,7 +452,7 @@ proptest! {
         prop_assert_eq!(pretty(&r_a.arena, &r_a.program), pretty(&r_b.arena, &r_b.program));
     }
 
-    /// Continuation tokens must be transparent to the parser (FD-004 #1).
+    /// Continuation tokens must be transparent to the parser.
     /// Parsing a well-formed source with `preserve_trivia=true` (so
     /// `\` line-continuations survive as `TokenKind::Continuation` tokens
     /// in the stream) must yield the same AST as parsing it with the

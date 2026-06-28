@@ -1,10 +1,10 @@
-// FD-041: unit tests for the pure sound helpers in cb_sound.h. No audio device /
+// Unit tests for the pure sound helpers in cb_sound.h. No audio device /
 // Allegro needed — the header is self-contained (mirrors test_particle.cpp /
 // test_map.cpp). Two concerns: the parameter-mapping math (volume→gain,
 // balance→pan, frequency→speed-ratio) and the generation-tagged channel pool
 // (alloc → reap-bump → stale-reject → slot-reuse), the headless analogue of the
 // interpreter's heap.rs Slab tests. The actual play/stop/reap of real Allegro
-// instances needs a device → that smoke is deferred (FD-041 Verification).
+// instances needs a device → that smoke is deferred.
 
 #include "cb_sound.h"
 
@@ -19,7 +19,7 @@ namespace {
 constexpr float kEps = 1e-6f;
 }  // namespace
 
-// ── Parameter mapping (cbchannel.cpp; unified per OQ6) ───────────────────────
+// ── Parameter mapping (unified) ──────────────────────────────────────────────
 
 // gain = volume / 100. 100 → 1.0 (full), 0 → silent, 50 → half.
 TEST(SoundGain, VolumeOverHundred) {
@@ -39,7 +39,7 @@ TEST(SoundPan, BalanceOverHundred) {
 }
 
 // An out-of-range balance clamps to [-1, 1] instead of letting Allegro reject the
-// pan (cbEnchanted createError'd on rejection; we degrade gracefully).
+// pan (out-of-range values are clamped, not rejected).
 TEST(SoundPan, OutOfRangeClamps) {
     EXPECT_NEAR(cb::sound::pan(250.0f), 1.0f, kEps);
     EXPECT_NEAR(cb::sound::pan(-250.0f), -1.0f, kEps);

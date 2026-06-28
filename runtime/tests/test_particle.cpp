@@ -1,9 +1,9 @@
-// FD-038: unit tests for the pure particle-emitter math in cb_particle.h. No
+// Unit tests for the pure particle-emitter math in cb_particle.h. No
 // display / Allegro needed — the header is self-contained (mirrors
-// test_object.cpp / test_collision.cpp). These pin the uniform launch direction
-// (resolved OQ4), the per-frame integrate/accelerate/gravity/cull, the density-
+// test_object.cpp / test_collision.cpp). These pin the uniform launch direction,
+// the per-frame integrate/accelerate/gravity/cull, the density-
 // scheduled spawn (and its non-positive-density guard), and the forward, clamped
-// animation-frame selection (resolved OQ5).
+// animation-frame selection.
 
 #include "cb_particle.h"
 
@@ -20,7 +20,7 @@ constexpr double kEps = 1e-9;
 constexpr double kPi = cb::particle::k_pi;
 }  // namespace
 
-// ── Launch direction (uniform over ±spread, FD-038 OQ4) ──────────────────
+// ── Launch direction (uniform over ±spread) ──────────────────
 
 // rand01 == 0.5 aims exactly along the emitter's facing angle (offset 0).
 TEST(ParticleLaunch, MidRandomIsFacingAngle) {
@@ -145,7 +145,7 @@ TEST(ParticleSpawn, VelocityFromSpeedAndAngle) {
 }
 
 // A non-positive density must not spawn (and must not hang): the guard against
-// cbEnchanted's infinite `while (counter > density)` loop.
+// an infinite `while (counter > density)` loop.
 TEST(ParticleSpawn, NonPositiveDensityGuard) {
     CbEmitterState e;
     e.density = 0.0;
@@ -155,7 +155,7 @@ TEST(ParticleSpawn, NonPositiveDensityGuard) {
     EXPECT_TRUE(e.particles.empty());
 }
 
-// ── Animation frame selection (forward, clamped — FD-038 OQ5) ─────────────
+// ── Animation frame selection (forward, clamped) ─────────────
 
 // Forward: a freshly spawned particle (remaining == total) is on frame 0; it
 // advances toward the last frame as it ages.

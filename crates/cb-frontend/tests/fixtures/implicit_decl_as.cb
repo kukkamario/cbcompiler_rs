@@ -1,4 +1,4 @@
-// FD-004 #4: implicit declaration with `As` annotation (spec §4.1).
+// Implicit declaration with `As` annotation (spec §4.1).
 
 z As String = "asd"
 n As Integer = 0

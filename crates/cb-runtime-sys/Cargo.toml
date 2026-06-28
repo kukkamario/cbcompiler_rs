@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 # Declares this crate "owns" the `cb_runtime` native libs so the build script's
-# `cargo:KEY=VALUE` metadata flows to direct dependents as `DEP_CB_RUNTIME_<KEY>`
-# (FD-048). `cb-backend-llvm` reads these to locate the runtime closure for the
+# `cargo:KEY=VALUE` metadata flows to direct dependents as `DEP_CB_RUNTIME_<KEY>`.
+# `cb-backend-llvm` reads these to locate the runtime closure for the
 # AOT link step. Cargo enforces this name is unique across the dependency graph.
 links = "cb_runtime"
 
@@ -14,7 +14,7 @@ links = "cb_runtime"
 cb-ir = { path = "../cb-ir" }
 
 [build-dependencies]
-# SDK-free build path (FD-033): compile the Allegro-free runtime TUs directly
+# SDK-free build path: compile the Allegro-free runtime TUs directly
 # when the full CMake/Allegro toolchain is unavailable.
 cc = "1"
 

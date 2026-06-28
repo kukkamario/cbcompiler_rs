@@ -20,7 +20,7 @@ type FrameBuf = (Vec<Value>, Vec<Slot>);
 
 const MAX_CALL_DEPTH: usize = 10_000;
 
-// ── Runtime trap channel (FD-015) ──────────────────────────────────────
+// ── Runtime trap channel ──────────────────────────────────────
 //
 // A runtime (C) function asks the host to terminate cleanly or raise an error
 // by calling back through `HOST_API`; the callback records the request in this
@@ -111,17 +111,17 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
     /// literals/coercions and to dispatch concat. Lives in .rodata of the
     /// loaded runtime library; never moves, never drops.
     string_api: &'static CbStringApi,
-    /// Hook table returned by the FD-015 `cb_runtime_init` handshake. The
-    /// reserved `about_to_exit` teardown (FD-043) is fired from `run` via
+    /// Hook table returned by the `cb_runtime_init` handshake. The
+    /// reserved `about_to_exit` teardown is fired from `run` via
     /// [`Interpreter::fire_about_to_exit`]; the slot is null in the SDK-free
     /// build (nothing to tear down) and non-null in the full Allegro build.
     runtime_hooks: &'static cb_runtime_sys::CbRuntimeHooks,
-    /// FD-043: guards `about_to_exit`/`on_exit` to fire at most once. `run`
+    /// Guards `about_to_exit`/`on_exit` to fire at most once. `run`
     /// takes `&mut self` and is re-runnable in principle, so latch on first
     /// termination.
     about_to_exit_fired: bool,
     /// Runtime function bindings: the `symbol → fn_ptr` overlay the interpreter
-    /// dispatches through (FD-045). The IR carries only symbols; this table,
+    /// dispatches through. The IR carries only symbols; this table,
     /// resolved once at startup from the linked executable runtime, supplies the
     /// live addresses (the metadata catalog has none).
     bindings: HashMap<String, unsafe extern "C" fn()>,
@@ -130,13 +130,13 @@ pub struct Interpreter<'a, O: Observer = NoopObserver> {
 impl<'a> Interpreter<'a, NoopObserver> {
     pub fn new(program: &'a Program, interner: &'a Interner) -> Self {
         let string_api = cb_runtime_sys::string_api();
-        // FD-015: hand the runtime the host trap-channel API once, before any
+        // Hand the runtime the host trap-channel API once, before any
         // runtime function runs. A failed handshake (declined / ABI-incompatible)
         // is a fatal startup misconfiguration — fail loudly rather than dispatch
-        // through an unwired trap channel (FD-024). Clear any stale pending trap.
+        // through an unwired trap channel. Clear any stale pending trap.
         let runtime_hooks = cb_runtime_sys::runtime_init(&HOST_API)
             .unwrap_or_else(|e| panic!("runtime trap-channel handshake failed: {e}"));
-        // FD-045: the IR carries runtime calls by symbol only. Resolve the live
+        // The IR carries runtime calls by symbol only. Resolve the live
         // `symbol → fn_ptr` overlay from the linked executable runtime once, up
         // front — and reconcile it against the metadata catalog (the drift guard:
         // since metadata and bindings come from independently-built objects, a
@@ -207,7 +207,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     /// completion / `End`, the `MakeError` code for an aborting program);
     /// `Err` is a genuine interpreter trap or internal error.
     ///
-    /// FD-043: this is a thin wrapper that fires the runtime teardown hook
+    /// This is a thin wrapper that fires the runtime teardown hook
     /// exactly once, on every termination path, after [`run_inner`] returns.
     /// The whole body lives in `run_inner` so the hook is not bypassed by the
     /// early `?`/`return` paths that precede `exec_loop` (`find_main`,
@@ -227,7 +227,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         result
     }
 
-    /// FD-043: notify the runtime that the program is about to exit. Fires the
+    /// Notify the runtime that the program is about to exit. Fires the
     /// observer's `on_exit` and the runtime's `about_to_exit` C hook, latched
     /// to run at most once. The hook must not free the string/heap allocator:
     /// the interpreter's own `CbStringHandle`s drop *after* `run` returns, so
@@ -256,7 +256,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         };
 
         self.push_frame(main_id, body_index, &[], None)?;
-        // FD-015: a runtime `request_exit(code)` surfaces as `Exit(code)` from
+        // A runtime `request_exit(code)` surfaces as `Exit(code)` from
         // `call_runtime`; intercept it here and convert to the clean exit code,
         // mirroring the `Terminator::Halt { code } => Ok(code)` path.
         match self.exec_loop() {
@@ -519,7 +519,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             FuncKind::Runtime { symbol } => {
                 let symbol = symbol.clone();
                 let sig = decl.sig.clone();
-                // The startup drift guard (FD-045) guarantees every catalog
+                // The startup drift guard guarantees every catalog
                 // symbol resolves, so a miss here is an internal invariant break.
                 let fn_ptr = *self
                     .bindings
@@ -1047,8 +1047,8 @@ impl<'a, O: Observer> Interpreter<'a, O> {
     /// Evaluate a binary op on two already-evaluated operand values.
     ///
     /// Invariant: sema coerces every non-shift `BinOp`'s operands to a common
-    /// `Int`/`Long`/`Float` (or `String`) before lowering (FD-035 /
-    /// cb_syntax.md §3.4), so well-formed IR never reaches the arithmetic arms
+    /// `Int`/`Long`/`Float` (or `String`) before lowering (cb_syntax.md §3.4),
+    /// so well-formed IR never reaches the arithmetic arms
     /// with a `Byte`/`Short` operand. We still widen `Byte`/`Short` to `Int`
     /// here — mirroring the shift path below and `eval_unop` — so hand-written
     /// IR and any future coercion slip stay consistent instead of tripping the
@@ -1061,7 +1061,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         span: Span,
     ) -> Result<Value, InterpError> {
         // Shifts dispatch on the (widened) LHS and read the count from any
-        // integer RHS; sema does not coerce shift operands (FD-035). Byte/Short
+        // integer RHS; sema does not coerce shift operands. Byte/Short
         // shift in 32-bit (Int) width, Long in 64-bit.
         if matches!(op, IrBinOp::Shl | IrBinOp::Shr | IrBinOp::Sar)
             && matches!(
@@ -1089,7 +1089,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
             (Value::String(a), Value::String(b)) => self.string_binop(op, a, b, span),
 
-            // Type instance identity comparison — yields Int 1/0 (FD-035)
+            // Type instance identity comparison — yields Int 1/0
             (Value::TypeInstance(a), Value::TypeInstance(b)) => match op {
                 IrBinOp::Eq => Ok(Value::Int((a == b) as i32)),
                 IrBinOp::NotEq => Ok(Value::Int((a != b) as i32)),
@@ -1287,7 +1287,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         span: Span,
     ) -> Result<Value, InterpError> {
         // Relations go through the shared `cb_rt_string_compare` ordering oracle
-        // (FD-049 decision C) so the interpreter and the native backend cannot
+        // so the interpreter and the native backend cannot
         // diverge. It is a lexicographic byte compare — identical to the previous
         // inline `a.as_bytes() <cmp> b.as_bytes()` (Rust slice `Ord` over UTF-8).
         let cmp = || unsafe { cb_rt_string_compare(a.as_ptr(), b.as_ptr()) };
@@ -1308,7 +1308,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
 
     fn eval_unop(&self, op: IrUnOp, v: &Value, span: Span) -> Result<Value, InterpError> {
         match (op, v) {
-            // Byte/Short widen to Int for unary arithmetic/bitwise (FD-035), so
+            // Byte/Short widen to Int for unary arithmetic/bitwise, so
             // e.g. negating a Byte yields a signed Int, matching binary promotion.
             (IrUnOp::Neg, Value::Int(x)) => Ok(Value::Int(x.wrapping_neg())),
             (IrUnOp::Neg, Value::Long(x)) => Ok(Value::Long(x.wrapping_neg())),
@@ -1316,7 +1316,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (IrUnOp::Neg, Value::Short(x)) => Ok(Value::Int((*x as i32).wrapping_neg())),
             (IrUnOp::Neg, Value::Byte(x)) => Ok(Value::Int((*x as i32).wrapping_neg())),
 
-            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028).
+            // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`).
             // Signed widths use `wrapping_abs` to match the runtime `Abs` at
             // `MIN`; Byte/Short widen to Int (already non-negative).
             (IrUnOp::Abs, Value::Int(x)) => Ok(Value::Int(x.wrapping_abs())),
@@ -1325,7 +1325,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
             (IrUnOp::Abs, Value::Short(x)) => Ok(Value::Int(*x as i32)),
             (IrUnOp::Abs, Value::Float(x)) => Ok(Value::Float(x.abs())),
 
-            // Logical NOT yields Int 1/0 (FD-035), defined for every integer
+            // Logical NOT yields Int 1/0, defined for every integer
             // width via truthiness so we don't rely on sema pre-converting.
             (IrUnOp::Not, Value::Int(_) | Value::Long(_) | Value::Byte(_) | Value::Short(_)) => {
                 Ok(Value::Int(if v.is_truthy() { 0 } else { 1 }))
@@ -1485,7 +1485,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         // General path: libffi dispatch using the catalog fn_ptr + IR sig.
         let ret = unsafe { crate::ffi::call(fn_ptr, sig, args, self.string_api) };
 
-        // FD-015: drain any trap the runtime recorded during the call. The
+        // Drain any trap the runtime recorded during the call. The
         // callback returned normally (never unwinds), so we route the request
         // through the Result chain here, at the single FFI chokepoint.
         if let Some(pending) = PENDING_TRAP.with(|slot| slot.take()) {

@@ -1,4 +1,4 @@
-// FD-005: `Delete` statement (§3.3). The parser is permissive on operand
+// `Delete` statement (§3.3). The parser is permissive on operand
 // shape — lvalue/rvalue classification and the §9.2 trap diagnostics are
 // sema's job.
 

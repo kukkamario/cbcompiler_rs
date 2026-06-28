@@ -1,15 +1,15 @@
-//! IR → LLVM lowering orchestrator (FD-049 Phase 1).
+//! IR → LLVM lowering orchestrator.
 //!
 //! [`build_object`] is the entry point used by the `Backend` impl: build an
 //! in-memory `inkwell` module from the lowered CoolBasic IR, verify it, and hand
 //! it to [`crate::emit::write_module`] for native object emission. The link step
 //! (CRT + runtime closure) stays in [`crate::link`].
 //!
-//! Scope is the Phase-1 scalar core (user functions, control flow, runtime
-//! calls, strings, `Print`) plus the Phase-2 array surface (`New`/`Dim`,
-//! index/`Redim`/`Len`/`For Each` via the `cb_rt_array_*` heap helpers). User
-//! Types/structs and the `Trap` hard-fault path are later phases — reaching one
-//! fails the codegen loudly rather than miscompiling.
+//! Scope is the scalar core (user functions, control flow, runtime
+//! calls, strings, `Print`), the array surface (`New`/`Dim`,
+//! index/`Redim`/`Len`/`For Each` via the `cb_rt_array_*` heap helpers), user
+//! Types/structs, and function pointers. Anything still out of scope fails the
+//! codegen loudly rather than miscompiling.
 
 mod func;
 mod regtypes;
@@ -46,7 +46,7 @@ pub(crate) struct Codegen<'a, 'ctx> {
     runtime: RefCell<HashMap<String, FunctionValue<'ctx>>>,
     /// Counter for unique private string-literal global names.
     str_counter: Cell<u32>,
-    /// Lazy `TypeDefId.0 → node struct type` cache (FD-049 Phase 3a). The node
+    /// Lazy `TypeDefId.0 → node struct type` cache. The node
     /// LLVM type is `{ptr, ptr, ptr, i32, i32, <field basic_types…>}` — the
     /// 32-byte `CbTypeHeader` prefix plus the type's inline fields.
     node_types: RefCell<HashMap<u32, inkwell::types::StructType<'ctx>>>,
@@ -105,7 +105,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
 
     /// Declare every program global as an `internal` variable: numerics zero-
     /// initialized; String/reference globals null-initialized. (Null is a safe
-    /// empty String for Phase 1 — every runtime string primitive null-checks;
+    /// empty String — every runtime string primitive null-checks;
     /// real String globals are rare since top-level `Dim` lowers to `@main`
     /// locals.)
     fn declare_globals(&mut self) -> Result<(), String> {
@@ -124,16 +124,16 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 | IrType::Array { .. }
                 | IrType::TypeRef(_)
                 | IrType::FnPtr(_) => gv.set_initializer(&self.ptr_t().const_null()),
-                // A value-struct global is zero-initialized (FD-049 Phase 3b).
+                // A value-struct global is zero-initialized.
                 // Its String sub-fields stay null rather than the empty sentinel
                 // — there is no runtime global-init hook to set them, and every
                 // string primitive null-checks (the same scoped simplification
-                // Phase 1 made for String globals; top-level `Dim` lowers to
+                // made for String globals; top-level `Dim` lowers to
                 // `@main` locals, where the sentinel IS set, so this is rare).
                 IrType::StructVal(_) => gv.set_initializer(&ty.into_struct_type().const_zero()),
                 other => {
                     return Err(format!(
-                        "global of type {other:?} is out of scope for the Phase-1 LLVM backend"
+                        "global of type {other:?} is out of scope for the LLVM backend"
                     ));
                 }
             }

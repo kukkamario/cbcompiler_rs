@@ -1,12 +1,11 @@
 #ifndef CB_SOUND_H
 #define CB_SOUND_H
 
-// Pure, Allegro-free sound helpers (FD-041).
+// Pure, Allegro-free sound helpers.
 //
 // cb_sound.cpp owns the live audio (the loaded samples, the playing channels,
 // the Allegro init, and the catalog entry points). THIS header holds only the
-// headless-testable parts so they unit-test without an audio device (the
-// cb_*_data.h / cb_particle.h pattern):
+// headless-testable parts so they unit-test without an audio device:
 //
 //   • The parameter-mapping math — CB's 0..100 volume/balance scale and an
 //     absolute target-frequency-in-Hz mapped onto Allegro's gain (0..1),
@@ -17,10 +16,8 @@
 //     generation check turns it into a safe silent no-op instead of a
 //     use-after-free of a recycled slot.
 //
-// The math is unified per FD-041 OQ6: a single gain(volume) = volume/100 used by
-// both the sample and stream paths and by PlaySound and SetSound alike (dropping
-// cbEnchanted's stream-only `* streamGain` multiply, which always multiplied by
-// the freshly-loaded stream's gain of 1.0 — a behavioral no-op).
+// The math is unified: a single gain(volume) = volume/100 used by both the
+// sample and stream paths and by PlaySound and SetSound alike.
 
 #include <cstddef>
 #include <cstdint>
@@ -28,15 +25,14 @@
 
 namespace cb::sound {
 
-// ─── Parameter mapping (pure; faithful to cbchannel.cpp) ──────────────────
+// ─── Parameter mapping (pure) ─────────────────────────────────────────────
 
-// CB volume (0..100) → Allegro gain. 100 → 1.0. cbEnchanted divides by 100 at
-// every gain site (cbchannel.cpp:35,73,104).
+// CB volume (0..100) → Allegro gain. 100 → 1.0.
 inline float gain(float volume) { return volume / 100.0f; }
 
 // CB balance (-100..100) → Allegro pan (-1..1). Clamped so an out-of-range
-// balance degrades gracefully (Allegro rejects a pan outside [-1,1], on which
-// cbEnchanted raised an error; we clamp instead). cbchannel.cpp:41,79,110.
+// balance degrades gracefully (Allegro rejects a pan outside [-1,1]; out-of-range
+// values are clamped, not rejected).
 inline float pan(float balance) {
     float p = balance / 100.0f;
     if (p < -1.0f) p = -1.0f;
@@ -46,13 +42,13 @@ inline float pan(float balance) {
 
 // CB frequency (absolute target Hz) → Allegro speed ratio freq / native. A
 // non-positive freq (the default -1) leaves the native rate untouched (ratio
-// 1.0). cbchannel.cpp:48-49,67,154-155.
+// 1.0).
 inline float speed(int32_t freq, uint32_t native_freq) {
     if (freq <= 0 || native_freq == 0) return 1.0f;
     return static_cast<float>(freq) / static_cast<float>(native_freq);
 }
 
-// ─── Generation-tagged channel pool (FD-041 OQ1) ──────────────────────────
+// ─── Generation-tagged channel pool ───────────────────────────────────────
 //
 // Mirrors crates/cb-backend-interp/src/heap.rs Slab: parallel entries /
 // occupied / generations / free_list vectors. alloc pops a free slot (reusing
@@ -145,7 +141,7 @@ private:
 // DrawScreen frame hook (cb_gfx.cpp) can call it without including audio headers.
 void reap();
 
-// At-exit flush (FD-043, defined in cb_sound.cpp): destroy every live channel
+// At-exit flush (defined in cb_sound.cpp): destroy every live channel
 // unconditionally — the teardown counterpart to reap(). Called from the
 // graphics about_to_exit teardown before al_uninstall_system tears audio down.
 // Allegro-free declaration so cb_gfx.cpp can call it without audio headers.

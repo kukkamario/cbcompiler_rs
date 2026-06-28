@@ -1,22 +1,21 @@
 /* cb_keys.def — single source of truth for the CB DirectInput-style scancode
- * table (FD-029). Intentionally has NO include guard: it is an X-macro body
+ * table. Intentionally has NO include guard: it is an X-macro body
  * meant to be #included more than once with different macro definitions.
  *
  * Two entry kinds:
  *   CB_KEY(name, scancode, allegro_key)  — a key that also gets a public
  *       `cbKey*` constant (name) in addition to its sCBKeyMap entry.
  *   CB_KEY_RAW(scancode, allegro_key)    — scancode→keycode mapping only, no
- *       public constant yet (deferred punctuation / OEM / numpad-operator keys,
- *       per FD-029 Q3c). `KeyDown(rawNumber)` still works for these.
+ *       public constant yet (deferred punctuation / OEM / numpad-operator keys).
+ *       `KeyDown(rawNumber)` still works for these.
  *
  * Consumers must `#define` BOTH macros before including, then `#undef` them:
  *   - runtime/cb_input.cpp uses both to populate sCBKeyMap[scancode] = keycode.
  *   - runtime/catalog.cpp expands CB_KEY into a CbConstDesc and CB_KEY_RAW into
  *     nothing (the allegro_key argument is dropped there).
  *
- * Scancodes are the legacy DirectInput numbering. Names are taken verbatim from
- * cbEnchanted's tools/cbkeys_mapping/keys_coolbasic.cb (a dump of the real
- * CoolBasic constant names). NOTE: scancodes 69/197 are NumLock/Pause here,
+ * Scancodes are the legacy DirectInput numbering. Names are the real CoolBasic
+ * constant names. NOTE: scancodes 69/197 are NumLock/Pause here,
  * matching real CoolBasic + DirectInput — this corrects the swap previously
  * present in the hand-written sCBKeyMap. */
 

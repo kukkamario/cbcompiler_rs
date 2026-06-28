@@ -1,7 +1,7 @@
 #ifndef CB_ARRAY_H
 #define CB_ARRAY_H
 
-/* CoolBasic native-array heap helpers (FD-049 Phase 2).
+/* CoolBasic native-array heap helpers.
  *
  * Dedicated INTERNAL header — NOT part of the plugin SDK (cb_runtime_core.h).
  * Only cb_array.cpp (the implementation) and the gtest suite include it; the
@@ -14,12 +14,12 @@
  *   - dims are element COUNTS; allocate product(counts) elements, laid out
  *     row-major (last index varies fastest);
  *   - any fault (negative dim, OOB/negative index, rank mismatch, null handle)
- *     raises a runtime error through the FD-015 host channel — which in an AOT
+ *     raises a runtime error through the host channel — which in an AOT
  *     exe writes stderr + exits 1 — and returns a safe default. With no host
  *     (the gtest target) the trap is a no-op and the default is returned;
  *   - Len(arr, dim) with `dim` out of range returns 0 WITHOUT trapping.
  *
- * CORE TU (FD-016): Allegro-free, compiles clean under -DCB_NO_ALLEGRO. */
+ * CORE TU: Allegro-free, compiles clean under -DCB_NO_ALLEGRO. */
 
 #include "cb_runtime_core.h"
 

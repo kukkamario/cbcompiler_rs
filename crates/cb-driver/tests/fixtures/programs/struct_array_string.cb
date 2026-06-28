@@ -1,4 +1,4 @@
-' Array of value structs with a String field (FD-049 review F17) — the combined
+' Array of value structs with a String field — the combined
 ' refcount path: per-element String assign (release-old/retain-new through an
 ' Index+Field StorePlace), whole-element value copy (deep-copies the String),
 ' and field reassignment, all exercised together.

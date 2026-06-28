@@ -1,4 +1,4 @@
-// FD-022: unit tests for the pure AABB helper in cb_geom.h. No display / Allegro
+// Unit tests for the pure AABB helper in cb_geom.h. No display / Allegro
 // needed — the header is self-contained inline logic.
 
 #include "cb_geom.h"
@@ -31,7 +31,7 @@ TEST(RectOverlap, ContainmentOverlaps) {
     EXPECT_TRUE(rect_overlap(0, 0, 10, 10, 2, -2, 4, 4));
 }
 
-// Documents the FD-022 finding behind ImagesCollide: feeding screen-space
+// Documents the reasoning behind ImagesCollide: feeding screen-space
 // top-left rectangles through rect_overlap with Y negated (how images_overlap
 // and images_collide call it) yields the same boolean as a direct screen-space
 // AABB. This is why the "mixed convention" in cb_rt_images_collide is correct.

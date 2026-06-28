@@ -1,7 +1,7 @@
 #ifndef CB_OBJECT_H
 #define CB_OBJECT_H
 
-// Internal object glue (FD-036 Phase 4). NOT catalog ABI and NOT a CB-visible
+// Internal object glue. NOT catalog ABI and NOT a CB-visible
 // function. cb_object.cpp owns the live object registry; cb_gfx.cpp calls
 // cb::object::render_all() from DrawScreen to composite the whole object pass
 // through the camera, on top of this frame's user draws and beneath the AddText
@@ -16,7 +16,7 @@ namespace cb::object {
 // Composite the whole object pass (see above). Called from DrawScreen.
 void render_all();
 
-// The game-loop update half (FD-036 Phase 5). Advances each object's animation,
+// The game-loop update half. Advances each object's animation,
 // decrements ObjectLife (auto-deleting at 0), wipes each object's per-frame
 // collision list, advances map tile animation, runs every registered collision
 // check, then re-arms collision checking on all survivors. Driven by

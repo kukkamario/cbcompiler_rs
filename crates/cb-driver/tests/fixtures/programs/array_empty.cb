@@ -1,4 +1,4 @@
-' Empty array (FD-049 review F19): New Int[0] is a real zero-length array — Len
+' Empty array: New Int[0] is a real zero-length array — Len
 ' is 0 and For Each runs zero times — then indexing element 0 is out of bounds
 ' and traps, exiting 1 in both backends.
 Dim arr As Int[] = New Int[0]

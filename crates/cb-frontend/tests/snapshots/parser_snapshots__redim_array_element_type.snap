@@ -1,26 +1,25 @@
 ---
 source: crates/cb-frontend/tests/parser_snapshots.rs
-assertion_line: 546
 expression: "snapshot_parser_fixture(\"redim_array_element_type\")"
 ---
 Program (4 top-level statements)
-  Stmt::Redim(rank=1) @ 111..136
-    Expr::Ident(sigil=None) @ 117..121
-    TypeExpr::Primitive(integer) @ 125..132
-    Expr::IntLit(10) @ 133..135
-  Stmt::Redim(rank=2) @ 154..179
-    Expr::Ident(sigil=None) @ 160..164
-    TypeExpr::Primitive(float) @ 168..173
-    Expr::IntLit(2) @ 174..175
-    Expr::IntLit(3) @ 177..178
-  Stmt::Redim(rank=1) @ 250..276
-    Expr::Ident(sigil=None) @ 256..260
-    TypeExpr::Array(rank=1) @ 264..273
-      TypeExpr::Primitive(integer) @ 264..271
-    Expr::IntLit(5) @ 274..275
-  Stmt::Redim(rank=2) @ 307..335
-    Expr::Ident(sigil=None) @ 313..317
-    TypeExpr::Array(rank=2) @ 321..329
-      TypeExpr::Primitive(float) @ 321..326
-    Expr::IntLit(3) @ 330..331
-    Expr::IntLit(3) @ 333..334
+  Stmt::Redim(rank=1) @ 100..125
+    Expr::Ident(sigil=None) @ 106..110
+    TypeExpr::Primitive(integer) @ 114..121
+    Expr::IntLit(10) @ 122..124
+  Stmt::Redim(rank=2) @ 143..168
+    Expr::Ident(sigil=None) @ 149..153
+    TypeExpr::Primitive(float) @ 157..162
+    Expr::IntLit(2) @ 163..164
+    Expr::IntLit(3) @ 166..167
+  Stmt::Redim(rank=1) @ 239..265
+    Expr::Ident(sigil=None) @ 245..249
+    TypeExpr::Array(rank=1) @ 253..262
+      TypeExpr::Primitive(integer) @ 253..260
+    Expr::IntLit(5) @ 263..264
+  Stmt::Redim(rank=2) @ 296..324
+    Expr::Ident(sigil=None) @ 302..306
+    TypeExpr::Array(rank=2) @ 310..318
+      TypeExpr::Primitive(float) @ 310..315
+    Expr::IntLit(3) @ 319..320
+    Expr::IntLit(3) @ 322..323

@@ -1,7 +1,7 @@
 #ifndef CB_GFX_H
 #define CB_GFX_H
 
-// Internal graphics glue (FD-037). NOT part of the catalog ABI and NOT
+// Internal graphics glue. NOT part of the catalog ABI and NOT
 // registered as CB-visible runtime functions: these bridge cb_gfx.cpp — which
 // owns the display, event queue, render target, and `Image` bitmaps — to the
 // other Allegro-linked subsystems (input, camera, map, object) and the native

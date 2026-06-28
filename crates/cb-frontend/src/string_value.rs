@@ -41,7 +41,7 @@ fn slice(src: &str, span: Span) -> &str {
     }
 }
 
-/// `Plain`: source has the form `"...body..."` and is verbatim (FD-051) — the
+/// `Plain`: source has the form `"...body..."` and is verbatim — the
 /// body may contain `\`, which carries no special meaning. Strip the outer
 /// quotes and return the body unchanged.
 fn decode_plain(raw: &str) -> (String, Vec<Diagnostic>) {
@@ -60,7 +60,7 @@ fn strip_single_quotes(raw: &str) -> &str {
     }
 }
 
-/// `Escaped`: the source slice has the form `$"...body..."` (FD-051). Strip the
+/// `Escaped`: the source slice has the form `$"...body..."`. Strip the
 /// leading `$` mode marker and the outer quotes, then walk the body character
 /// by character; on `\` consume an escape sequence per §1.6. Unknown escapes
 /// copy the offending characters verbatim into the output and produce an
@@ -68,7 +68,7 @@ fn strip_single_quotes(raw: &str) -> &str {
 fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
     // Strip the `$` mode marker first, then the quotes. The `$` adds one byte
     // to the literal-relative offset of every escape span (load-bearing for the
-    // E0208 span alignment the F-L14 regression guards).
+    // E0208 span alignment).
     let dollar_stripped = raw.strip_prefix('$');
     let after_dollar = dollar_stripped.unwrap_or(raw);
     let body = strip_single_quotes(after_dollar);
@@ -76,7 +76,7 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
     // predicates as the stripping above: if a step didn't strip (e.g. a `$`
     // with no leading `$`, or a start quote but no end quote), the offset must
     // not advance past the bytes that are still present in `body`, or every
-    // escape span would misalign (F-L14). For a well-formed `$"..."` token the
+    // escape span would misalign. For a well-formed `$"..."` token the
     // offset is 2 (`$` + `"`); for a defensive partial token it is less.
     let dollar_len: u32 = if dollar_stripped.is_some() { 1 } else { 0 };
     let stripped =
@@ -104,7 +104,7 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
         // Absolute file offset of the `\`: the literal's start, past the opening
         // quote (`body_offset_in_lit`), plus the index into `body`. `sub_span`
         // expects absolute offsets (see `decode_raw`); omitting `lit_span.start`
-        // here pointed escape diagnostics at the wrong line (FD-036 follow-up).
+        // here pointed escape diagnostics at the wrong line.
         let escape_start_in_lit = lit_span.start + body_offset_in_lit + i as u32;
         if i + 1 >= bytes.len() {
             // Lone `\` at end of body — invalid.
@@ -227,8 +227,8 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                             Label::new(span),
                         ));
                         // Recovery: copy the offending source verbatim (`\uNNNN`),
-                        // matching the `\x` invalid-digits and unknown-escape arms
-                        // (F-L13). `body[i..hex_end]` is the `\u` plus four hex
+                        // matching the `\x` invalid-digits and unknown-escape
+                        // arms. `body[i..hex_end]` is the `\u` plus four hex
                         // digits, all ASCII, so this is a valid `&str` slice.
                         out.push_str(&body[i..hex_end]);
                     }
@@ -249,8 +249,7 @@ fn decode_escaped(raw: &str, lit_span: Span) -> (String, Vec<Diagnostic>) {
                     Label::new(span),
                 ));
                 // Friendly recovery: drop the backslash and keep the literal
-                // character — `"a\qb"` → `"aqb"`. This matches the choice
-                // documented in the FD-002 plan.
+                // character — `"a\qb"` → `"aqb"`.
                 out.push(ch);
                 i += 1 + ch_len;
             }
@@ -455,7 +454,7 @@ mod tests {
 
     #[test]
     fn plain_keeps_backslash_verbatim() {
-        // FD-051: `"a\nb"` is verbatim — the `\n` stays two characters.
+        // `"a\nb"` is verbatim — the `\n` stays two characters.
         let (s, d) = decode_at(StrLitKind::Plain, "\"a\\nb\"");
         assert_eq!(s, "a\\nb");
         assert!(d.is_empty());
@@ -463,7 +462,7 @@ mod tests {
 
     #[test]
     fn plain_windows_path_verbatim() {
-        // FD-051 motivating case: `"C:\new"` decodes to the literal path, NOT
+        // `"C:\new"` decodes to the literal path, NOT
         // `C:<LF>ew`.
         let (s, d) = decode_at(StrLitKind::Plain, "\"C:\\new\"");
         assert_eq!(s, "C:\\new");
@@ -503,7 +502,7 @@ mod tests {
 
     #[test]
     fn escaped_quote() {
-        // FD-051: a literal `"` inside an escaped string is written `\"`.
+        // A literal `"` inside an escaped string is written `\"`.
         let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\\"\"");
         assert_eq!(s, "\"");
         assert!(d.is_empty());
@@ -536,7 +535,7 @@ mod tests {
 
     #[test]
     fn escaped_unicode_surrogate_recovers_verbatim() {
-        // F-L13: an invalid-scalar `\u` escape now copies the source verbatim
+        // An invalid-scalar `\u` escape copies the source verbatim
         // (like `\x` invalid-digits and the unknown-escape arm), rather than
         // dropping the escape entirely.
         let (s, d) = decode_at(StrLitKind::Escaped, "$\"\\uD83D\"");
@@ -547,7 +546,7 @@ mod tests {
 
     #[test]
     fn escaped_body_offset_with_unterminated_literal() {
-        // F-L14: a `$"` token with NO trailing `"` must not strip the (absent)
+        // A `$"` token with NO trailing `"` must not strip the (absent)
         // closing quote, so the body offset advances only past `$` (the
         // un-stripped `"` stays in the body) and the escape span still aligns
         // with the `\`. `$"\q` (no closing quote): `\` is at literal byte index 2.

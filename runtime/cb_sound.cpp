@@ -1,4 +1,4 @@
-// CoolBasic sound runtime (FD-041).
+// CoolBasic sound runtime.
 //
 // The sample-based audio surface: load a file into memory (LoadSound), play a
 // sample or stream a file (PlaySound), tweak a playing channel live (SetSound),
@@ -6,35 +6,32 @@
 // Two CB-visible opaque types: `Sound` (CbSound* handle, tag 17) and
 // `SoundChannel` (tag 18). Allegro-dependent (allegro_audio + allegro_acodec),
 // so this TU lives behind the CB_NO_ALLEGRO guard and is absent from the
-// SDK-free catalog (FD-033) — the FD-018 Text/Font pattern, not the Allegro-free
+// SDK-free catalog — the Text/Font pattern, not the Allegro-free
 // Memblock/File one.
 //
-// Semantics mined from cbEnchanted (src/soundinterface.cpp, cbsound.cpp,
-// cbchannel.cpp) and the official CoolBasic Help. Deliberate divergences (FD-041):
+// Notable behaviours and divergences from classic CoolBasic:
 //
 //   * Strict opaque `Sound`/`SoundChannel` types (Null default / Null on load
 //     failure) instead of classic CB's plain int32 ids — consistent with
-//     Object/Map/Memblock/File. The FD-018 null-opaque→Value::Null mapping makes
+//     Object/Map/Memblock/File. The null-opaque→Value::Null mapping makes
 //     "Null on failure" work with zero frontend change.
 //
 //   * `SoundChannel` is a generation-tagged pool handle (cb_sound.h GenPool), not
-//     a raw pointer. cbEnchanted reaps a finished channel every frame, so a stale
+//     a raw pointer. A finished channel is reaped every frame, so a stale
 //     handle is the NORMAL case (the sound ended on its own), not a program bug —
 //     the generation check makes SetSound/StopSound/SoundPlaying on it a SAFE
 //     silent no-op, never a use-after-free of a recycled slot. `Sound` stays a
 //     plain new/delete pointer like every other handle (it isn't auto-reaped, so
-//     a stale `Sound` is a genuine bug → trap, matching cbEnchanted's getSound).
+//     a stale `Sound` is a genuine bug → trap).
 //
-//   * Graceful audio-less degradation (best-effort init, never abort), unlike
-//     cbEnchanted's fatal initializeSounds — the cb_rt_screen `if (!g_display)`
-//     headless pattern. On an audio-less host LoadSound/PlaySound return Null,
-//     SoundPlaying returns 0, Set/StopSound no-op, and the null-`Sound` trap is
-//     SUPPRESSED (a Null-ignoring program runs silently instead of exit-1-ing on
-//     a silent CI box).
+//   * Graceful audio-less degradation (best-effort init, never abort) — the
+//     cb_rt_screen `if (!g_display)` headless pattern. On an audio-less host
+//     LoadSound/PlaySound return Null, SoundPlaying returns 0, Set/StopSound
+//     no-op, and the null-`Sound` trap is SUPPRESSED (a Null-ignoring program
+//     runs silently instead of exit-1-ing on a silent CI box).
 //
-//   * Unified gain = volume/100 for sample and stream (drop cbEnchanted's
-//     stream-only `* streamGain`, always ×1.0). No CD-track form. Channels attach
-//     directly to al_get_default_mixer() (no shared mixer until Video — OQ7).
+//   * Unified gain = volume/100 for sample and stream. No CD-track form.
+//     Channels attach directly to al_get_default_mixer() (no shared mixer yet).
 
 #include "cb_runtime.h"
 #include "cb_sound.h"
@@ -65,9 +62,9 @@ namespace {
 // A playing channel: a one-shot sample instance (PlaySound of a preloaded
 // `Sound`) or a streamed file (PlaySound of a filename String). Trivially
 // default-constructible so GenPool can reset a reaped slot; the Allegro object
-// is destroyed by the reaper before the slot is freed. Mirrors cbchannel.h's
-// sample/stream discriminated union, kept as two plain pointers + a tag for
-// observability (CLAUDE.md) — the extra pointer per slot is negligible.
+// is destroyed by the reaper before the slot is freed. The sample/stream
+// discriminated union is kept as two plain pointers + a tag for observability —
+// the extra pointer per slot is negligible.
 enum class PlayType { Sample, Stream };
 struct ChannelState {
     PlayType play_type = PlayType::Sample;
@@ -81,20 +78,20 @@ bool g_audio_tried = false;
 
 // Best-effort audio init; mirrors cb_gfx.cpp's ensure_init (each step guarded so
 // re-entry is free). On any failure g_audio_ok stays false and every entry point
-// degrades — FD-041 OQ2, NOT cbEnchanted's fatal abort. Tried once: a host that
-// can't init audio won't start succeeding later.
+// degrades rather than aborting. Tried once: a host that can't init audio won't
+// start succeeding later.
 bool ensure_audio_init() {
     if (g_audio_tried) return g_audio_ok;
     g_audio_tried = true;
     if (!al_is_system_installed() && !al_init()) return false;
     if (!al_install_audio()) return false;
     if (!al_init_acodec_addon()) return false;
-    if (!al_reserve_samples(512)) return false;  // the 512 cap is cbEnchanted's
+    if (!al_reserve_samples(512)) return false;  // 512 concurrent-sample cap
     g_audio_ok = true;
     return true;
 }
 
-// Raise an FD-015 runtime error with `msg`, if a host is connected. The host
+// Raise a runtime error with `msg`, if a host is connected. The host
 // copies the message synchronously and returns (it never unwinds), so the
 // freshly-made CbString is released right after. With no host (gtest) this is a
 // no-op and the caller falls through to its safe default.
@@ -153,8 +150,7 @@ void destroy_channel(ChannelState& c) {
 
 // Per-frame reaper (declared in cb_sound.h, called from cb_gfx.cpp's DrawScreen).
 // Frees every channel that has stopped playing and bumps its slot generation, so
-// a CB program still holding the handle gets a safe no-op. Mirrors cbEnchanted's
-// updateAudio (soundinterface.cpp:146-161).
+// a CB program still holding the handle gets a safe no-op.
 void reap() {
     for (uint32_t idx = 0; idx < g_channels.capacity(); ++idx) {
         if (!g_channels.occupied(idx)) continue;
@@ -166,7 +162,7 @@ void reap() {
     }
 }
 
-// At-exit flush (FD-043): like reap(), but destroys EVERY live channel
+// At-exit flush: like reap(), but destroys EVERY live channel
 // regardless of play state, so still-playing samples/streams release their
 // Allegro objects before al_uninstall_system runs. Safe to call repeatedly —
 // freed slots are skipped, so a second call is a no-op.
@@ -197,10 +193,10 @@ extern "C" CbSound* cb_rt_load_sound(const CbString* path) {
 }
 
 // DeleteSound(sound): free a loaded sample. A null/never-loaded `Sound` traps
-// (matching cbEnchanted's "Sound access violation") — UNLESS audio is
-// unavailable, in which case the trap is suppressed (LoadSound returned Null, so
-// a degrade-gracefully program reaches here with Null through no fault of its
-// own). Use-after-DeleteSound is UB, like every other raw-pointer handle.
+// — UNLESS audio is unavailable, in which case the trap is suppressed (LoadSound
+// returned Null, so a degrade-gracefully program reaches here with Null through
+// no fault of its own). Use-after-DeleteSound is UB, like every other
+// raw-pointer handle.
 extern "C" void cb_rt_delete_sound(CbSound* sound) {
     bool audio = ensure_audio_init();
     if (!sound) {
@@ -241,7 +237,7 @@ extern "C" CbChannel* cb_rt_play_sound4(CbSound* sound, double volume,
     return to_handle(g_channels.alloc(c));
 }
 
-// Arity overloads → defaults volume=100, balance=0, frequency=-1 (cbchannel.h).
+// Arity overloads → defaults volume=100, balance=0, frequency=-1.
 extern "C" CbChannel* cb_rt_play_sound(CbSound* sound) {
     return cb_rt_play_sound4(sound, 100.0, 0.0, -1);
 }
@@ -255,9 +251,9 @@ extern "C" CbChannel* cb_rt_play_sound3(CbSound* sound, double volume,
 
 // ─── PlaySound — filename String (streamed file, the "music" path) ────────
 
-// Full 4-arg form. Streams the file (3 buffers × 8192 samples, cbchannel.cpp:130)
-// rather than loading it whole. A load failure returns Null with no trap (it is
-// a load failure, like LoadSound — not a bad handle).
+// Full 4-arg form. Streams the file (3 buffers × 8192 samples) rather than
+// loading it whole. A load failure returns Null with no trap (it is a load
+// failure, like LoadSound — not a bad handle).
 extern "C" CbChannel* cb_rt_play_sound_file4(const CbString* path, double volume,
                                              double balance, int32_t frequency) {
     if (!ensure_audio_init()) return nullptr;
@@ -296,11 +292,11 @@ extern "C" CbChannel* cb_rt_play_sound_file3(const CbString* path, double volume
 // ─── SetSound / StopSound / SoundPlaying (operate on a `SoundChannel`) ─────
 
 // SetSound(channel, looping, volume, balance, frequency): mutate a playing
-// channel live. A stale/finished/null channel is a silent no-op (the generation
-// pool rejects it safely) — cbEnchanted's deliberate non-erroring getChannel.
-// The CB compiler always supplies the optional args, so the lower-arity forms
-// reset volume/balance to their defaults (faithful to classic CB always pushing
-// all five) while frequency=-1 leaves the native pitch.
+// channel live. A stale/finished/null channel is a deliberate silent no-op (the
+// generation pool rejects it safely). The CB compiler always supplies the
+// optional args, so the lower-arity forms reset volume/balance to their defaults
+// (faithful to classic CB always pushing all five) while frequency=-1 leaves the
+// native pitch.
 extern "C" void cb_rt_set_sound5(CbChannel* channel, int32_t looping,
                                  double volume, double balance,
                                  int32_t frequency) {

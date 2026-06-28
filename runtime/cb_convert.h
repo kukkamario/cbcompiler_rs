@@ -1,7 +1,7 @@
 #ifndef CB_CONVERT_H
 #define CB_CONVERT_H
 
-/* String<->number conversion primitives (FD-046).
+/* String<->number conversion primitives.
  *
  * Bare exported symbols — like the core cb_rt_string_* primitives, these are
  * NOT CB-visible catalog functions (no CB_FN row, not in CbCatalog, not in
@@ -11,7 +11,7 @@
  * String type — most importantly the float->string formatter, the sole
  * conversion where the interpreter and a native build could otherwise diverge
  * silently. Numeric<->numeric casts and Hex$/Bin$/Chr$/Asc are deliberately
- * NOT here (see FD-046).
+ * NOT here.
  *
  * Allegro-free and outside any CB_NO_ALLEGRO guard: ships in both the SDK-free
  * and full runtime builds and is headless gtest-able. Returned CbString*

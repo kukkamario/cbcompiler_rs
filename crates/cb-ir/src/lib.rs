@@ -45,7 +45,7 @@ pub enum FuncKind {
     Runtime {
         /// Linker symbol of the runtime function. The LLVM backend uses this for
         /// `declare`/`call`; the interpreter resolves it to a live address through
-        /// its startup binding overlay (FD-045). The catalog *metadata* carries no
+        /// its startup binding overlay. The catalog *metadata* carries no
         /// function pointer — only this symbol.
         symbol: String,
     },
@@ -79,7 +79,7 @@ pub struct RuntimeTypeDesc {
     pub tag: u32,
 }
 
-/// Value of a runtime-defined constant (FD-029). Only Int and Float are
+/// Value of a runtime-defined constant. Only Int and Float are
 /// supported for now; this lives in `cb-ir` (rather than reusing `cb-sema`'s
 /// `ConstValue`) because `cb-sema` depends on `cb-ir`, not the reverse.
 #[derive(Clone, Debug, PartialEq)]
@@ -88,7 +88,7 @@ pub enum RuntimeConstValue {
     Float(f64),
 }
 
-/// A global constant predeclared by the runtime catalog (FD-029). Seeded into
+/// A global constant predeclared by the runtime catalog. Seeded into
 /// the compiler's global scope and folded like a user `Const`.
 #[derive(Clone, Debug)]
 pub struct RuntimeConstDesc {

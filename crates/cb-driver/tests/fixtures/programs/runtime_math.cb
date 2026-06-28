@@ -48,7 +48,7 @@ Print Str(Int("  17abc"))
 Print Str(Int("xyz"))
 
 // Random — values are non-deterministic, so assert ranges instead of golden
-// values. Rand is INCLUSIVE [low,high] (cbEnchanted parity); Rnd is [low,high).
+// values. Rand is INCLUSIVE [low,high]; Rnd is [low,high).
 Randomize(12345)
 i = Rand(10)
 If i >= 0 And i <= 10 Then Print "rand_ok"

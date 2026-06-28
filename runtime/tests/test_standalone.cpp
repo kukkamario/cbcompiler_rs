@@ -1,4 +1,4 @@
-// FD-049: unit tests for the standalone (AOT) program lifecycle
+// Unit tests for the standalone (AOT) program lifecycle
 // (cb_standalone.cpp) — the entry-point glue the native backend links against.
 // These exercise cb_rt_exit and cb_rt_standalone_run, which both terminate the
 // process, so they are GoogleTest *death tests*: each statement runs in an

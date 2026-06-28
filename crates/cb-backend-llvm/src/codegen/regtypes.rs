@@ -1,6 +1,6 @@
-//! Per-function `Reg → IrType` derivation and String-temp lifetime info (FD-049).
+//! Per-function `Reg → IrType` derivation and String-temp lifetime info.
 //!
-//! No such facility exists in the IR, so build one. Every Phase-1 instruction
+//! No such facility exists in the IR, so build one. Every supported instruction
 //! has a statically derivable result type: consts → their type; loads → the
 //! slot type; conversions → their target; comparisons / `StrLen` → `Int`;
 //! `StrConcat` → `String`; arithmetic/bitwise `BinOp` → the common operand type
@@ -12,8 +12,8 @@
 //! fixpoint over all instructions converges — covering unreachable blocks too,
 //! which still must be lowered to keep every LLVM block terminated.
 //!
-//! The pass additionally drives the String refcount discipline (FD-049 decision
-//! B): it records which String regs are *consumed* (moved into a Store/Return)
+//! The pass additionally drives the String refcount discipline: it records
+//! which String regs are *consumed* (moved into a Store/Return)
 //! and, for owned String temps that are neither consumed nor escape their
 //! defining block, the point to `cb_rt_string_release` them — right after their
 //! last in-block use.
@@ -32,7 +32,7 @@ pub struct RegInfo {
     /// as it walks.
     pub releases: HashMap<(BlockId, usize), Vec<Reg>>,
     /// `Call`/`CallIndirect` results whose type is a value `Struct` — under the
-    /// owned-model (FD-049 review F4) these own +1 per `String` sub-field, so a
+    /// owned-model these own +1 per `String` sub-field, so a
     /// store/return moves them in (no extra retain) and an unconsumed one is
     /// released after its last use. A struct *loaded from a slot* is a borrowed
     /// view and is **not** in this set.
@@ -65,7 +65,7 @@ pub fn analyze(func: &Function, program: &Program) -> RegInfo {
 }
 
 /// Collect the `Call`/`CallIndirect` results that produce a value `Struct` — the
-/// owned struct temps of the owned-model (FD-049 review F4). A struct returned
+/// owned struct temps of the owned-model. A struct returned
 /// from a call owns +1 per `String` sub-field (the callee retained it before
 /// dropping its locals, or handed off its own owned temp); a struct loaded from
 /// a slot stays a borrowed view and is deliberately excluded.
@@ -132,7 +132,7 @@ fn result_type(
         InstKind::BinOp { op, lhs, .. } => binop_result(*op, types.get(lhs)?),
         InstKind::UnOp { op, operand } => unop_result(*op, types.get(operand)?),
         InstKind::Call { callee, .. } => (*program.func_table[callee.0 as usize].sig.ret).clone(),
-        // ── Arrays (FD-049 Phase 2) ────────────────────────────────────
+        // ── Arrays ────────────────────────────────────
         // `Len`/`ArrayTotalLen` yield Int counts; `NewArray` yields the array
         // handle type; element reads yield the array's element type (resolved
         // once the array reg's type is known — the fixpoint retries otherwise).
@@ -147,7 +147,7 @@ fn result_type(
                 _ => return None,
             }
         }
-        // ── User Types (FD-049 Phase 3a) ───────────────────────────────
+        // ── User Types ───────────────────────────────
         // `New`/`First`/`Last` yield a `TypeRef` to the named type; `GetField`
         // carries its result type in the IR; `Next`/`Previous` propagate the
         // operand's `TypeRef` (fixpoint-resolved like `GetElement`).
@@ -158,7 +158,7 @@ fn result_type(
         }
         InstKind::GetField { field_type, .. } => field_type.clone(),
         InstKind::Next { object } | InstKind::Previous { object } => types.get(object)?.clone(),
-        // ── Function pointers (FD-049 Phase 3c) ────────────────────────
+        // ── Function pointers ────────────────────────
         // `FuncAddr` is the sole non-null fn-pointer producer: its type is
         // `FnPtr(sig-of func)`. A `CallIndirect` returns the callee's signature
         // return type (resolved once the callee reg's `FnPtr` type is known —
@@ -210,14 +210,13 @@ fn unop_result(op: IrUnOp, operand: &IrType) -> IrType {
 }
 
 /// Compute, for each owned String (or owned value-struct) temp, the in-block
-/// instruction after which it should be released (FD-049 decision B + review
-/// F4). A reg is *consumed* if it is moved into a Store or returned; consumed
-/// regs are never auto-released (their +1 moves into the slot / out the return).
-/// An unconsumed reg whose every use is in its defining block is released right
-/// after its last use there. A reg that escapes its block is conservatively
-/// leaked — safe. A String temp that is *dead* (zero uses) is also leaked (Phase
-/// 1); an owned struct temp that is dead is released after its def so the
-/// owned-model stays leak-free.
+/// instruction after which it should be released. A reg is *consumed* if it is
+/// moved into a Store or returned; consumed regs are never auto-released (their
+/// +1 moves into the slot / out the return). An unconsumed reg whose every use
+/// is in its defining block is released right after its last use there. A reg
+/// that escapes its block is conservatively leaked — safe. A String temp that
+/// is *dead* (zero uses) is also leaked; an owned struct temp that is dead is
+/// released after its def so the owned-model stays leak-free.
 fn compute_releases(
     func: &Function,
     types: &HashMap<Reg, IrType>,
@@ -285,7 +284,7 @@ fn compute_releases(
     }
     // A dead owned struct temp (a discarded struct-returning call, zero uses,
     // not consumed) is released right after its def so the owned-model leaks
-    // nothing — String temps with zero uses stay leaked (Phase 1).
+    // nothing — String temps with zero uses stay leaked.
     for &reg in owned_struct_temps {
         if consumed.contains(&reg) || uses.contains_key(&reg) {
             continue;
@@ -297,7 +296,7 @@ fn compute_releases(
     releases
 }
 
-/// Reg operands of an instruction (the regs it *reads*). Covers the Phase-1
+/// Reg operands of an instruction (the regs it *reads*). Covers the supported
 /// instruction set; out-of-scope kinds report no operands (their String regs,
 /// if any, are simply leaked rather than released — never use-after-freed).
 fn operand_regs(kind: &InstKind) -> Vec<Reg> {

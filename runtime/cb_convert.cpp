@@ -1,4 +1,4 @@
-// CoolBasic runtime — string<->number conversion primitives (FD-046).
+// CoolBasic runtime — string<->number conversion primitives.
 //
 // The conversions that CROSS the String type, centralized here as bare
 // exported symbols so the interpreter and a future native/LLVM backend share
@@ -10,9 +10,9 @@
 // cb_rt_string_* primitives in cb_string.cpp.
 //
 // Numeric<->numeric casts (incl. Int(Float) rounding) and Hex$/Bin$/Chr$/Asc
-// are deliberately NOT here — see FD-046 for the three-way boundary.
+// are deliberately NOT here.
 //
-// IMPORTANT (FD-016 style): this TU builds/inspects strings ONLY through the
+// IMPORTANT: this TU builds/inspects strings ONLY through the
 // public core primitives (cb_rt_string_from_literal/_data/_len) — like a
 // plugin — and is Allegro-free, outside any CB_NO_ALLEGRO guard, so it ships
 // in both the SDK-free and full builds.
@@ -42,7 +42,7 @@ inline bool is_ws(uint8_t b) {
 }
 
 // Float -> String, CoolBasic's 6-significant-digit format (decoded empirically
-// from the original runtime; see FD-046).
+// from the original runtime).
 //
 //   - 6 significant digits.
 //   - Fixed-point iff the decimal exponent E = floor(log10|x|) is in [-3, 7];
@@ -153,7 +153,7 @@ extern "C" CbString* cb_rt_float_to_string(double v) {
 // `parse_leading_int`): skip ASCII whitespace, optional +/-, consume digits up
 // to the first non-digit (INCLUDING '.', so "22.5" -> 22 and "1e3" -> 1),
 // saturating at INT64_MAX/MIN+1, 0 when no digit leads. This intentionally
-// diverges from CB's exact-".5"-rounds-up-positives quirk (FD-046 §decision).
+// diverges from CB's exact-".5"-rounds-up-positives quirk.
 extern "C" int64_t cb_rt_string_to_long(const CbString* s) {
     const uint8_t* data = cb_rt_string_data(s);
     std::size_t len = cb_rt_string_len(s);

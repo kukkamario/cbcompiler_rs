@@ -1,6 +1,6 @@
 //! AST node arena and node variants for the CoolBasic frontend.
 //!
-//! Design notes (see FD-002 §A):
+//! Design notes:
 //! - Single homogeneous arena of `Node` with a parallel `spans` side table.
 //! - `NodeId` is a `u32` index; child relationships are stored as `NodeId`
 //!   (or `Vec<NodeId>` for variable-arity children).
@@ -124,8 +124,8 @@ pub enum Expr {
         /// Bare-name span of the field (sigil byte excluded, if any). A sigil
         /// at the access site (`player\x$`) is accepted by the parser but
         /// ignored — only its byte is trimmed from `name_span`; unlike
-        /// `Expr::Ident`/`FieldDecl`, no sigil is retained here. FD-004 #12:
-        /// previously a full `Expr::Ident` node was allocated for this
+        /// `Expr::Ident`/`FieldDecl`, no sigil is retained here. Previously
+        /// a full `Expr::Ident` node was allocated for this
         /// position to share machinery with regular identifier exprs. The
         /// span-only form matches every other declaration site (e.g.
         /// `DimName::name_span`, `Stmt::FieldDecl::name_span`) and avoids an
@@ -171,7 +171,7 @@ pub enum Stmt {
     /// A `Dim` (local) or `Global` variable declaration. The two keyword forms
     /// share an identical shape — the only difference is scope/visibility,
     /// captured by `is_global` (matching `Const`'s `is_global` flag) rather
-    /// than a separate variant (F-A2/F-A3). `Global`'s top-level-only rule is a
+    /// than a separate variant. `Global`'s top-level-only rule is a
     /// sema/parse check, not a reason for a distinct AST node.
     VarDecl {
         is_global: bool,
@@ -240,7 +240,7 @@ pub enum Stmt {
     /// A `Type ... EndType` or `Struct ... EndStruct` declaration. The two
     /// forms are structurally identical and differ only in the heap-vs-value
     /// semantics they imply downstream (§3.3), captured by `kind` rather than a
-    /// separate variant (F-A1).
+    /// separate variant.
     TypeDecl {
         kind: TypeDeclKind,
         name_span: Span,
@@ -306,7 +306,7 @@ pub enum IfForm {
 
 /// Which keyword introduced a [`Stmt::TypeDecl`] — `Type` (heap reference
 /// semantics) or `Struct` (value semantics). The distinction is real (§3.3)
-/// but carries no structural weight in the AST (F-A1).
+/// but carries no structural weight in the AST.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TypeDeclKind {
     Type,

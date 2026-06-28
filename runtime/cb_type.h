@@ -1,7 +1,7 @@
 #ifndef CB_TYPE_H
 #define CB_TYPE_H
 
-/* CoolBasic user-`Type` instance heap + linked-list helpers (FD-049 Phase 3a).
+/* CoolBasic user-`Type` instance heap + linked-list helpers.
  *
  * Dedicated INTERNAL header — NOT part of the plugin SDK (cb_runtime_core.h).
  * Only cb_type.cpp (the implementation) and the gtest suite include it; the
@@ -22,21 +22,21 @@
  *     sentinel if it was first) so an in-flight `For Each` continues; an RVALUE
  *     `Delete` (field/element/`First(T)` operand) unlinks+frees only;
  *   - any fault (null deref, deleted access, double delete, sentinel access)
- *     raises a runtime error through the FD-015 host channel — which in an AOT
+ *     raises a runtime error through the host channel — which in an AOT
  *     exe writes stderr + exits 1 — and returns a safe default. With no host
  *     (the gtest target) the trap is a no-op and the default is returned.
  *
- * MEMORY: nodes are leaked (malloc, never freed) exactly like Phase-2 arrays;
+ * MEMORY: nodes are leaked (malloc, never freed) like arrays;
  * `Delete` sets a per-node `deleted` flag rather than freeing, and any later
- * access to a deleted node traps. (No generation slab — see the FD note for the
- * one scoped `Delete x; Delete x` divergence this allows.)
+ * access to a deleted node traps. (No generation slab — which permits one
+ * scoped `Delete x; Delete x` divergence.)
  *
  * NODE LAYOUT: a fixed 32-byte header (CbTypeHeader) followed by the type's
  * inline field storage. The C helper only ever touches the header; the LLVM
  * backend GEPs the fields (LLVM struct element index 5 + field position). The
  * backend passes `cb_rt_type_new` the LLVM `size_of` of the whole node.
  *
- * CORE TU (FD-016): Allegro-free, compiles clean under -DCB_NO_ALLEGRO. */
+ * CORE TU: Allegro-free, compiles clean under -DCB_NO_ALLEGRO. */
 
 #include "cb_runtime_core.h"
 

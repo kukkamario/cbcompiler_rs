@@ -1,7 +1,7 @@
 #ifndef CB_RUNTIME_H
 #define CB_RUNTIME_H
 
-/* Back-compat umbrella (FD-016).
+/* Back-compat umbrella.
  *
  * The runtime header was split into a plugin-facing CORE ABI
  * (cb_runtime_core.h) and the internal FUNCTIONALITY prototypes

@@ -5,8 +5,8 @@
 //! explicitly — no `_ => {}` catch-alls — so adding a new variant to
 //! [`crate::ast::Expr`], [`crate::ast::Stmt`], [`crate::ast::TypeExpr`],
 //! or [`crate::ast::CaseArm`] forces an arm here at compile time.
-//! That was the FD-005 regression: `Stmt::Delete` was added without
-//! traversal support and silently fell through the driver's old catch-all.
+//! `Stmt::Delete` was once added without traversal support and silently
+//! fell through the driver's old catch-all.
 
 use std::fmt;
 
@@ -23,7 +23,7 @@ pub fn debug_print(out: &mut dyn fmt::Write, arena: &Arena, root: NodeId) -> fmt
 
 /// Maximum traversal depth before the printer stops recursing and emits an
 /// elision marker. `print_node` is reachable on untrusted ASTs via
-/// `--dump-ast`, so — like the parser's own recursion guard (FD-021) — it
+/// `--dump-ast`, so — like the parser's own recursion guard — it
 /// must not overflow the stack on a pathologically deep tree. Set above the
 /// parser's `MAX_RECURSION_DEPTH` (256) so every AST the parser can actually
 /// produce still prints in full; the cap only trips on a tree built by some
@@ -75,7 +75,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.extend_from_slice(indices);
             }
             Expr::Field { target, .. } => {
-                // FD-004 #12: `Expr::Field`'s name is a bare `Span`, not a
+                // `Expr::Field`'s name is a bare `Span`, not a
                 // child node, so there is nothing extra to traverse here.
                 out.push(*target);
             }
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn prints_delete_traverses_operand() {
-        // FD-005 regression guard: `Stmt::Delete` must traverse its operand.
+        // Regression guard: `Stmt::Delete` must traverse its operand.
         let mut arena = Arena::new();
         let operand = arena.alloc(
             Node::Expr(Expr::Ident {

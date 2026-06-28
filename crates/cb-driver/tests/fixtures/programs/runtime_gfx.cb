@@ -1,4 +1,4 @@
-// FD-017 graphics additions. Headless-safe: drawing targets a memory-bitmap
+// Graphics additions. Headless-safe: drawing targets a memory-bitmap
 // image (MakeImage falls back to a memory bitmap with no window open), so the
 // pixel/color round-trips run without a display. Window-only behaviour (real
 // gamma, screenshots, vsync) is smoke-tested via examples/, not here.

@@ -1,11 +1,11 @@
-// FD-040: file I/O. Binary + text round-trip, position/EOF, and filesystem
+// File I/O. Binary + text round-trip, position/EOF, and filesystem
 // queries. Allegro-free, so this runs in the SDK-free build too (run_isolated,
 // not graphics-gated). Runs in a throwaway working directory; the relative file
 // is created there. Trap paths (null handle, CopyFile over an existing dst) are
 // covered by cli.rs; C++ edge cases in runtime/tests/test_file.cpp.
 
 Dim f As File
-f = OpenToWrite("fd040.dat")
+f = OpenToWrite("io.dat")
 If f <> Null Then Print "open_write_ok"
 WriteByte(f, 65)
 WriteByte(f, 300)                 // only the low byte (44) is stored
@@ -16,10 +16,10 @@ WriteString(f, "hello")
 WriteLine(f, "line one")
 CloseFile(f)
 
-If FileExists("fd040.dat") Then Print "exists_ok"
-If IsDirectory("fd040.dat") = 0 Then Print "not_dir_ok"
+If FileExists("io.dat") Then Print "exists_ok"
+If IsDirectory("io.dat") = 0 Then Print "not_dir_ok"
 
-f = OpenToRead("fd040.dat")
+f = OpenToRead("io.dat")
 If f <> Null Then Print "open_read_ok"
 Print Str(ReadByte(f))            // 65
 Print Str(ReadByte(f))            // 44
@@ -33,7 +33,7 @@ Print Str(ReadByte(f))            // 0     (lenient past-EOF)
 CloseFile(f)
 
 // Random access with OpenToEdit.
-f = OpenToEdit("fd040.dat")
+f = OpenToEdit("io.dat")
 SeekFile(f, 0)
 Print Str(FileOffset(f))          // 0
 Print Str(ReadByte(f))            // 65
@@ -45,6 +45,6 @@ Dim cd As String
 cd = CurrentDir()
 If Len(cd) > 0 Then Print "currentdir_ok"
 
-DeleteFile("fd040.dat")
-If FileExists("fd040.dat") = 0 Then Print "delete_ok"
+DeleteFile("io.dat")
+If FileExists("io.dat") = 0 Then Print "delete_ok"
 Print "done"

@@ -1,16 +1,15 @@
-// CoolBasic file-I/O runtime (FD-040).
+// CoolBasic file-I/O runtime.
 //
 // Binary and text file access plus filesystem/directory queries. The CB-visible
 // `File` type is the opaque CbFile* handle (tag 16): OpenToRead/Write/Edit
 // return it, CloseFile frees it. Allegro-free (uses only <cstdio> + <filesystem>),
-// so this TU is part of the SDK-free catalog (FD-033) and runs headless in CI.
+// so this TU is part of the SDK-free catalog and runs headless in CI.
 //
-// Semantics were mined from the cbEnchanted reference (src/fileinterface.cpp)
-// and the official CoolBasic Help; the divergences below are all deliberate
-// safety/correctness improvements over classic CB (see FD-040):
+// The divergences below are all deliberate safety/correctness improvements over
+// classic CB:
 //
 //   * Opaque handle (tag 16, Null default / Null on open failure) instead of
-//     classic CB's integer file ids. The FD-018 null-opaque->Value::Null mapping
+//     classic CB's integer file ids. The null-opaque->Value::Null mapping
 //     makes "Null on failure" work with zero frontend change.
 //
 //   * Reads are LENIENT at end-of-data: a read at/past EOF returns a zero value
@@ -19,7 +18,7 @@
 //     returns uninitialised garbage here (and ReadByte returns 255); we return a
 //     defined default.
 //
-//   * Genuinely invalid use TRAPS via the FD-015 host channel (exit 1): a null
+//   * Genuinely invalid use TRAPS via the host channel (exit 1): a null
 //     handle, and a wrong-mode op (writing a Read handle / reading a Write
 //     handle). Classic CB is permissive (uses the FILE* as-is). With no host
 //     connected (the native gtest target) the trap is a no-op and the caller
@@ -42,7 +41,7 @@
 //   * FindFile yields real directory entries only (no "."/".."), "" when done,
 //     over a single global cursor on the current directory. CurrentDir keeps a
 //     trailing separator. CopyFile refuses to overwrite an existing destination
-//     (traps). Execute matches cbEnchanted: system("start"/"xdg-open" + cmd).
+//     (traps). Execute runs a shell "start"/"xdg-open" + cmd via system().
 
 #include "cb_runtime.h"
 
@@ -70,7 +69,7 @@ struct CbFile {
 
 namespace {
 
-// Raise an FD-015 runtime error with `msg`, if a host is connected. The host
+// Raise a runtime error with `msg`, if a host is connected. The host
 // callback copies the message synchronously and returns (it never unwinds), so
 // the freshly-made CbString is released right after. With no host (gtest) this
 // is a no-op and the caller falls through to its safe default.
@@ -434,7 +433,7 @@ extern "C" int32_t cb_rt_file_size(const CbString* path) {
 }
 
 // CurrentDir(): the working directory, with a trailing separator (matches
-// cbEnchanted / actual CoolBasic).
+// actual CoolBasic).
 extern "C" CbString* cb_rt_current_dir(void) {
     std::error_code ec;
     std::filesystem::path p = std::filesystem::current_path(ec);
@@ -476,8 +475,8 @@ extern "C" void cb_rt_delete_file(const CbString* path) {
     std::filesystem::remove(to_path(path), ec);
 }
 
-// Execute(cmd): launch an external command, matching cbEnchanted — a shell
-// `start` (Windows) / `xdg-open` (elsewhere) of `cmd` via system().
+// Execute(cmd): launch an external command — a shell `start` (Windows) /
+// `xdg-open` (elsewhere) of `cmd` via system().
 extern "C" void cb_rt_execute(const CbString* cmd) {
     std::string c = utf8_bytes(cmd);
 #ifdef _WIN32

@@ -1,7 +1,7 @@
 #ifndef CB_MAP_DATA_H
 #define CB_MAP_DATA_H
 
-// Pure tile-map data + parsing for the tilemap subsystem (FD-036 Phase 3).
+// Pure tile-map data + parsing for the tilemap subsystem.
 // Header-only and Allegro-free so the .til binary parser, the grid accessors,
 // and the world<->tile coordinate math can be unit-tested without a display
 // (mirrors cb_camera_math.h / test_camera.cpp). cb_map.cpp wraps a CbMapData
@@ -215,7 +215,7 @@ inline bool cb_map_tile_src(const CbMapData& m, int32_t tile, int32_t tileset_w,
 }
 
 // World anchor (pre-Y-flip) for the top-left of grid tile (gx, gy): the inverse
-// of worldCoordinatesToMapCoordinates. The render loop draws the tile bitmap at
+// of the world->map transform cb_map_world_to_map. The render loop draws the tile bitmap at
 // (wx, -wy) under the plain world transform (the anchor Y is flipped for world
 // draws).
 inline void cb_map_tile_anchor(const CbMapData& m, int32_t gx, int32_t gy,
@@ -224,9 +224,9 @@ inline void cb_map_tile_anchor(const CbMapData& m, int32_t gx, int32_t gy,
     wy = m.mapHeight * m.tileHeight * 0.5 - (double)gy * m.tileHeight + m.posY;
 }
 
-// ─── Line of sight (FD-036 Phase 5) ──────────────────
+// ─── Line of sight ──────────────────
 // World coordinates -> tilemap-relative pixels (origin at the map's top-left,
-// Y growing down). The inverse of mapCoordinatesToWorldCoordinates.
+// Y growing down). The inverse of the map->world transform cb_map_tile_anchor.
 inline void cb_map_world_to_map(const CbMapData& m, double& x, double& y) {
     x = x - m.posX + m.mapWidth * m.tileWidth * 0.5;
     y = -y + m.posY + m.mapHeight * m.tileHeight * 0.5;
@@ -278,7 +278,7 @@ inline bool cb_map_ray_cast(const CbMapData& m, double x1, double y1, double x2,
     return false;
 }
 
-// ─── Tile animation advance (FD-036) ──────────────────────
+// ─── Tile animation advance ──────────────────────
 // Advance one animated tile's currentFrame by `timestep` seconds, following the
 // CoolBasic formula: cur += timestep / (slowness * animSpeed), reset to 0 once
 // (int)cur *exceeds* animLength — so the tile cycles tile..tile+animLength, i.e.

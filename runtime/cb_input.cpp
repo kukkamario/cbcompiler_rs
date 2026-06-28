@@ -1,4 +1,4 @@
-// CoolBasic input runtime (FD-013 Batch 5).
+// CoolBasic input runtime.
 //
 // The CB DirectInput-style scancode table (`sCBKeyMap`) and the 2-bit edge-state
 // machine (bit0 = currently down, bit1 = changed since the last frame). Mouse
@@ -14,8 +14,7 @@
 //
 // ABI: CB `Int` arrives/returns as int32_t. EscapeKey is a pure query — unlike
 // CoolBasic's "safe exit", pressing Escape does NOT auto-close the program (that
-// would need a runtime->interpreter trap channel that does not exist yet, and
-// conflicts with Batch 3's clean IR Halt termination).
+// would need a runtime->interpreter trap channel that does not exist yet).
 
 #include "cb_runtime.h"
 #include "cb_input.h"
@@ -75,7 +74,7 @@ bool sKeyMapInit = false;
 void init_key_map() {
     if (sKeyMapInit) return;
     sKeyMapInit = true;
-    // Populated from the shared X-macro table (FD-029); the SAME table drives
+    // Populated from the shared X-macro table; the SAME table drives
     // the public `cbKey*` constants in catalog.cpp, so a scancode can never
     // drift between the lookup table and the symbolic name.
 #define CB_KEY(name, scan, al) sCBKeyMap[scan] = al;
@@ -235,7 +234,7 @@ extern "C" int32_t cb_rt_mouse_move_x(void) { return sMouseDX; }
 extern "C" int32_t cb_rt_mouse_move_y(void) { return sMouseDY; }
 extern "C" int32_t cb_rt_mouse_move_z(void) { return sMouseDZ; }
 
-// ─── FD-017 keyboard additions ─────────────────────────────────────────
+// ─── Keyboard additions ────────────────────────────────────────────────
 //
 // GetKey returns the next queued typed character (codepoint; ASCII == CP-1252),
 // or 0 if none queued. Like the rest of the input model, the queue only fills
@@ -290,7 +289,7 @@ extern "C" int32_t cb_rt_wait_key(void) {
     }
 }
 
-// ─── FD-017 mouse additions ────────────────────────────────────────────
+// ─── Mouse additions ───────────────────────────────────────────────────
 //
 // GetMouse returns the next queued button-down (button number), or 0 if none.
 extern "C" int32_t cb_rt_get_mouse(void) {

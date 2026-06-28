@@ -1,4 +1,4 @@
-// CoolBasic sprite-Object runtime (FD-036 Phase 4).
+// CoolBasic sprite-Object runtime.
 //
 // The 2D sprite Object: a world position, an angle, an optional animated sprite
 // sheet, custom data slots, lifetime, and draw-order membership.
@@ -7,12 +7,12 @@
 // it unit-tests without a display; this TU adds the live registry, the bitmaps,
 // the catalog entry points, and the camera-space render orchestrator.
 //
-// Registry — no numeric ids (FD-036, decided 2026-06-20): the CB-visible `Object`
+// Registry — no numeric ids: the CB-visible `Object`
 // handle (tag 13) *is* a `CbObject*`, exactly like `Image`/`Font`. There is no
 // integer-id map and no shared id space. Lookup is the pointer itself; draw order
 // is one std::vector per chain (floor, regular); enumeration walks a creation-
 // order std::vector. Use-after-DeleteObject is a dangling handle (matches
-// Image/Font). The VM is single-threaded (FD-036), so process-global state is safe.
+// Image/Font). The VM is single-threaded, so process-global state is safe.
 //
 // Textures are shared & reference-counted: each object holds a
 // shared_ptr<CbTexture>, which keeps both the pristine (unmasked) bitmap and the
@@ -65,12 +65,12 @@ static bool g_default_visible = true;
 //
 // The CB-visible `Object` type (tag 13). Declared (never defined) via the
 // `typedef struct CbObject CbObject` in cb_runtime_func.h; defined here. Always
-// passed/returned by pointer. Field defaults mirror CBObject's constructor; the
-// alphaBlend `= 255` load write is intentionally NOT replicated (render only
+// passed/returned by pointer. Field defaults mirror CoolBasic's object
+// constructor; an alphaBlend `= 255` load write is intentionally NOT replicated (render only
 // blends when < 1.0, so we keep the documented 0–1 scale honest).
 struct CbObject;
 
-// A single recorded collision (FD-036 Phase 5): the other object (Null for a
+// A single recorded collision: the other object (Null for a
 // map-wall hit — a Map is not an Object, so GetCollision yields Null there), the
 // contact normal angle (degrees), and the contact point in world coordinates.
 struct CbCollision {
@@ -104,7 +104,7 @@ struct CbObject {
     bool isFloor;                          // ctor arg
     bool painted = false;
 
-    // ─── Collision (FD-036 Phase 5) ────────────────────────────────────
+    // ─── Collision ────────────────────────────────────
     // range1/range2 = collision bounds (box: width,height; circle: diameter in
     // range1). Default 0×0; LoadObject/LoadAnimObject/CloneObject set them to the
     // image size, MakeObject/MakeObjectFloor leave them 0 (so a made object's
@@ -117,14 +117,14 @@ struct CbObject {
     bool checkCollisions = true;
     std::vector<CbCollision> collisions;
 
-    // ─── Picking (FD-036 Phase 5) ──────────────────────────────────────
+    // ─── Picking ──────────────────────────────────────
     // 0 = not pickable; 1 = box, 2 = circle, 3 = pixel (raycast no-op). Set by
     // ObjectPickable; read by ObjectPick's raycast and CameraPick's point test.
     int pickStyle = 0;
 
-    // ─── Particle emitter (FD-038) ─────────────────────────────────────
+    // ─── Particle emitter ─────────────────────────────────────
     // Non-null exactly for an emitter (MakeEmitter). This pointer IS the
-    // emitter-kind discriminator (cbEnchanted used a virtual type() tag): an
+    // emitter-kind discriminator: an
     // emitter renders its particles instead of a sprite, updates them each tick,
     // defers its DeleteObject until the particles drain, and is excluded from
     // picking/collision. The `tex`/frameWidth/frameHeight fields hold the
@@ -140,7 +140,7 @@ namespace cb::object {
 
 namespace {
 
-// The live registry (FD-036 no-id design). `live_objects` is creation order (the
+// The live registry (no-id design). `live_objects` is creation order (the
 // InitObjectList/NextObject walk); `floor_objects`/`regular_objects` are the draw
 // chains (floor drawn before regular). Every live object appears in `live_objects`
 // and exactly one draw chain.
@@ -148,7 +148,7 @@ std::vector<CbObject*> live_objects;
 std::vector<CbObject*> floor_objects;
 std::vector<CbObject*> regular_objects;
 
-// Deleted emitters draining their remaining particles (FD-038). DeleteObject on
+// Deleted emitters draining their remaining particles. DeleteObject on
 // an emitter with live particles stops it spawning and moves it here (out of
 // live_objects, so no longer enumerable/addressable) but keeps it in its draw
 // chain so the particles finish; update_all drains and frees them.
@@ -158,7 +158,7 @@ std::vector<CbObject*> rogue_emitters;
 // advances). Non-reentrant — a single shared iterator, as in CoolBasic.
 std::size_t enum_index = 0;
 
-// ─── Collision-check registry (FD-036 Phase 5) ──────────────────────────
+// ─── Collision-check registry ──────────────────────────
 //
 // SetupCollision is a *persistent* registration (CoolBasic's collision-check
 // list): each entry is re-tested every update tick, not one-shot. Cleared only
@@ -178,7 +178,7 @@ struct CbCollisionCheck {
 
 std::vector<CbCollisionCheck> collision_checks;
 
-// ─── Pickable registry + last-pick state (FD-036 Phase 5) ───────────────
+// ─── Pickable registry + last-pick state ───────────────
 //
 // ObjectPickable adds/removes objects here; ObjectPick raycasts the picker's
 // facing ray against each and keeps the nearest hit, recording it for
@@ -361,12 +361,11 @@ void render_floor(const CbObject* o, ALLEGRO_BITMAP* bmp) {
     }
 }
 
-// Draw an emitter's live particles (FD-038). Camera world space is already
+// Draw an emitter's live particles. Camera world space is already
 // active (called from render_all's bracket). Each particle is a translated,
-// centred sprite — no rotation, no ghost alpha (faithful to cbEnchanted). For an
+// centred sprite — no rotation, no ghost alpha. For an
 // animated strip the frame is chosen forward over the particle's life and the
-// cell sliced with the FD-036-correct row/offset math (cbEnchanted's particle
-// slicer had the same row/offset bugs FD-036 fixed for images).
+// cell sliced with the correct row/offset math.
 void render_particles(const CbObject* o) {
     const cb::particle::CbEmitterState& e = *o->emitter;
     if (!o->tex || !o->tex->bmp || e.particles.empty()) return;
@@ -439,10 +438,10 @@ void render_object(const CbObject* o) {
 }
 
 // Resolve the emitter state behind an Object handle for the Particle* commands.
-// Returns null and raises a clean runtime error (FD-015 trap channel) if the
+// Returns null and raises a clean runtime error (trap channel) if the
 // handle is not an emitter — classic CB blind-casts here (UB); we refuse. The
 // Particle* commands are typed to take an Object, so the type checker can't catch
-// a plain-object argument (resolved OQ3: trap, not a silent no-op).
+// a plain-object argument (trap, not a silent no-op).
 cb::particle::CbEmitterState* require_emitter(CbObject* o, const char* cmd) {
     if (o && o->emitter) return o->emitter.get();
     const CbHostApi* h = cb_host();
@@ -570,12 +569,12 @@ extern "C" CbObject* cb_rt_clone_object(const CbObject* src) {
 // only when the last owner (a clone) releases it. Dangling-handle if reused.
 extern "C" void cb_rt_delete_object(CbObject* o) {
     if (!o) return;
-    // Emitter graceful drain (FD-038): a deleted emitter that still has live
+    // Emitter graceful drain: a deleted emitter that still has live
     // particles stops spawning and finishes them before being freed. It leaves
     // live_objects (no longer addressable/enumerable) but stays in its draw chain
     // so the particles keep rendering; update_rogue_emitters drains then frees it.
-    // (This also smooths an emitter auto-deleted by ObjectLife, unlike cbEnchanted
-    // which dropped its particles abruptly on life expiry.)
+    // (This also smooths an emitter auto-deleted by ObjectLife, whose particles
+    // would otherwise be dropped abruptly on life expiry.)
     if (o->emitter && !o->emitter->stop && !o->emitter->particles.empty()) {
         erase_from(live_objects, o);
         erase_from(pickable_objects, o);  // emitters are never pickable; defensive
@@ -600,11 +599,11 @@ extern "C" void cb_rt_delete_object(CbObject* o) {
 }
 
 // ClearObjects(): deletes all objects. Objects-only — the active tilemap is left
-// alone (FD-036 decoupling decision; LoadMap/MakeMap own the map's lifetime).
+// alone (LoadMap/MakeMap own the map's lifetime).
 extern "C" void cb_rt_clear_objects(void) {
     for (CbObject* o : live_objects) delete o;
     // Rogue (deleted, still-draining) emitters are no longer in live_objects, so
-    // free them separately (FD-038). They remain in regular_objects, but that is
+    // free them separately. They remain in regular_objects, but that is
     // cleared below without dereferencing, so there is no double free.
     for (CbObject* o : rogue_emitters) delete o;
     live_objects.clear();
@@ -921,7 +920,7 @@ extern "C" void cb_rt_object_string_set(CbObject* o, const CbString* value) {
 }
 
 // ObjectLife get/set; set marks the object as using life (decremented per update
-// tick by the Phase-5 game loop, auto-deleting at 0).
+// tick by the game loop, auto-deleting at 0).
 extern "C" int32_t cb_rt_object_life_get(const CbObject* o) {
     return o ? (int32_t)o->life : 0;
 }
@@ -943,10 +942,10 @@ extern "C" CbObject* cb_rt_next_object(void) {
     return live_objects[enum_index++];
 }
 
-// ─── Collision (FD-036 Phase 5) ─────────────────────────────────────────
+// ─── Collision ─────────────────────────────────────────
 //
 // SetupCollision registers a persistent check; the actual geometry runs once per
-// update tick in run_collision_checks (driven by the Phase-5 game loop). The
+// update tick in run_collision_checks (driven by the game loop). The
 // pure overlap/resolution math lives in cb_collision_data.h; the map-grid tile
 // loops (Rect/CircleMap) are here because they walk the active tilemap. Mode 0
 // (report) records the contact but does NOT move the object; modes 1/2 (stop/
@@ -962,7 +961,7 @@ namespace {
 void register_collision(CbObject* a, int typeA, CbObject* b, bool bIsMap, int typeB,
                         int handling) {
     if (!a) return;
-    if (a->emitter) return;            // emitters never collide (FD-038, real CB)
+    if (a->emitter) return;            // emitters never collide (real CB)
     if (b && b->emitter) return;
     if (typeA != 1 && typeA != 2) return;  // colliding type must be Box or Circle
     if (bIsMap) {
@@ -991,7 +990,7 @@ void set_object_range(CbObject* o, double r1, double r2) {
 // centred AABB (range1×range2); circle uses range1/2 as the radius.
 int32_t objects_overlap_impl(const CbObject* a, const CbObject* b, int32_t type) {
     if (!a || !b) return 0;
-    if (a->emitter || b->emitter) return 0;  // emitters never collide (FD-038)
+    if (a->emitter || b->emitter) return 0;  // emitters never collide
     if (type < 1 || type > 3) return 0;
     if (type == 1) {
         double w1 = a->range1, h1 = a->range2, w2 = b->range1, h2 = b->range2;
@@ -1043,7 +1042,7 @@ void circle_circle_test(CbCollisionCheck& c) {
     }
 }
 
-// Box-vs-tilemap (collisioncheck.cpp:300-408). Two axis passes over the tiles
+// Box-vs-tilemap. Two axis passes over the tiles
 // around the object; fixed cardinal contact normals (top 270 / right 180 /
 // bottom 90 / left 0). The map-wall "other" is Null (a Map is not an Object).
 void rect_map_test(CbCollisionCheck& c) {
@@ -1115,10 +1114,10 @@ void rect_map_test(CbCollisionCheck& c) {
     if (collided[3]) a->collisions.push_back({nullptr, 0.0, objX - objWidth / 2.0 - 1.0, objY});
 }
 
-// Circle-vs-tilemap (collisioncheck.cpp:411-696) — the hardest test: per-axis
+// Circle-vs-tilemap — the hardest test: per-axis
 // circle-rect tile probing with edge-vs-corner disambiguation (a neighbour-tile
-// lookup decides rect-style flush push-out vs corner push-out). The goto
-// breakouts become a `done` flag that stops each pass at the first resolved tile.
+// lookup decides rect-style flush push-out vs corner push-out). A `done` flag
+// stops each pass at the first resolved tile.
 void circle_map_test(CbCollisionCheck& c) {
     const CbMapData* m = cb::map::active_data();
     if (!m || m->tileWidth <= 0 || m->tileHeight <= 0) return;
@@ -1334,7 +1333,7 @@ extern "C" int32_t cb_rt_objects_overlap3(const CbObject* a, const CbObject* b,
 
 // Re-test every registered collision check (one update tick). Object collision
 // lists are wiped per-object by the update tick before this runs; here we only
-// append contacts and apply stop/slide position corrections. Glue for the Phase-5
+// append contacts and apply stop/slide position corrections. Glue for the
 // game loop (cb_objects_update_all); see cb_object.h.
 void run_collision_checks(void) {
     for (CbCollisionCheck& c : collision_checks) {
@@ -1351,13 +1350,13 @@ void run_collision_checks(void) {
     }
 }
 
-// ─── Picking & line of sight (FD-036 Phase 5) ───────────────────────────
+// ─── Picking & line of sight ───────────────────────────
 
 // ObjectPickable(obj, style): 0 = not pickable (removed); 1/2/3 = box/circle/
 // pixel. Adds/removes the object from the pickable set.
 extern "C" void cb_rt_object_pickable(CbObject* o, int32_t style) {
     if (!o) return;
-    if (o->emitter) return;  // emitters are never pickable (FD-038, real CB)
+    if (o->emitter) return;  // emitters are never pickable (real CB)
     if (style == 0) {
         o->pickStyle = 0;
         erase_from(pickable_objects, o);
@@ -1406,8 +1405,8 @@ extern "C" void cb_rt_object_pick(CbObject* picker) {
             best_y = hy;
         }
     }
-    // Bug fix: PickedAngle is the angle from the picker to the PICKED hit point,
-    // in degrees (the reference returned stale loop-end coords in radians).
+    // PickedAngle is the angle from the picker to the PICKED hit point,
+    // in degrees.
     if (last_picked) {
         last_picked_angle = cb_object_angle2(picker->posX, picker->posY, best_x, best_y);
     }
@@ -1467,14 +1466,14 @@ extern "C" void cb_rt_screen_position_object(CbObject* o, double sx, double sy) 
     o->posY = sy;
 }
 
-// ─── Particle emitters (FD-038) ─────────────────────────────────────────
+// ─── Particle emitters ─────────────────────────────────────────
 //
-// A CoolBasic "Effects" emitter IS an Object (cbEnchanted: CBParticleEmitter :
-// public CBObject). MakeEmitter returns the `Object` handle, so every object
+// A CoolBasic "Effects" emitter IS an Object. MakeEmitter returns the `Object`
+// handle, so every object
 // command above works on it unchanged; the three Particle* commands configure
 // the emitter payload and trap on a non-emitter handle. Emitters render their
 // particles (render_particles), step them each tick (update_emitter / the rogue
-// drain), and are excluded from picking and collision (real CB — see FD-038).
+// drain), and are excluded from picking and collision (real CB).
 
 // MakeEmitter(image, lifeTime): create an emitter at (0,0). `lifeTime` is the
 // per-PARTICLE life in DrawScreen frames (not the emitter's own life). The
@@ -1541,7 +1540,7 @@ extern "C" void cb_rt_particle_emission(CbObject* o, int32_t density, int32_t co
 // ParticleAnimation(emitter, frames): animate the (LoadAnimImage) particle image
 // as a `frames`-long strip, played once over each particle's life. Clamped to the
 // strip's real frame count so an over-long value can't slice past the sheet
-// (resolved OQ5: classic CB crashes; we clamp).
+// (classic CB crashes; we clamp).
 extern "C" void cb_rt_particle_animation(CbObject* o, int32_t frames) {
     if (auto* e = require_emitter(o, "ParticleAnimation")) {
         if (frames < 0) frames = 0;
@@ -1550,7 +1549,7 @@ extern "C" void cb_rt_particle_animation(CbObject* o, int32_t frames) {
     }
 }
 
-// ─── Game-loop update (FD-036 Phase 5) ──────────────────────────────────
+// ─── Game-loop update ──────────────────────────────────
 
 namespace {
 
@@ -1569,9 +1568,9 @@ void advance_object_anim(CbObject* o) {
     o->playing = s.playing;
 }
 
-// One emitter tick (FD-038): bump the spawn counter, integrate+cull existing
+// One emitter tick: bump the spawn counter, integrate+cull existing
 // particles, then spawn any emissions due. Spawn randomness draws from the shared
-// CB RNG (cb_rt_rnd_max → [0,1), the randf() cbEnchanted used), so Randomize
+// CB RNG (cb_rt_rnd_max → [0,1)), so Randomize
 // affects particles too. ObjectLife decrement/auto-delete is handled by the
 // caller (update_all), as for any object.
 void update_emitter(CbObject* o) {
@@ -1583,7 +1582,7 @@ void update_emitter(CbObject* o) {
                             [] { return cb_rt_rnd_max(1.0); });
 }
 
-// Drain deleted emitters (FD-038): each rogue keeps integrating its particles
+// Drain deleted emitters: each rogue keeps integrating its particles
 // (no spawning) until empty, then leaves its draw chain and is freed. Called once
 // per update tick. A rogue created during this same tick's main loop integrates
 // once more here (a 1-frame cosmetic nicety, not a correctness issue).
@@ -1613,7 +1612,7 @@ void update_all(void) {
     std::vector<CbObject*> snapshot = live_objects;
     for (CbObject* o : snapshot) {
         if (o->emitter) {
-            update_emitter(o);  // spawn + step particles (FD-038)
+            update_emitter(o);  // spawn + step particles
         } else {
             advance_object_anim(o);
         }
@@ -1624,7 +1623,7 @@ void update_all(void) {
         }
         o->collisions.clear();  // eraseCollisions: wipe last tick's contacts
     }
-    update_rogue_emitters();      // drain + free deleted emitters (FD-038)
+    update_rogue_emitters();      // drain + free deleted emitters
     cb::map::tick_animation();    // advance animated map tiles
     run_collision_checks();  // re-test every registered check
     for (CbObject* o : live_objects) o->checkCollisions = true;  // re-arm

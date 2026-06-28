@@ -1,4 +1,4 @@
-' Redim to a LARGER size (FD-049 review F15). Redim replaces the variable with a
+' Redim to a LARGER size. Redim replaces the variable with a
 ' fresh, zero-initialised array — it does not preserve the old contents.
 Dim arr As Int[] = New Int[3]
 arr[0] = 11

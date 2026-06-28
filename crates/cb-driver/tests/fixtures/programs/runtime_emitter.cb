@@ -1,4 +1,4 @@
-// FD-038: particle emitters. A CoolBasic "Effects" emitter IS an Object —
+// Particle emitters. A CoolBasic "Effects" emitter IS an Object —
 // MakeEmitter returns the Object handle, so the object commands drive it and it
 // enumerates via NextObject. Real CB excludes emitters from picking AND collision
 // (the Help docs claim otherwise; verified against the real compiler). The
@@ -71,4 +71,4 @@ While it <> Null
 Wend
 If n = 1 Then Print "emitter_deleted_ok"   // only `o` remains
 
-Print "fd038_emitter_done"
+Print "emitter_done"

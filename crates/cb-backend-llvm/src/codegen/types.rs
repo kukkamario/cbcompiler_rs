@@ -1,6 +1,6 @@
-//! `IrType` → `inkwell` type mapping and function-type construction (FD-049).
+//! `IrType` → `inkwell` type mapping and function-type construction.
 //!
-//! Scalar Phase-1 surface plus array handles (FD-049 Phase 2): an `Array`
+//! Scalar surface plus array handles: an `Array`
 //! lowers to an opaque `CbArray*` pointer. The remaining reference IR types
 //! (`TypeRef`, `StructVal`, `FnPtr`, `RuntimeType`) are deliberately rejected
 //! with an error rather than guessed at — they are out of scope, so a program
@@ -17,7 +17,7 @@ use cb_ir::{IrType, StructDefInfo};
 /// opaque pointer; a value `StructVal` lowers to an inline LLVM `StructType`
 /// built recursively from `struct_defs` (value semantics — copied by load/store,
 /// CB forbids self-containment so the recursion terminates). Errors on the
-/// remaining reference types (`FnPtr` until Phase 3c, `RuntimeType`, `Void`).
+/// remaining reference types (`RuntimeType`, `Void`).
 pub fn basic_type<'ctx>(
     ctx: &'ctx Context,
     struct_defs: &[StructDefInfo],
@@ -31,12 +31,12 @@ pub fn basic_type<'ctx>(
         IrType::Float => ctx.f64_type().into(),
         // CbString* (opaque) and a null reference both lower to `ptr`.
         IrType::String | IrType::Null => ctx.ptr_type(AddressSpace::default()).into(),
-        // An array handle is an opaque `CbArray*` (FD-049 Phase 2), like String.
+        // An array handle is an opaque `CbArray*`, like String.
         IrType::Array { .. } => ctx.ptr_type(AddressSpace::default()).into(),
-        // A user-`Type` instance is an opaque `CbTypeHeader*` (FD-049 Phase 3a);
+        // A user-`Type` instance is an opaque `CbTypeHeader*`;
         // its inline fields are GEP'd through a per-type node struct in func.rs.
         IrType::TypeRef(_) => ctx.ptr_type(AddressSpace::default()).into(),
-        // A value struct is an inline aggregate (FD-049 Phase 3b).
+        // A value struct is an inline aggregate.
         IrType::StructVal(name) => {
             let def = struct_defs
                 .iter()
@@ -48,7 +48,7 @@ pub fn basic_type<'ctx>(
             }
             ctx.struct_type(&elems, false).into()
         }
-        // A function pointer is an opaque `ptr` (FD-049 Phase 3c); the callee
+        // A function pointer is an opaque `ptr`; the callee
         // function type is rebuilt from its `FnSig` at the `CallIndirect` site.
         IrType::FnPtr(_) => ctx.ptr_type(AddressSpace::default()).into(),
         other => {
@@ -137,7 +137,7 @@ mod tests {
     fn aggregate_types_error() {
         use cb_diagnostics::Symbol;
         let ctx = Context::create();
-        // An array handle lowers to an opaque pointer (FD-049 Phase 2)...
+        // An array handle lowers to an opaque pointer...
         assert!(
             basic_type(
                 &ctx,
@@ -150,13 +150,13 @@ mod tests {
             .unwrap()
             .is_pointer_type()
         );
-        // ...as does a user-`Type` instance handle (FD-049 Phase 3a)...
+        // ...as does a user-`Type` instance handle...
         assert!(
             basic_type(&ctx, &[], &IrType::TypeRef(Symbol::DUMMY))
                 .unwrap()
                 .is_pointer_type()
         );
-        // ...a value struct lowers to an inline aggregate (FD-049 Phase 3b)...
+        // ...a value struct lowers to an inline aggregate...
         let def = StructDefInfo {
             name: Symbol::DUMMY,
             fields: vec![(Symbol::DUMMY, IrType::Int), (Symbol::DUMMY, IrType::Float)],
@@ -169,7 +169,7 @@ mod tests {
         .unwrap();
         assert!(st.is_struct_type());
         assert_eq!(st.into_struct_type().count_fields(), 2);
-        // ...and a function pointer lowers to an opaque pointer (FD-049 Phase 3c);
+        // ...and a function pointer lowers to an opaque pointer;
         // only runtime handles remain rejected.
         assert!(
             basic_type(

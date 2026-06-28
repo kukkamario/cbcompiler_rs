@@ -1,4 +1,4 @@
-// FD-004 #10: `Select` rejects more than one `Default` arm.
+// `Select` rejects more than one `Default` arm.
 
 Select x
     Case 1

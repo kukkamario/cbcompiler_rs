@@ -1,10 +1,10 @@
-// CoolBasic graphics & image runtime (FD-013 Batch 4).
+// CoolBasic graphics & image runtime.
 //
 // One translation unit owns the display, the active render target, the
 // draw/clear colors, FPS counting, and the `Image`/`Font` opaque handles, so the
 // screen and image functions share state directly without a class hierarchy —
 // kept deliberately simple and observable (CLAUDE.md). The module lives in the
-// `cb::gfx` namespace (FD-037); its cross-TU glue is declared in cb_gfx.h, and
+// `cb::gfx` namespace; its cross-TU glue is declared in cb_gfx.h, and
 // the CB-visible `cb_rt_*` entry points keep C linkage for the catalog/FFI.
 //
 // ABI conventions (see cb_runtime.h / the catalog DSL): CB `Float` parameters
@@ -38,11 +38,11 @@
 // The CB-visible `Image` type. Declared (never defined) in cb_runtime.h as
 // `struct CbImage`; defined here. Always passed/returned by pointer.
 //
-// FD-017 adds a hotspot — the draw/scale/rotate origin. It defaults to (0,0)
-// (top-left), so functions that predate it (DrawImage) are unaffected; HotSpot,
+// The hotspot — the draw/scale/rotate origin — defaults to (0,0)
+// (top-left), so functions that don't set it (DrawImage) are unaffected; HotSpot,
 // CloneImage, and RotateImage set it.
 //
-// FD-036 adds multi-frame sprite-sheet metadata. `anim_length == 0` (the
+// Multi-frame sprite-sheet metadata. `anim_length == 0` (the
 // default) means a single-frame image — every draw uses the whole bitmap and the
 // frame parameter is ignored. LoadAnimImage sets frame_w/frame_h/anim_length so
 // the bitmap is sliced into frame_w×frame_h cells. `anim_begin` (the start frame)
@@ -64,7 +64,7 @@ struct CbImage {
 
 // ─── Opaque Font handle ───────────────────────────────────────────────
 //
-// The CB-visible `Font` type (FD-018). Wraps an Allegro font; always passed and
+// The CB-visible `Font` type. Wraps an Allegro font; always passed and
 // returned by pointer. Created by LoadFont, freed by DeleteFont. The built-in
 // default font is owned separately (see `default_font` below) and is never
 // wrapped in a heap CbFont, so the program cannot DeleteFont it.
@@ -100,7 +100,7 @@ static double               fps_last_sample = 0.0;
 static int32_t              fps_frame_count = 0;
 static int32_t              fps_value       = 0;
 
-// FD-017 best-effort state. Smooth2D toggles linear filtering on new bitmaps;
+// Best-effort state. Smooth2D toggles linear filtering on new bitmaps;
 // ScreenGamma is stored but not applied (Allegro 5 has no simple display gamma
 // ramp) — kept so reads/round-trips behave and to document the divergence.
 static bool                 smooth_2d       = false;
@@ -113,7 +113,7 @@ static double               gamma_b         = 1.0;
 static bool                 default_mask_on = false;
 static ALLEGRO_COLOR        default_mask_color;
 
-// ─── Text & font state (FD-018) ────────────────────────────────────────
+// ─── Text & font state ────────────────────────────────────────
 //
 // `default_font` is loaded once (Courier New 12pt, or Allegro's built-in 8x8
 // font as a never-fail fallback) and owned for the process lifetime.
@@ -158,11 +158,10 @@ void apply_alpha_blender(void) {
                             ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_ONE);
 }
 
-// FD-043: coarse at-exit teardown, registered with the core teardown seam the
+// Coarse at-exit teardown, registered with the core teardown seam the
 // first time Allegro comes up (ensure_init). The about_to_exit hook dispatches
 // here on a clean program exit: flush any live audio channels, then let Allegro
-// release the display, addons, and audio subsystem in one call — mirroring the
-// cbEnchanted reference (cleanup() + al_uninstall_system()). Guarded to run at
+// release the display, addons, and audio subsystem in one call. Guarded to run at
 // most once: the window-close path in DrawScreen already destroys the display
 // inline and exits, after which about_to_exit still fires this, and
 // al_uninstall_system() is not safe to call twice.
@@ -224,7 +223,7 @@ static void ensure_init(void) {
     apply_bitmap_defaults();
     apply_alpha_blender();
 
-    // FD-043: now that Allegro is up, register the at-exit teardown so a clean
+    // Now that Allegro is up, register the at-exit teardown so a clean
     // program exit releases the display/audio instead of leaning on process
     // teardown. The seam de-dupes by pointer; the static guard skips the
     // re-registration cost on every later ensure_init call.
@@ -270,7 +269,7 @@ extern "C" void cb_rt_screen(int32_t w, int32_t h) {
     current_target = al_get_backbuffer(g_display);
     // Source-over alpha blending so masked (alpha=0) pixels are transparent. A
     // plain ONE/ZERO blender would copy source verbatim, discarding the alpha that
-    // MaskObject/MaskImage and load-time auto-masking bake in (FD-036 fix).
+    // MaskObject/MaskImage and load-time auto-masking bake in.
     apply_alpha_blender();
 
     draw_color  = al_map_rgb(255, 255, 255);
@@ -333,7 +332,7 @@ extern "C" void cb_rt_screenshot(const CbString* path) {
 // & fonts section). Called each frame just before the flip.
 static void render_queued_texts(void);
 
-// FD-036 Phase 5 game-loop dedup flags. An explicit UpdateGame/DrawGame sets
+// Game-loop dedup flags. An explicit UpdateGame/DrawGame sets
 // these so DrawScreen's implicit pass doesn't run the same update/draw twice in a
 // frame; DrawScreen resets them.
 static bool game_updated = false;
@@ -344,7 +343,7 @@ static bool game_drawn   = false;
 static void do_draw_screen(bool clear_after) {
     if (!g_display) return;
 
-    // FD-036 Phase 5: run the built-in game loop for this frame, deduped against
+    // Run the built-in game loop for this frame, deduped against
     // an explicit UpdateGame/DrawGame (the gameUpdated/gameDrawn flags). Update the
     // objects if not already, step camera-follow, then composite the full object
     // pass through the camera (map background → floor → regular → map foreground)
@@ -358,7 +357,7 @@ static void do_draw_screen(bool clear_after) {
     game_updated = false;
     game_drawn   = false;
 
-    // FD-041: reap finished sound channels (cbEnchanted's per-frame updateAudio).
+    // Reap finished sound channels each frame.
     // Idempotent and cheap — no dedup flag needed.
     cb::sound::reap();
 
@@ -376,7 +375,7 @@ static void do_draw_screen(bool clear_after) {
         fps_last_sample = now;
     }
 
-    // Advance the input state machine for this frame (FD-013 Batch 5): clear
+    // Advance the input state machine for this frame: clear
     // the per-key/button "changed" bits and zero movement deltas, then route
     // every queued event into the input module before processing window events.
     cb::input::frame_begin();
@@ -385,11 +384,11 @@ static void do_draw_screen(bool clear_after) {
     while (al_get_next_event(g_event_queue, &ev)) {
         cb::input::handle_event(&ev);
         if (ev.type == ALLEGRO_EVENT_DISPLAY_CLOSE) {
-            // FD-015: route window-close through the trap channel for a clean
+            // Route window-close through the trap channel for a clean
             // Halt/Ok(0) termination instead of exit(0). Destroy our display
             // here, ask the host to exit, and return — the interpreter drains
             // the pending Exit(0) right after this runtime call returns, and the
-            // FD-043 about_to_exit teardown (al_uninstall_system) runs then. The
+            // about_to_exit teardown (al_uninstall_system) runs then. The
             // `return` is essential: `display` is now null and the code below
             // would deref it. The inline destroy can't wait for about_to_exit
             // for that reason; the teardown's al_uninstall_system tolerates an
@@ -548,7 +547,7 @@ extern "C" void cb_rt_smooth_2d(int32_t enabled) {
     smooth_2d = enabled != 0;
 }
 
-// ─── DrawToWorld transform (FD-036 Phase 2) ─────────────────────────────
+// ─── DrawToWorld transform ─────────────────────────────
 //
 // When a DrawToWorld category flag is set AND we are drawing to the screen
 // (not an image), a user draw command runs
@@ -668,8 +667,8 @@ extern "C" void cb_rt_put_pixel_argb(int32_t x, int32_t y, int32_t argb) {
                                    p & 0xFF, (p >> 24) & 0xFF));
 }
 
-// Packs an ALLEGRO_COLOR to 32-bit ARGB (the runtime's retained format; see
-// FD-017 Q2 — diverges from the spec's nominal 0xRRGGBB but matches what
+// Packs an ALLEGRO_COLOR to 32-bit ARGB (the runtime's retained format;
+// diverges from the spec's nominal 0xRRGGBB but matches what
 // CoolBasic's GetPixel actually returns).
 static int32_t pack_argb(ALLEGRO_COLOR color) {
     unsigned char r, g, b, a;
@@ -857,11 +856,11 @@ extern "C" void cb_rt_delete_image(CbImage* img) {
     delete img;
 }
 
-// ─── FD-017 image additions (single-frame) ─────────────────────────────
+// ─── Image additions (single-frame) ─────────────────────────────
 //
-// Multi-frame sprite sheets are deferred (FD-017 Q3), so the `frame` parameters
-// of those signatures are dropped here; SaveImage keeps a `frame` arg
-// for source compatibility but ignores it.
+// These operate on single-frame images, so the `frame` parameters of those
+// signatures are dropped here; SaveImage keeps a `frame` arg for source
+// compatibility but ignores it.
 
 // DefaultMask(enabled, r, g, b): mask color applied to future MakeImage/
 // LoadImage results. enabled=0 turns it off.
@@ -873,7 +872,7 @@ extern "C" void cb_rt_default_mask(int32_t enabled, int32_t r, int32_t g, int32_
     }
 }
 
-// Copies an image, its hotspot, and its frame metadata (FD-036).
+// Copies an image, its hotspot, and its frame metadata.
 extern "C" CbImage* cb_rt_clone_image(const CbImage* img) {
     if (!img || !img->bmp) return nullptr;
     ALLEGRO_BITMAP* b = clone_bitmap_hl(img->bmp);
@@ -894,7 +893,7 @@ extern "C" void cb_rt_resize_image(CbImage* img, int32_t w, int32_t h) {
     int oh = al_get_bitmap_height(img->bmp);
 
     // Restore the caller's render target on exit, the way MakeImage does, so
-    // building `dest` is not an observable global-state side effect (FD-022).
+    // building `dest` is not an observable global-state side effect.
     ALLEGRO_BITMAP* prev = al_get_target_bitmap();
 
     int prev_flags = al_get_new_bitmap_flags();
@@ -941,7 +940,7 @@ extern "C" void cb_rt_rotate_image(CbImage* img, double angle) {
     if (niw < 1) niw = 1;
     if (nih < 1) nih = 1;
 
-    // Restore the caller's render target on exit (see cb_rt_resize_image, FD-022).
+    // Restore the caller's render target on exit (see cb_rt_resize_image).
     ALLEGRO_BITMAP* prev = al_get_target_bitmap();
 
     int prev_flags = al_get_new_bitmap_flags();
@@ -1016,7 +1015,7 @@ extern "C" void cb_rt_draw_image_box(const CbImage* img, double sx, double sy,
 extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
     if (!img || !img->bmp) return;
     if (x < 0 || y < 0) {
-        // FD-036: center on a single frame when frame size is set, else on the
+        // Center on a single frame when frame size is set, else on the
         // whole image.
         if (img->frame_w > 0 && img->frame_h > 0) {
             img->hotspot_x = img->frame_w / 2;
@@ -1031,7 +1030,7 @@ extern "C" void cb_rt_hotspot(CbImage* img, int32_t x, int32_t y) {
     }
 }
 
-// rect_overlap lives in cb_geom.h (FD-022) so the unit tests can exercise it
+// rect_overlap lives in cb_geom.h so the unit tests can exercise it
 // without pulling in Allegro.
 
 // Bounding-box overlap between two placed images (Y negated for world space,
@@ -1078,7 +1077,7 @@ extern "C" int32_t cb_rt_images_collide(const CbImage* a, double x1, double y1, 
     return 0;
 }
 
-// ─── FD-036 multi-frame sprite sheets ──────────────────────────────────
+// ─── Multi-frame sprite sheets ──────────────────────────────────
 //
 // A multi-frame image stores one bitmap sliced on the fly into frame_w×frame_h
 // cells (LoadAnimImage sets the frame size). The frame draw overloads below sit
@@ -1087,9 +1086,9 @@ extern "C" int32_t cb_rt_images_collide(const CbImage* a, double x1, double y1, 
 // Source sub-rect for `frame` of a multi-frame image. Returns false for a
 // single-frame image (anim_length==0 or no frame size) — the caller draws the
 // whole bitmap. `frame` is 0-based and taken modulo framesX (NOT clamped to
-// anim_length). The row/offset math uses /framesX and *frame_h; an earlier
-// reference port used /framesY and *frameWidth, correct only for square
-// single-row sheets (see FD-036, FIX #1/#2 below).
+// anim_length). The row/offset math uses /framesX and *frame_h; a /framesY,
+// *frameWidth slice would be correct only for square
+// single-row sheets (see FIX #1/#2 below).
 static bool image_frame_src_rect(const CbImage* img, int32_t frame,
                                  float& left, float& top, float& w, float& h) {
     if (!img || !img->bmp || img->anim_length == 0 ||
@@ -1295,7 +1294,7 @@ extern "C" int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth) {
     return (w > 0 && h > 0) ? 1 : 0;
 }
 
-// ─── Text & fonts (FD-018) ─────────────────────────────────────────────
+// ─── Text & fonts ─────────────────────────────────────────────
 //
 // Text draws in the current `draw_color` onto the active `current_target`, font
 // lookup honours `smooth_2d`, and the persistent AddText queue re-renders every
@@ -1346,7 +1345,7 @@ static void render_queued_texts(void) {
 }
 
 // Text(x, y, s): draws immediately at (x, y) in the current font/color onto the
-// active render target. Honors DrawToWorld's text flag (FD-036): when set and
+// active render target. Honors DrawToWorld's text flag: when set and
 // drawing to the screen, (x, y) is interpreted in world coordinates.
 extern "C" void cb_rt_text(double x, double y, const CbString* s) {
     ensure_init();
@@ -1464,7 +1463,7 @@ extern "C" void cb_rt_set_font(CbFont* f) {
 // default. Queued AddText entries snapshot a borrowed ALLEGRO_FONT* (see
 // cb_rt_add_text), so any that referenced this font are rebound to default_font
 // too — otherwise render_queued_texts would dereference the freed font on the
-// next DrawScreen (FD-022). default_font is process-owned and never freed here,
+// next DrawScreen. default_font is process-owned and never freed here,
 // so the rebind is always safe.
 extern "C" void cb_rt_delete_font(CbFont* f) {
     if (!f) return;

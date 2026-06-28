@@ -3,7 +3,7 @@
 
 // Pure UTF-8 helpers shared by the string library (cb_strfuncs.cpp) and the
 // native C++ unit tests. Header-only (inline) so this Allegro-free logic can be
-// exercised without linking the full runtime. (FD-022)
+// exercised without linking the full runtime.
 
 #include <cstddef>
 #include <cstdint>

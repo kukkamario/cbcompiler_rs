@@ -1,5 +1,5 @@
-// FD-049: unit tests for the core string primitives added for the native
-// backend — cb_rt_string_compare (the shared ordering oracle, decision C) and
+// Unit tests for the core string primitives added for the native
+// backend — cb_rt_string_compare (the shared ordering oracle) and
 // cb_rt_string_char_len (the codepoint count behind CB `Len(s$)`). These drive
 // the bare extern "C" symbols directly; no display / Allegro / trap host. The
 // interpreter is required to agree with both (it calls cb_rt_string_compare and

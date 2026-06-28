@@ -2,7 +2,7 @@
 //!
 //! The renderer is load-bearing for every user-visible diagnostic, so
 //! these tests pin the rendered form against snapshots (success paths)
-//! and exercise the validation failure modes added in FD-006 A3 / C
+//! and exercise the validation failure modes
 //! (`Err` paths). Black-box: everything goes through the published
 //! `cb_diagnostics` API.
 

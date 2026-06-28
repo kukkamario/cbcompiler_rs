@@ -1,4 +1,4 @@
-// FD-004 #2: empty single-line `If` body forms must emit E0215 and not panic.
+// Empty single-line `If` body forms must emit E0215 and not panic.
 // Inputs in this fixture are explicitly single-line shapes (anything ending
 // in a bare `Then` followed by a newline is block form, exercised by
 // parser_if.cb already).

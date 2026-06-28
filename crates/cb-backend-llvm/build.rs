@@ -1,4 +1,4 @@
-//! Build script for the LLVM/AOT backend (FD-048).
+//! Build script for the LLVM/AOT backend.
 //!
 //! Under the `codegen` feature it re-exports the runtime link metadata that
 //! `cb-runtime-sys` publishes via its `links = "cb_runtime"` key
@@ -9,7 +9,7 @@
 use std::env;
 use std::path::PathBuf;
 
-/// Metadata keys published by `cb-runtime-sys` (FD-048). Re-exported verbatim as
+/// Metadata keys published by `cb-runtime-sys`. Re-exported verbatim as
 /// `CB_RT_<KEY>` env vars. `CLOSURE_LIST` is empty for the SDK-free flavor.
 const RUNTIME_KEYS: &[&str] = &["FLAVOR", "LIB_DIR", "RUNTIME_LIBS", "CLOSURE_LIST"];
 

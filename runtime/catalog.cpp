@@ -35,7 +35,7 @@ extern "C" {
 // type, so they double as compile-time tests of the
 // `type_tag<CbTestHandle>` path.
 //
-// CB_METADATA_ONLY (FD-045): omit the function *bodies* so the metadata-only
+// CB_METADATA_ONLY: omit the function *bodies* so the metadata-only
 // object references neither cb_host() nor the string primitives, and so it can
 // link alongside the full runtime without duplicate definitions. The forward
 // declarations above (and in cb_runtime_func.h) remain — all FuncTraits<…> needs.
@@ -49,7 +49,7 @@ extern "C" int32_t cb_rt_use_test_handle(const CbTestHandle* handle) {
     return static_cast<int32_t>(reinterpret_cast<uintptr_t>(handle));
 }
 
-// ─── Trap-channel test functions (FD-015) ─────────────────────────────
+// ─── Trap-channel test functions ─────────────────────────────
 //
 // Test-only, like the test-handle pair above: they give the runtime trap
 // channel automated end-to-end coverage (the only production caller of
@@ -130,44 +130,44 @@ constexpr CbTypeTag CB_TYPE_TEST_HANDLE = 10;
 template<> struct type_tag<      CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 template<> struct type_tag<const CbTestHandle*> { static constexpr CbTypeTag value = CB_TYPE_TEST_HANDLE; };
 
-// Image — the graphics opaque handle (FD-013 Batch 4).
+// Image — the graphics opaque handle.
 constexpr CbTypeTag CB_TYPE_IMAGE = 11;
 template<> struct type_tag<      CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
 template<> struct type_tag<const CbImage*>      { static constexpr CbTypeTag value = CB_TYPE_IMAGE; };
 
-// Font — the text opaque handle (FD-018).
+// Font — the text opaque handle.
 constexpr CbTypeTag CB_TYPE_FONT = 12;
 template<> struct type_tag<      CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 template<> struct type_tag<const CbFont*>       { static constexpr CbTypeTag value = CB_TYPE_FONT; };
 
-// Object — the sprite opaque handle (FD-036 Phase 4).
+// Object — the sprite opaque handle.
 constexpr CbTypeTag CB_TYPE_OBJECT = 13;
 template<> struct type_tag<      CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
 template<> struct type_tag<const CbObject*>     { static constexpr CbTypeTag value = CB_TYPE_OBJECT; };
 
-// Map — the tilemap opaque handle (FD-036 Phase 3). Object is tag 13; the map
+// Map — the tilemap opaque handle. Object is tag 13; the map
 // is tag 14.
 constexpr CbTypeTag CB_TYPE_MAP = 14;
 template<> struct type_tag<      CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
 template<> struct type_tag<const CbMap*>        { static constexpr CbTypeTag value = CB_TYPE_MAP; };
 
-// Memblock — the raw byte-buffer opaque handle (FD-039, tag 15). Allegro-free,
+// Memblock — the raw byte-buffer opaque handle (tag 15). Allegro-free,
 // unlike Image/Font/Object/Map, so it (and its functions) stay outside the
 // CB_NO_ALLEGRO guard and ship in the SDK-free catalog.
 constexpr CbTypeTag CB_TYPE_MEMBLOCK = 15;
 template<> struct type_tag<      CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
 template<> struct type_tag<const CbMemblock*>   { static constexpr CbTypeTag value = CB_TYPE_MEMBLOCK; };
 
-// File — the file-handle opaque type (FD-040, tag 16). Allegro-free like
+// File — the file-handle opaque type (tag 16). Allegro-free like
 // Memblock, so it (and its functions) stay outside the CB_NO_ALLEGRO guard and
 // ship in the SDK-free catalog.
 constexpr CbTypeTag CB_TYPE_FILE = 16;
 template<> struct type_tag<      CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
 template<> struct type_tag<const CbFile*>       { static constexpr CbTypeTag value = CB_TYPE_FILE; };
 
-// Sound — the loaded-sample opaque type (FD-041, tag 17). SoundChannel — a
-// playing channel (FD-041, tag 18); registered CB-side as "SoundChannel" but the
-// C struct stays CbChannel (mirroring cbEnchanted's CBChannel). Both are
+// Sound — the loaded-sample opaque type (tag 17). SoundChannel — a
+// playing channel (tag 18); registered CB-side as "SoundChannel" but the
+// C struct stays CbChannel. Both are
 // Allegro-dependent (allegro_audio), so the type-table rows and functions below
 // sit inside the CB_NO_ALLEGRO guard — but the tag constants and these
 // specializations are unconditional (like Image/Font/Object/Map), since
@@ -211,7 +211,7 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 // `fn` is the runtime function. `#fn` stringifies it as the linker symbol;
 // CB_FN_PTR(fn) is the stored pointer. In a normal build it is
 // `reinterpret_cast<void(*)(void)>(fn)`, tying symbol and pointer to the same
-// identifier so they cannot drift. In a CB_METADATA_ONLY build (FD-045) it is
+// identifier so they cannot drift. In a CB_METADATA_ONLY build it is
 // `nullptr`: taking `&fn` is the sole thing that ODR-uses every runtime function
 // and drags in the Allegro closure, so nulling it lets the catalog compile and
 // link as pure metadata, referencing no runtime function body.
@@ -237,23 +237,23 @@ inline constexpr auto cb_anon_params = FuncTraits<Fn>::params();
 
 static constexpr CbTypeDesc catalog_types[] = {
     { "TestHandle", ::cb_catalog::CB_TYPE_TEST_HANDLE },
-    // Memblock (FD-039) is Allegro-free — its Make/Peek/Poke functions are
+    // Memblock is Allegro-free — its Make/Peek/Poke functions are
     // present in every build, so the type is advertised unconditionally (unlike
     // the graphics handles below, which would have no functions in the SDK-free
     // catalog).
     { "Memblock",   ::cb_catalog::CB_TYPE_MEMBLOCK },
-    // File (FD-040) is likewise Allegro-free, so it ships in every catalog.
+    // File is likewise Allegro-free, so it ships in every catalog.
     { "File",       ::cb_catalog::CB_TYPE_FILE },
 #ifndef CB_NO_ALLEGRO
     // Image/Font are graphics handles; their operations live behind the
-    // Allegro guard below, so they're absent from the SDK-free catalog
-    // (FD-033). Advertising the type with no functions to make one would
+    // Allegro guard below, so they're absent from the SDK-free catalog.
+    // Advertising the type with no functions to make one would
     // be inconsistent.
     { "Image",      ::cb_catalog::CB_TYPE_IMAGE },
     { "Font",       ::cb_catalog::CB_TYPE_FONT },
     { "Object",     ::cb_catalog::CB_TYPE_OBJECT },
     { "Map",        ::cb_catalog::CB_TYPE_MAP },
-    // Sound/SoundChannel (FD-041) are Allegro-dependent (allegro_audio), so they
+    // Sound/SoundChannel are Allegro-dependent (allegro_audio), so they
     // join the graphics handles inside the guard — absent from the SDK-free
     // catalog. The CB-visible name is "SoundChannel", not "Channel" (the bare
     // noun is polysemous and stays free for user code; the tag is CB_TYPE_CHANNEL).
@@ -262,7 +262,7 @@ static constexpr CbTypeDesc catalog_types[] = {
 #endif
 };
 
-// ─── Constant catalog (FD-029) ────────────────────────────────────────
+// ─── Constant catalog ────────────────────────────────────────
 //
 // Runtime-defined global constants. The compiler seeds these into its
 // global scope and folds them like a user `Const`, so they never reach the
@@ -356,7 +356,6 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("instr",            cb_rt_str_instr_from),
     CB_FN("chr",              cb_rt_chr),
     CB_FN("hex",              cb_rt_hex),
-    // FD-017 completeness pass.
     CB_FN("mid",              cb_rt_str_mid),
     CB_FN("replace",          cb_rt_str_replace),
     CB_FN("lset",             cb_rt_str_lset),
@@ -370,7 +369,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("countwords",       cb_rt_count_words),
     CB_FN("getword",          cb_rt_get_word),
 
-    // Memory blocks (cb_memblock.cpp, FD-039). Allegro-free, so — unlike the
+    // Memory blocks (cb_memblock.cpp). Allegro-free, so — unlike the
     // graphics/input block below — these stay outside the CB_NO_ALLEGRO guard
     // and ship in the SDK-free catalog. `Memblock` is the opaque tag-15 handle.
     CB_FN("makememblock",     cb_rt_make_memblock),
@@ -387,7 +386,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("pokeint",          cb_rt_poke_int),
     CB_FN("pokefloat",        cb_rt_poke_float),
 
-    // File I/O (cb_file.cpp, FD-040). Allegro-free, so — like the memory blocks
+    // File I/O (cb_file.cpp). Allegro-free, so — like the memory blocks
     // above — these stay outside the CB_NO_ALLEGRO guard and ship in the SDK-free
     // catalog. `File` is the opaque tag-16 handle.
     CB_FN("opentoread",       cb_rt_open_to_read),
@@ -423,7 +422,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("endsearch",        cb_rt_end_search),
 
     // Graphics, text, and input (cb_gfx.cpp / cb_font.cpp / cb_input.cpp) pull
-    // in Allegro. The SDK-free build (FD-033, -DCB_NO_ALLEGRO) compiles only the
+    // in Allegro. The SDK-free build (-DCB_NO_ALLEGRO) compiles only the
     // Allegro-free TUs, so these entries — and only these — are guarded out.
     // Their symbols are the sole reason catalog.cpp would otherwise force a link
     // against the Allegro closure (CB_FN takes each function's address).
@@ -440,7 +439,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("gfxmodeexists",    cb_rt_gfx_mode_exists),
     CB_FN("drawscreen",       cb_rt_drawscreen),
     CB_FN("drawscreen",       cb_rt_drawscreen_args),
-    // Game loop (FD-036 Phase 5): built-in object update/draw, deduped per frame.
+    // Game loop: built-in object update/draw, deduped per frame.
     CB_FN("updategame",       cb_rt_update_game),
     CB_FN("drawgame",         cb_rt_draw_game),
     CB_FN("screengamma",      cb_rt_screen_gamma),
@@ -495,7 +494,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawghostimage",   cb_rt_draw_ghost_image),
     CB_FN("drawimagebox",     cb_rt_draw_image_box),
     CB_FN("hotspot",          cb_rt_hotspot),
-    // FD-036 multi-frame sprite sheets — `frame`/`useMask` overloads (one CB_FN
+    // Multi-frame sprite sheets — `frame`/`useMask` overloads (one CB_FN
     // per arity; useMask is accepted but ignored). LoadAnimImage returns the
     // existing `Image` opaque type, so no new type tag is registered.
     CB_FN("loadanimimage",    cb_rt_load_anim_image),
@@ -510,7 +509,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("screenwidth",      cb_rt_screen_width),
     CB_FN("screenheight",     cb_rt_screen_height),
 
-    // Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+    // Camera (cb_camera.cpp). The world<->screen transform core.
     // No new opaque type — camera state is process-global. RotateCamera/
     // TurnCamera take two angle args (logical, render) feeding two independent
     // fields (CoolBasic's desyncable logical/render angles).
@@ -525,7 +524,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("drawtoworld",      cb_rt_draw_to_world),
     CB_FN("mousewx",          cb_rt_mouse_wx),
     CB_FN("mousewy",          cb_rt_mouse_wy),
-    // Object-aware camera (FD-036 Phase 5, deferred from Phase 2). These take an
+    // Object-aware camera. These take an
     // `Object`; CameraPick converts a screen point to world then picks.
     CB_FN("pointcamera",            cb_rt_point_camera),
     CB_FN("camerafollow",           cb_rt_camera_follow),
@@ -533,7 +532,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("clonecameraorientation", cb_rt_clone_camera_orientation),
     CB_FN("camerapick",             cb_rt_camera_pick),
 
-    // Tile maps (cb_map.cpp, FD-036 Phase 3). `Map` is the opaque handle
+    // Tile maps (cb_map.cpp). `Map` is the opaque handle
     // registered above (tag 14). One active map; EditMap's `map` arg is popped
     // but ignored. SetTile has a 2- and 3-arg form (animSlowness defaults to 1).
     CB_FN("loadmap",          cb_rt_load_map),
@@ -547,7 +546,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("settile",          cb_rt_set_tile),
     CB_FN("settile",          cb_rt_set_tile_slow),
 
-    // Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+    // Objects / sprites (cb_object.cpp). `Object` is the opaque
     // handle registered above (tag 13). Per-arity overloads share the CB name
     // with distinct C symbols (the settile/drawimage pattern); the lower-arity C
     // function bakes the defaults. Documented-but-ignored z/dz/rotQuality args are
@@ -618,7 +617,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("initobjectlist",        cb_rt_init_object_list),
     CB_FN("nextobject",            cb_rt_next_object),
 
-    // Collision (FD-036 Phase 5). SetupCollision is two type-distinct overloads
+    // Collision. SetupCollision is two type-distinct overloads
     // (object-object vs the type-4 Map form); ObjectRange/ObjectsOverlap have an
     // optional-arg arity overload. GetCollision returns an `Object` handle.
     CB_FN("setupcollision",        cb_rt_setup_collision),
@@ -635,7 +634,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("objectsoverlap",        cb_rt_objects_overlap),
     CB_FN("objectsoverlap",        cb_rt_objects_overlap3),
 
-    // Picking & line of sight (FD-036 Phase 5). PickedObject returns an `Object`
+    // Picking & line of sight. PickedObject returns an `Object`
     // handle; PixelPick is a registered no-op stub (1- and 2-arg forms).
     CB_FN("objectpickable",        cb_rt_object_pickable),
     CB_FN("objectpick",            cb_rt_object_pick),
@@ -648,7 +647,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("objectsight",           cb_rt_object_sight),
     CB_FN("screenpositionobject",  cb_rt_screen_position_object),
 
-    // Particle emitters (FD-038). An emitter IS an `Object` (MakeEmitter returns
+    // Particle emitters. An emitter IS an `Object` (MakeEmitter returns
     // tag 13), so the object commands above drive it; the Particle* commands take
     // that `Object` and trap on a non-emitter. ParticleMovement's acceleration is
     // an optional arg (own arity overload).
@@ -658,7 +657,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("particleemission",      cb_rt_particle_emission),
     CB_FN("particleanimation",     cb_rt_particle_animation),
 
-    // Text & fonts (FD-018)
+    // Text & fonts
     CB_FN("text",             cb_rt_text),
     CB_FN("centertext",       cb_rt_center_text),
     CB_FN("verticaltext",     cb_rt_vertical_text),
@@ -698,7 +697,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("showmouse",        cb_rt_show_mouse),
     CB_FN("clearmouse",       cb_rt_clear_mouse),
 
-    // Sound (cb_sound.cpp, FD-041). PlaySound's polymorphic first arg is two
+    // Sound (cb_sound.cpp). PlaySound's polymorphic first arg is two
     // source-typed overloads (preloaded `Sound` vs filename `String`); each
     // documented optional arg (volume/balance/frequency) is an arity overload —
     // the moveobject/playobject pattern (the catalog has no default-arg
@@ -728,7 +727,7 @@ static const CbFuncDesc catalog_funcs[] = {
     CB_FN("createtesthandle", cb_rt_create_test_handle),
     CB_FN("usetesthandle",    cb_rt_use_test_handle),
 
-    // Trap-channel test functions (FD-015; test-only, see implementations)
+    // Trap-channel test functions (test-only, see implementations)
     CB_FN("testrequestexit",  cb_rt_test_request_exit),
     CB_FN("testraiseerror",   cb_rt_test_raise_error),
 };
@@ -744,7 +743,7 @@ static const CbCatalog catalog = {
     static_cast<uint32_t>(sizeof(catalog_consts) / sizeof(catalog_consts[0])),
     catalog_consts,
 #ifdef CB_METADATA_ONLY
-    nullptr,  // FD-045: metadata-only catalog carries no string API (the interp
+    nullptr,  // metadata-only catalog carries no string API (the interp
               // reads the full catalog for that). Keeps this object free of the
               // cb_runtime_string_api symbol — i.e. of cb_string.cpp.
 #else
@@ -753,7 +752,7 @@ static const CbCatalog catalog = {
 };
 
 #ifdef CB_METADATA_ONLY
-// FD-045: distinct entry-point symbol so the metadata-only object can link
+// distinct entry-point symbol so the metadata-only object can link
 // alongside the full runtime. The compiler (sema / a native backend) reads the
 // catalog through here without pulling in the executable runtime.
 extern "C" const CbCatalog* cb_runtime_get_catalog_meta(void) {

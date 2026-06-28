@@ -18,7 +18,7 @@
 // the primitives below, exposed via CbStringApi on the catalog. The struct
 // layout is private to this TU.
 //
-// FD-016: this is the CORE string implementation — the only TU in the
+// This is the CORE string implementation — the only TU in the
 // Allegro-free `cb_runtime_core` library. The CB-visible string LIBRARY
 // (Upper/Left/InStr/…) lives in the functionality TU cb_strfuncs.cpp, which
 // reaches these primitives through the public surface only.
@@ -96,10 +96,10 @@ const OomMsg k_oom = {
 
 // Single-block allocation: header + inline data. Refcount starts at 1;
 // caller is responsible for filling the data region. On allocation failure we
-// best-effort surface the condition through the FD-015 trap channel, then
+// best-effort surface the condition through the trap channel, then
 // abort. raise_error only RECORDS the intent and returns (cb_runtime_core.h),
 // so it cannot rescue an in-flight allocation that has no valid pointer to hand
-// back — std::abort() remains the hard stop (FD-022).
+// back — std::abort() remains the hard stop.
 static CbString* alloc_with_data(std::size_t len) {
     CbString* s = static_cast<CbString*>(std::malloc(sizeof(CbString) + len));
     if (!s) {
@@ -189,8 +189,8 @@ extern "C" int32_t cb_rt_string_test_refcount(const CbString* s) {
 // Lexicographic comparison over the raw UTF-8 bytes: `memcmp` across the shared
 // prefix, then a length tiebreak. This is exactly Rust's slice `Ord` over the
 // byte slices (`a.as_bytes() < b.as_bytes()`), so it is the single ordering
-// oracle shared by the interpreter's string relations and the native backend
-// (FD-049 decision C). `memcmp` compares unsigned bytes, matching Rust's `u8`
+// oracle shared by the interpreter's string relations and the native backend.
+// `memcmp` compares unsigned bytes, matching Rust's `u8`
 // ordering. Null operands are treated as empty (len 0) via the len/data helpers.
 // Returns <0 / 0 / >0 (normalized to -1/0/1).
 extern "C" int32_t cb_rt_string_compare(const CbString* a, const CbString* b) {

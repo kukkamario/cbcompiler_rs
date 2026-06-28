@@ -1,4 +1,4 @@
-// FD-022: ImagesCollide true/false coverage, headless. MakeImage clears to
+// ImagesCollide true/false coverage, headless. MakeImage clears to
 // opaque black, so every pixel is solid (non-zero alpha) and placement alone
 // decides the pixel-precise result. Memory bitmaps make this CI-safe.
 Dim a As Image

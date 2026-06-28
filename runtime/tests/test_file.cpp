@@ -1,4 +1,4 @@
-// FD-040: unit tests for the file-I/O runtime (cb_file.cpp). These drive the
+// Unit tests for the file-I/O runtime (cb_file.cpp). These drive the
 // extern "C" cb_rt_* entry points directly (like test_memblock.cpp), so the
 // target links cb_runtime. No display / Allegro is touched; the tests work
 // against real files in a per-test temp directory.
@@ -55,7 +55,7 @@ protected:
         std::error_code ec;
         orig_cwd = std::filesystem::current_path(ec);
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        dir = std::filesystem::temp_directory_path(ec) / (std::string("cb_fd040_") + info->name());
+        dir = std::filesystem::temp_directory_path(ec) / (std::string("cb_file_test_") + info->name());
         std::filesystem::remove_all(dir, ec);
         std::filesystem::create_directories(dir, ec);
     }

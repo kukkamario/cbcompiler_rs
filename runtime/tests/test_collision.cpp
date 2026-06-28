@@ -1,4 +1,4 @@
-// FD-036 Phase 5: unit tests for the pure collision + picking geometry in
+// Unit tests for the pure collision + picking geometry in
 // cb_collision_data.h. No display / Allegro needed — the header is self-contained
 // (mirrors test_object.cpp / test_map.cpp / test_camera.cpp). These pin the
 // overlap predicates, the contact-angle formula `((rad+π)/π)*180`, and the box/

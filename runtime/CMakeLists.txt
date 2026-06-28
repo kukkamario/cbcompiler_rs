@@ -9,12 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Allegro CONFIG REQUIRED)
 
-# ─── Core library (FD-016) ───────────────────────────────────────────────
+# ─── Core library ────────────────────────────────────────────────────────
 # The irreducible, plugin-facing runtime: the opaque string type + its
 # primitives and the CbStringApi table. ZERO Allegro / functionality
 # dependency — this is what a plugin statically links to handle String
-# parameters. (FD-015 will add cb_host.cpp here for the trap-channel
-# handshake.)
+# parameters.
 add_library(cb_runtime_core STATIC
     cb_string.cpp
     cb_host.cpp
@@ -72,7 +71,7 @@ if(VCPKG_TARGET_TRIPLET MATCHES "static")
         list(APPEND CB_LINK_SEEDS shell32)
         # allegro_audio's WASAPI backend (openal-soft) boosts its mixer thread via
         # MMCSS — AvSetMmThreadCharacteristicsW / AvRevertMmThreadCharacteristics
-        # from avrt.lib (FD-041). Like shell32 and fmt below, the static openal
+        # from avrt.lib. Like shell32 and fmt below, the static openal
         # references it but the vcpkg port doesn't surface it to the transitive
         # walk (openal is recorded as an absolute path), so add it explicitly.
         list(APPEND CB_LINK_SEEDS avrt)
@@ -92,7 +91,7 @@ endif()
 
 target_link_libraries(cb_runtime PRIVATE ${CB_LINK_SEEDS})
 
-# ─── Font resolution backend (FD-022) ────────────────────────────────────
+# ─── Font resolution backend ─────────────────────────────────────────────
 # On non-Windows, cb_font.cpp resolves system font families through fontconfig,
 # but only when FONTCONFIG_FOUND is defined — otherwise the carefully-ported
 # branch compiles out and LoadFont("Arial") silently falls back to Allegro's
@@ -155,7 +154,7 @@ file(GENERATE
     CONTENT "${_cb_link_content}"
 )
 
-# ─── Native C++ unit tests (FD-022) ──────────────────────────────────────
+# ─── Native C++ unit tests ───────────────────────────────────────────────
 # OFF by default so the normal cargo build (build.rs runs `cmake --build .`)
 # never configures GoogleTest or builds this target. To run the tests:
 #

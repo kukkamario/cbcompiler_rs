@@ -1,4 +1,4 @@
-// FD-004 #5: `Next` accepts sigilled idents and validates the sigil
+// `Next` accepts sigilled idents and validates the sigil
 // against the loop variable.
 
 // Both sigilled and matching — no diagnostic.

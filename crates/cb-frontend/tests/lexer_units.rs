@@ -167,7 +167,7 @@ mod ident {
     #[test]
     fn bang_is_reserved_not_a_sigil() {
         // `!` was formerly the Bool sigil; it is now a reserved symbol with no
-        // meaning (FD-035). `x!` lexes as the bare identifier `x` (no sigil)
+        // meaning. `x!` lexes as the bare identifier `x` (no sigil)
         // followed by an error token for the stray `!`.
         let (toks, diags) = lex_with_diags("x!");
         assert_eq!(toks[0].kind, TokenKind::Ident { sigil: None });
@@ -235,7 +235,7 @@ mod keywords {
 
     #[test]
     fn int_and_integer_preserve_spelling() {
-        // FD-004 #3: `Int`/`Integer` are aliases but lex to distinct keyword
+        // `Int`/`Integer` are aliases but lex to distinct keyword
         // variants so diagnostics can render the user's spelling. Downstream
         // code (parser, sema) treats them as equivalent.
         let int_toks = lex("Int");
@@ -252,7 +252,7 @@ mod keywords {
 
     #[test]
     fn uint_and_uinteger_preserve_spelling() {
-        // FD-004 #3: see int_and_integer_preserve_spelling.
+        // See int_and_integer_preserve_spelling.
         let uint_toks = lex("UInt");
         let uinteger_toks = lex("UInteger");
         assert_eq!(
@@ -385,7 +385,7 @@ mod keywords {
 
     #[test]
     fn delete_is_keyword_case_insensitive() {
-        // FD-005: pre-FD-005, `Delete` lexed as `Ident` and the parser
+        // Previously `Delete` lexed as `Ident` and the parser
         // misread `Delete x` as a paren-less call. Pin the keyword status
         // across the three canonical case variants.
         for src in ["delete", "Delete", "DELETE"] {
@@ -567,7 +567,7 @@ mod strings {
 
     #[test]
     fn escaped_string_has_backslash() {
-        // FD-051: the escape-aware kind is selected by the `$"` opener, not by
+        // The escape-aware kind is selected by the `$"` opener, not by
         // content. The lexer just classifies; it doesn't unescape.
         let toks = lex("$\"a\\nb\"");
         assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Escaped));
@@ -575,7 +575,7 @@ mod strings {
 
     #[test]
     fn plain_string_with_backslash_is_verbatim() {
-        // FD-051: a backslash inside `"..."` is an ordinary character — the
+        // A backslash inside `"..."` is an ordinary character — the
         // literal stays `Plain`.
         let toks = lex("\"a\\nb\"");
         assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Plain));
@@ -583,7 +583,7 @@ mod strings {
 
     #[test]
     fn plain_string_with_windows_path_is_verbatim() {
-        // FD-051 motivating case: `"C:\new"` must not turn `\n` into a newline;
+        // `"C:\new"` must not turn `\n` into a newline;
         // it lexes as a single verbatim `Plain` literal.
         let toks = lex("\"C:\\new\"");
         assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Plain));
@@ -594,7 +594,7 @@ mod strings {
 
     #[test]
     fn dollar_quote_starts_escaped_string() {
-        // FD-051 disambiguation: only `$"` starts an escaped string. The leading
+        // Only `$"` starts an escaped string. The leading
         // `$` is consumed as part of the literal, not as a hex prefix.
         let toks = lex("$\"hi\"");
         assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Escaped));
@@ -604,7 +604,7 @@ mod strings {
 
     #[test]
     fn dollar_digit_still_lexes_hex() {
-        // FD-051 disambiguation: `$ff` is still a hexadecimal literal — only a
+        // `$ff` is still a hexadecimal literal — only a
         // `$` immediately followed by `"` opens an escaped string.
         let toks = lex("$ff");
         assert_eq!(toks[0].kind, TokenKind::IntLit(0xff));
@@ -612,7 +612,7 @@ mod strings {
 
     #[test]
     fn trailing_dollar_sigil_is_still_an_ident() {
-        // FD-051 disambiguation: a `$` consumed as a trailing sigil keeps the
+        // A `$` consumed as a trailing sigil keeps the
         // identifier intact — `name$` is an ident with the String sigil.
         let toks = lex("name$");
         assert_eq!(
@@ -685,7 +685,7 @@ mod comments {
 
     #[test]
     fn tick_comment_trivia() {
-        // FD-028: `'` starts a line comment (classic BASIC / CoolBasic style).
+        // `'` starts a line comment (classic BASIC / CoolBasic style).
         let toks = lex_trivia("' to end of line\nfoo");
         assert_eq!(
             kinds(&toks),
@@ -804,13 +804,13 @@ mod operators {
         expect_kinds("-", &[TokenKind::Op(Op::Minus)]);
         expect_kinds("*", &[TokenKind::Op(Op::Star)]);
         expect_kinds("/", &[TokenKind::Op(Op::Slash)]);
-        // FD-028: `^` is exponentiation (replacing `**`).
+        // `^` is exponentiation (replacing `**`).
         expect_kinds("^", &[TokenKind::Op(Op::Caret)]);
     }
 
     #[test]
     fn double_star_is_two_stars() {
-        // FD-028: `**` is no longer a single exponent token; the exponent
+        // `**` is no longer a single exponent token; the exponent
         // operator is `^`. `**` now lexes as two separate `*` tokens.
         expect_kinds("**", &[TokenKind::Op(Op::Star), TokenKind::Op(Op::Star)]);
     }
@@ -840,7 +840,7 @@ mod operators {
     #[test]
     fn lone_backslash_in_expression_context() {
         // `a \ b` — the `\` is not followed by a line terminator, so it lexes as
-        // Op::BackSlash (the `Type` field accessor, FD-028), not a continuation.
+        // Op::BackSlash (the `Type` field accessor), not a continuation.
         let toks = lex("a \\ b");
         assert_eq!(
             kinds(&toks),
@@ -1251,7 +1251,7 @@ mod errors {
     fn distinct_messages_for_newline_in_string_variants() {
         // Plain newline inside `"..."` and `\` immediately before newline inside
         // `$"..."` should produce different diagnostic messages, even though
-        // both use code E0101 / NewlineInString. FD-051: the backslash-before-
+        // both use code E0101 / NewlineInString. The backslash-before-
         // newline path only exists in the escape-aware `$"..."` form (in a
         // verbatim `"..."` the `\` is an ordinary character).
         let (_, diags_plain) = lex_with_diags("\"hello\nworld\"");

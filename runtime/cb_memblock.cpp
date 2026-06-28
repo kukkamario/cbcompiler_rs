@@ -1,9 +1,9 @@
-// CoolBasic memory-block runtime (FD-039).
+// CoolBasic memory-block runtime.
 //
 // Raw, manually-managed byte buffers for byte-level data manipulation. The
 // CB-visible `Memblock` type is the opaque CbMemblock* handle (tag 15):
 // MakeMEMBlock returns it, DeleteMEMBlock frees it. Allegro-free, so this TU
-// is part of the SDK-free catalog (FD-033) and runs headless in CI.
+// is part of the SDK-free catalog and runs headless in CI.
 //
 // Two deliberate divergences from classic CoolBasic, both for safety and
 // portability:
@@ -12,7 +12,7 @@
 //     off the end of the buffer on a bad offset (undefined behaviour, silent
 //     memory corruption). Every access here validates the handle and the
 //     offset+width against the block size and, on failure, raises a runtime
-//     error through the FD-015 host channel (cb_host()->raise_error) and
+//     error through the host channel (cb_host()->raise_error) and
 //     returns a safe default. A negative MakeMEMBlock/ResizeMEMBlock size and
 //     a bad MemCopy range trap the same way.
 //
@@ -43,7 +43,7 @@ struct CbMemblock {
 
 namespace {
 
-// Raise an FD-015 runtime error with `msg`, if a host is connected. The host
+// Raise a runtime error with `msg`, if a host is connected. The host
 // callback copies the message synchronously and returns (it never unwinds),
 // so the freshly-made CbString is released right after. With no host (e.g. the
 // native gtest target) this is a no-op and the caller falls through to its

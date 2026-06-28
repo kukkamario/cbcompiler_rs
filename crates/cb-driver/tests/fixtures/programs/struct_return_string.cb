@@ -1,4 +1,4 @@
-' Returning a value-struct that carries a String field (FD-049 review F4). The
+' Returning a value-struct that carries a String field. The
 ' owned-model makes the returned aggregate own +1 per String sub-field, so the
 ' caller's binding stays valid after the callee frame is torn down (no UAF).
 

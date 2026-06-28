@@ -34,7 +34,7 @@ fn sema_diags(src: &str) -> Vec<cb_diagnostics::Diagnostic> {
     sema.diagnostics
 }
 
-/// FD-019: assigning to a non-variable-rooted lvalue (e.g. a function-call
+/// Assigning to a non-variable-rooted lvalue (e.g. a function-call
 /// result's field) is rejected, not silently dropped by lowering.
 #[test]
 fn invalid_assign_target_call_field() {
@@ -105,7 +105,7 @@ fn nested_for_loops() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-020: descending integer loop — direction-test constants are integer-typed
+// Descending integer loop — direction-test constants are integer-typed
 // and the negative step drives the `>=` (descending) branch.
 #[test]
 fn for_loop_descending() {
@@ -113,7 +113,7 @@ fn for_loop_descending() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-020: float loop — default/zero direction constants and all compare/step
+// Float loop — default/zero direction constants and all compare/step
 // operands are Float, matching the loop variable (no Int/Float operand mismatch).
 #[test]
 fn for_loop_float_step() {
@@ -121,7 +121,7 @@ fn for_loop_float_step() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-020: mixed loop — `To 10.5` (Float) is coerced to the Int loop variable,
+// Mixed loop — `To 10.5` (Float) is coerced to the Int loop variable,
 // so the lowered `to` register is Int (a narrowing E0318 warning also fires).
 #[test]
 fn for_loop_mixed_narrowing() {
@@ -218,7 +218,7 @@ fn runtime_function_call() {
 }
 
 // Regression: a bare (no-paren, no-arg) call to an *overloaded* command must
-// lower to a 0-arg call. `DrawScreen` gained a 2-arg overload (FD-017), turning
+// lower to a 0-arg call. `DrawScreen` gained a 2-arg overload, turning
 // it into an OverloadSet; lowering previously only handled Function/RuntimeFn
 // for bare statements, so `DrawScreen` was silently dropped — the window never
 // flipped or pumped events (black, unclosable). See lower.rs ExprStmt handling.
@@ -263,7 +263,7 @@ fn bare_overloaded_command_lowers_to_call() {
     );
 }
 
-// FD-030: loops, Break and Continue. Continue's target differs per loop kind
+// Loops, Break and Continue. Continue's target differs per loop kind
 // (Forever → body, Repeat-While/Repeat-Until/While → condition, For → step
 // block), so each kind gets its own snapshot.
 
@@ -316,7 +316,7 @@ fn break_count_exits_nested_loops() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: For Each desugaring — index+Len walk for arrays, First/Next walk for
+// For Each desugaring — index+Len walk for arrays, First/Next walk for
 // Type linked lists.
 
 #[test]
@@ -335,7 +335,7 @@ fn for_each_type() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: arrays — allocation, element store/load, Len with a dimension
+// Arrays — allocation, element store/load, Len with a dimension
 // argument, and Redim in both local and global form.
 
 #[test]
@@ -352,7 +352,7 @@ fn array_multidim_and_len_dim() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-032: a bare function name in value position takes the function's address
+// A bare function name in value position takes the function's address
 // (cb_syntax.md §7.4), lowering to `func_addr <name>` — the sole producer of a
 // non-null function pointer, consumed by `call_indirect`.
 #[test]
@@ -372,7 +372,7 @@ fn redim_local_and_global() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: value structs — the FD-019 StorePlace projection paths.
+// Value structs — the StorePlace projection paths.
 
 #[test]
 fn struct_field_write_read() {
@@ -404,7 +404,7 @@ fn struct_copy_assignment() {
 }
 
 // Mixed [Index, Field] projection chain — `arr[1].x = 42` must be a single
-// store_place addressing the owning local (FD-019 regression surface).
+// store_place addressing the owning local (regression surface).
 #[test]
 fn array_of_structs_element_field() {
     let ir = lower_src(
@@ -414,7 +414,7 @@ fn array_of_structs_element_field() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: Type (heap) instances — New, field access, list intrinsics, Delete.
+// Type (heap) instances — New, field access, list intrinsics, Delete.
 
 #[test]
 fn type_new_and_field_assign() {
@@ -447,7 +447,7 @@ fn type_delete_lvalue_rvalue_global() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: string comparisons lower to the str_* ops and Len(String) to
+// String comparisons lower to the str_* ops and Len(String) to
 // str_len, not their numeric/array counterparts.
 #[test]
 fn string_compare_and_strlen() {
@@ -466,7 +466,7 @@ fn short_circuit_or() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-030: Continue inside Select is explicit fall-through (§6.2) — the arm
+// Continue inside Select is explicit fall-through (§6.2) — the arm
 // body jumps straight into the *next* arm's body, skipping its test.
 #[test]
 fn select_continue_fallthrough() {
@@ -476,7 +476,7 @@ fn select_continue_fallthrough() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-034: an array of value structs must carry `StructVal(p)` elements
+// An array of value structs must carry `StructVal(p)` elements
 // consistently (the declared array type is refined recursively, not just at the
 // top level), so For Each over it types the loop variable as the struct value
 // — not a heap `TypeRef`. The element is read via get_element_flat and its
@@ -491,7 +491,7 @@ fn for_each_struct_array() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-034: For Each over a rank ≥ 2 array walks every element in row-major order
+// For Each over a rank ≥ 2 array walks every element in row-major order
 // (§6.3), not just dimension 0 — the bound is `array_total_len` and elements are
 // read with a single flat `get_element_flat` index. Previously this emitted an
 // axis-0 `len` plus a single-index `get_element`, which trapped at runtime.
@@ -504,7 +504,7 @@ fn for_each_multidim_array() {
     insta::assert_snapshot!(ir);
 }
 
-// FD-034: `Delete <field>` and `Delete <index>` are rvalue deletes (§3.3): the
+// `Delete <field>` and `Delete <index>` are rvalue deletes (§3.3): the
 // node is freed with no slot rewind, exactly like `Delete First(T)`. They must
 // emit `delete_rvalue` over the loaded reference — previously they were
 // classified lvalue and the lowerer dropped them silently (no IR at all).

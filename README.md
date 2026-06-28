@@ -78,7 +78,7 @@ CB_RUNTIME_FORCE_SDK_FREE=1 cargo test --workspace
 ```
 
 For the design and internals, see
-[`docs/cb_runtime.md`](docs/cb_runtime.md#sdk-free-build-fd-033).
+[`docs/cb_runtime.md`](docs/cb_runtime.md#sdk-free-build).
 
 ---
 

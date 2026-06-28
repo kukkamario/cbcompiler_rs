@@ -4,8 +4,8 @@
 //! select a backend from the features compiled in (and the `--backend` flag),
 //! run the pipeline, and hand the lowered IR to the chosen backend. The
 //! frontend pipeline and the exit-code contract live in the `cb_driver` library
-//! so a future second binary can reuse them (FD-044). Selecting the LLVM backend
-//! reports "not yet implemented" (exit 3) until codegen lands (FD-025).
+//! so a future second binary can reuse them. Selecting the LLVM backend
+//! reports "not yet implemented" (exit 3) until codegen lands.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -85,12 +85,12 @@ fn default_backend() -> Option<Backend> {
     }
 }
 
-/// Instantiate the selected backend as a `Box<dyn Backend>` (FD-044). The
+/// Instantiate the selected backend as a `Box<dyn Backend>`. The
 /// single feature-gated dispatch point: the run site below calls
 /// `backend.execute(...)` with no backend-specific `match`. In a no-backend
 /// build `Backend` is uninhabited, so the body is an empty (diverging) match.
 ///
-/// `source`/`output` are injected here (FD-048 decision 3): the AOT (llvm)
+/// `source`/`output` are injected here: the AOT (llvm)
 /// backend needs the artifact path, which the `Backend::execute` signature does
 /// not carry. The interpreter ignores them.
 fn make_backend(
@@ -168,10 +168,10 @@ fn main() -> ExitCode {
         Compilation::Finished { exit_code } => return ExitCode::from(exit_code),
     };
 
-    // Backend-agnostic dispatch (FD-044): the backend either ran the program —
+    // Backend-agnostic dispatch: the backend either ran the program —
     // returning its own exit code, which we clamp to an OS code — or produced an
     // artifact. On `Err`, the `kind` selects the exit code, keeping all OS-exit
-    // policy here in the driver (FD-025): `Unimplemented` (e.g. the llvm stub)
+    // policy here in the driver: `Unimplemented` (e.g. the llvm stub)
     // → 3, any other failure (an interpreter trap / internal error) → 1.
     match backend {
         Some(backend) => match backend.execute(&ir_program, &interner) {

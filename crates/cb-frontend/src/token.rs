@@ -1,11 +1,11 @@
 //! Token types produced by the lexer.
 //!
-//! Design notes (see FD-001 and `docs/cb_syntax.md`):
+//! Design notes (see `docs/cb_syntax.md`):
 //! - A trailing type sigil (`%`, `#`, `$`) is folded into the `Ident`
 //!   token via [`TokenKind::Ident`]'s `sigil` field, not emitted as a
 //!   separate token. The sigil's byte is included in [`Token::span`].
 //!   (`!` was formerly the `Bool` sigil; it is now a reserved symbol with no
-//!   meaning — see FD-035 and `docs/cb_syntax.md` §1.4.)
+//!   meaning — see `docs/cb_syntax.md` §1.4.)
 //! - Comments cover `//` and `REM` (line) and `/* … */` (block, nested).
 //! - Keyword operators (`And`, `Or`, `Mod`, `Shl`, …) lex as
 //!   [`TokenKind::Keyword`], not [`TokenKind::Op`]; the parser handles their
@@ -297,7 +297,7 @@ pub enum Punct {
     Dot,
 }
 
-/// String-literal flavour, chosen by **delimiter form** (FD-051). Drives the
+/// String-literal flavour, chosen by **delimiter form**. Drives the
 /// unescape / value-extraction step downstream of the lexer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StrLitKind {

@@ -1,8 +1,8 @@
-// FD-036 Phase 5a: object collision — ObjectsOverlap one-shot tests, the
+// Object collision — ObjectsOverlap one-shot tests, the
 // collision query surface, and SetupCollision registration smoke. Headless-safe:
 // asserts deterministic STATE with no display (MakeObject/MakeMap/ObjectsOverlap
 // touch no bitmap). The PERSISTENT SetupCollision path (re-tested each update
-// tick) is driven end-to-end by the Phase-5c game-loop fixture once UpdateGame
+// tick) is driven end-to-end by the game-loop fixture once UpdateGame
 // exists; the resolution geometry is unit-tested in runtime/tests/test_collision.cpp.
 
 Dim a As Object
@@ -55,4 +55,4 @@ Print "setup_map_smoke_ok"
 ResetObjectCollision(a)
 Print "reset_smoke_ok"
 
-Print "fd036_collision_done"
+Print "collision_done"

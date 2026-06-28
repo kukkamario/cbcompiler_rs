@@ -1,4 +1,4 @@
-//! Object-file emission for the AOT pipeline (FD-048, FD-049).
+//! Object-file emission for the AOT pipeline.
 //!
 //! The target/object-write back-half: given a finished `inkwell` module, select
 //! the host `TargetMachine` and write a native object file. The module contents

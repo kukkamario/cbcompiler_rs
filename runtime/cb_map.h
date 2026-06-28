@@ -1,7 +1,7 @@
 #ifndef CB_MAP_H
 #define CB_MAP_H
 
-// Internal tilemap glue (FD-036 Phase 3/4). NOT catalog ABI and NOT a CB-visible
+// Internal tilemap glue. NOT catalog ABI and NOT a CB-visible
 // function. cb_map.cpp owns the single active tilemap; the object render
 // orchestrator in cb_object.cpp brackets the world transform and calls
 // cb::map::render_layer() for the two drawn layers, so the map composites in the

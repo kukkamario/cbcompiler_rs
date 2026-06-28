@@ -1,20 +1,20 @@
-// CoolBasic native-array runtime (FD-049 Phase 2).
+// CoolBasic native-array runtime.
 //
 // C-ABI heap helpers that ONLY the LLVM/AOT backend calls; the interpreter
 // keeps its Rust ArrayObj heap (preserving its observability). The two backends
 // share a SPECIFICATION — the interpreter is the differential-test oracle — not
 // code. See cb_array.h for the contract.
 //
-// CORE TU (FD-016): Allegro-free, includes only cb_runtime_core.h (via
+// CORE TU: Allegro-free, includes only cb_runtime_core.h (via
 // cb_array.h), part of cb_runtime_core. The trap pattern mirrors
 // cb_memblock.cpp: trap() is a no-op when no host is connected (the gtest
 // path), and in an AOT exe the default host's raise_error writes stderr and
 // exits 1 (cb_standalone.cpp), so neg-dim / OOB / rank-mismatch / null-handle
 // faults all collapse to one exit-1 path.
 //
-// Arrays are conservatively LEAKED in this phase (no free / refcount), exactly
-// like Phase-1 string temps; Redim replaces a slot's handle and the old array
-// leaks. Array deletion is a later phase.
+// Arrays are conservatively LEAKED (no free / refcount), like string temps;
+// Redim replaces a slot's handle and the old array leaks. Array deletion is
+// not yet implemented.
 
 #include "cb_array.h"
 
@@ -24,7 +24,7 @@
 
 namespace {
 
-// Raise an FD-015 runtime error with `msg`, if a host is connected. The host
+// Raise a runtime error with `msg`, if a host is connected. The host
 // callback records the intent and returns (it never unwinds), so the freshly
 // made CbString is released right after. With no host (the native gtest target)
 // this is a no-op and the caller falls through to its safe default — never UB.

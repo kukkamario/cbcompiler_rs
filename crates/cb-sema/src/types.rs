@@ -101,7 +101,7 @@ pub fn kw_to_type(kw: Kw) -> Option<Type> {
     }
 }
 
-/// Whether a keyword is a reserved-but-unsupported type name (FD-035). These
+/// Whether a keyword is a reserved-but-unsupported type name. These
 /// parse as type atoms (`is_primitive_type_kw`) but resolve to no type; sema
 /// rejects them with a clear diagnostic instead of a generic parse error.
 pub fn is_reserved_type_kw(kw: Kw) -> bool {
@@ -205,7 +205,7 @@ pub fn resolve_return_type(return_sigil: Option<Sigil>, return_ty: Option<&Type>
     }
 }
 
-/// Apply CoolBasic's storage-widening rule (FD-035 / cb_syntax.md §3.4):
+/// Apply CoolBasic's storage-widening rule (cb_syntax.md §3.4):
 /// `Byte`/`Short` are storage-only and never compute in their own width, so
 /// they widen to `Int`; every other type is returned unchanged. Used wherever
 /// an arithmetic/bitwise/shift result must be promoted out of a narrow width.
@@ -218,7 +218,7 @@ pub(crate) fn widen_storage(t: &Type) -> Type {
 
 /// Numeric promotion for a binary operation: return the wider of the two
 /// types, floored at `Int` for integers. `Byte`/`Short` are storage-only and
-/// widen to `Int` for all arithmetic (FD-035 / cb_syntax.md §3.4); `Float`
+/// widen to `Int` for all arithmetic (cb_syntax.md §3.4); `Float`
 /// beats every integer.
 pub fn numeric_promote(a: &Type, b: &Type) -> Type {
     fn rank(t: &Type) -> u8 {
@@ -276,7 +276,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
         }
         // Shifts dispatch on the (widened) LHS: Byte/Short shift in Int width.
         // The count may be any integer; check_binary does not coerce shift
-        // operands, so the interpreter widens the LHS (FD-035).
+        // operands, so the interpreter widens the LHS.
         BinOp::Shl | BinOp::Shr | BinOp::Sar => {
             if lhs.is_integer() && rhs.is_integer() {
                 Some(widen_storage(lhs))
@@ -285,7 +285,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
             }
         }
 
-        // Equality — result is Int (1/0); there is no Bool type (FD-035)
+        // Equality — result is Int (1/0); there is no Bool type
         BinOp::Eq | BinOp::NotEq => {
             // `RuntimeType` is excluded from `is_reference()` (no ordering, see
             // its doc), so equality against opaque handles is spelled out here:
@@ -323,7 +323,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
             }
         }
 
-        // Logical — operands tested as `<> 0`, result is Int 1/0 (FD-035).
+        // Logical — operands tested as `<> 0`, result is Int 1/0.
         // Numeric-only: CB has no truthiness for strings or references — only
         // numerics can be tested against 0 (§1.7).
         BinOp::And | BinOp::Or | BinOp::Xor => {
@@ -339,7 +339,7 @@ pub fn binary_result_type(op: BinOp, lhs: &Type, rhs: &Type) -> Option<Type> {
 /// Determine the result type of a unary operation.
 pub fn unary_result_type(op: UnOp, operand: &Type) -> Option<Type> {
     // Byte/Short widen to Int for unary arithmetic/bitwise, mirroring binary
-    // promotion (FD-035): e.g. negating a Byte yields a signed Int.
+    // promotion: e.g. negating a Byte yields a signed Int.
     match op {
         UnOp::Plus | UnOp::Neg => {
             if operand.is_numeric() {
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn numeric_promote_narrow_floors_at_int() {
-        // Byte/Short are storage-only: arithmetic widens to Int (FD-035).
+        // Byte/Short are storage-only: arithmetic widens to Int.
         assert_eq!(numeric_promote(&Type::Byte, &Type::Byte), Type::Int);
         assert_eq!(numeric_promote(&Type::Short, &Type::Short), Type::Int);
         assert_eq!(numeric_promote(&Type::Byte, &Type::Short), Type::Int);
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn binary_div_promotes_int_vs_float() {
-        // FD-028: `/` is integer division when both operands are integers, and
+        // `/` is integer division when both operands are integers, and
         // floating-point division when either operand is a Float (which
         // promotes both). There is no separate `\` integer-division operator.
         assert_eq!(
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn binary_comparison_returns_int() {
-        // Comparisons yield Int 1/0 — there is no Bool type (FD-035).
+        // Comparisons yield Int 1/0 — there is no Bool type.
         assert_eq!(
             binary_result_type(BinOp::Eq, &Type::Int, &Type::Int),
             Some(Type::Int)
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn binary_logical() {
-        // Logical ops take numeric operands and yield Int 1/0 (FD-035).
+        // Logical ops take numeric operands and yield Int 1/0.
         assert_eq!(
             binary_result_type(BinOp::And, &Type::Int, &Type::Int),
             Some(Type::Int)
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn binary_shift_widens_narrow_lhs() {
-        // Byte/Short shift in Int width; Int/Long keep their width (FD-035).
+        // Byte/Short shift in Int width; Int/Long keep their width.
         assert_eq!(
             binary_result_type(BinOp::Shl, &Type::Byte, &Type::Int),
             Some(Type::Int)
@@ -544,7 +544,7 @@ mod tests {
             Some(Type::Float)
         );
         assert!(unary_result_type(UnOp::Neg, &Type::String).is_none());
-        // Byte/Short widen to Int for unary arithmetic/bitwise (FD-035).
+        // Byte/Short widen to Int for unary arithmetic/bitwise.
         assert_eq!(unary_result_type(UnOp::Neg, &Type::Byte), Some(Type::Int));
         assert_eq!(
             unary_result_type(UnOp::BinNot, &Type::Short),

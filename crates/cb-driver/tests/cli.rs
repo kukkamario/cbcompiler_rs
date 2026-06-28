@@ -119,7 +119,7 @@ fn sema_error_exits_one() {
 
 #[test]
 fn infer_from_null_exits_one_e0331() {
-    // FD-042: an implicit declaration cannot infer a type from `Null` — E0331.
+    // An implicit declaration cannot infer a type from `Null` — E0331.
     let dir = tempdir().unwrap();
     let path = write_cb(&dir, "infer_null.cb", "x = Null\n");
     Command::cargo_bin("cb")
@@ -248,7 +248,7 @@ fn end_statement_exits_zero() {
 #[cfg(feature = "interp")]
 #[test]
 fn runtime_request_exit_sets_exit_code() {
-    // FD-015 trap channel: a runtime function calling the host's
+    // Trap channel: a runtime function calling the host's
     // `request_exit(code)` terminates cleanly with that code (via the
     // Exit→Ok(code) path), and the statement after it must not run.
     let dir = tempdir().unwrap();
@@ -269,7 +269,7 @@ fn runtime_request_exit_sets_exit_code() {
 #[cfg(feature = "interp")]
 #[test]
 fn runtime_raise_error_writes_stderr_and_exits_one() {
-    // FD-015 trap channel: a runtime function calling the host's
+    // Trap channel: a runtime function calling the host's
     // `raise_error(msg)` aborts with exit 1, renders "runtime error: <msg>"
     // to stderr, and the statement after it must not run.
     let dir = tempdir().unwrap();
@@ -291,10 +291,10 @@ fn runtime_raise_error_writes_stderr_and_exits_one() {
 #[cfg(feature = "interp")]
 #[test]
 fn particle_command_on_non_emitter_traps() {
-    // FD-038: the Particle* commands are typed to take an Object, so the checker
+    // The Particle* commands are typed to take an Object, so the checker
     // can't distinguish a plain object from an emitter. A plain object reaching
-    // ParticleMovement traps via the FD-015 channel (classic CB blind-casts → UB;
-    // resolved OQ3: trap, not a silent no-op). Graphics-gated — MakeObject /
+    // ParticleMovement traps via the trap channel (classic CB blind-casts → UB;
+    // we trap rather than silently no-op). Graphics-gated — MakeObject /
     // ParticleMovement only exist in the full Allegro build.
     if !cb_runtime_sys::HAS_GRAPHICS {
         eprintln!("skipping: SDK-free runtime build has no graphics");
@@ -319,8 +319,8 @@ fn particle_command_on_non_emitter_traps() {
 #[cfg(feature = "interp")]
 #[test]
 fn memblock_out_of_bounds_traps() {
-    // FD-039: an out-of-range Peek/Poke traps via the FD-015 channel instead of
-    // corrupting memory (classic CB blind-casts → UB; resolved as: trap). A
+    // An out-of-range Peek/Poke traps via the trap channel instead of
+    // corrupting memory (classic CB blind-casts → UB; we trap). A
     // 4-byte block can't hold a 4-byte int at offset 2, so PokeInt aborts with
     // exit 1 and the statement after it does not run. Not graphics-gated —
     // memory blocks are Allegro-free and present in the SDK-free build too.
@@ -344,9 +344,9 @@ fn memblock_out_of_bounds_traps() {
 #[cfg(feature = "interp")]
 #[test]
 fn file_op_on_null_handle_traps() {
-    // FD-040: a read/write on a null (never-opened) File handle traps via the
-    // FD-015 channel — exit 1, and the statement after it does not run. Classic
-    // CB is permissive; we refuse (resolved as: trap). Allegro-free, so present
+    // A read/write on a null (never-opened) File handle traps via the
+    // trap channel — exit 1, and the statement after it does not run. Classic
+    // CB is permissive; we refuse. Allegro-free, so present
     // in the SDK-free build too.
     let dir = tempdir().unwrap();
     let path = write_cb(
@@ -368,9 +368,9 @@ fn file_op_on_null_handle_traps() {
 #[cfg(feature = "interp")]
 #[test]
 fn delete_sound_on_null_handle_traps_when_audio_available() {
-    // FD-041: DeleteSound on a null (never-loaded) `Sound` raises the FD-015 trap
-    // ("invalid sound handle", cbEnchanted's "Sound access violation") — exit 1,
-    // and "after" is not reached. But the FD deliberately SUPPRESSES that trap on
+    // DeleteSound on a null (never-loaded) `Sound` raises the trap
+    // ("invalid sound handle") — exit 1,
+    // and "after" is not reached. But we deliberately SUPPRESS that trap on
     // an audio-less host (LoadSound would have returned Null there through no fault
     // of the program), so on a silent box the op is a no-op and the program runs
     // to completion. Graphics-gated (the Sound funcs exist only in the full Allegro
@@ -416,8 +416,8 @@ fn delete_sound_on_null_handle_traps_when_audio_available() {
 #[cfg(feature = "interp")]
 #[test]
 fn copy_file_over_existing_traps() {
-    // FD-040: CopyFile refuses to overwrite an existing destination — it traps
-    // (resolved as: trap), matching classic CB's "operation fails". Runs in the
+    // CopyFile refuses to overwrite an existing destination — it traps,
+    // matching classic CB's "operation fails". Runs in the
     // temp dir so the relative files land there.
     let dir = tempdir().unwrap();
     let path = write_cb(
@@ -452,7 +452,7 @@ fn runtime_abs_overload_resolves() {
         .stdout(contains("call abs"));
 }
 
-// --- CLI parsing: help, version, and argument errors (FD-025) ---
+// --- CLI parsing: help, version, and argument errors ---
 
 #[test]
 fn help_flag_prints_usage_and_exits_zero() {
@@ -534,7 +534,7 @@ fn backend_empty_equals_rejected() {
         .stderr(contains("unknown backend"));
 }
 
-// --- Dump flags vs. the error gate (FD-025) ---
+// --- Dump flags vs. the error gate ---
 
 #[test]
 fn dump_ir_on_erroring_input_exits_one_with_empty_stdout() {
@@ -570,7 +570,7 @@ fn dump_ast_on_erroring_input_still_emits() {
         .stderr(contains("E0300"));
 }
 
-// --- Exit-code clamping (FD-025) ---
+// --- Exit-code clamping ---
 
 #[cfg(feature = "interp")]
 #[test]
@@ -612,12 +612,12 @@ fn request_exit_negative_clamps_to_zero() {
         .stdout(contains("after").not());
 }
 
-// --- Backend selection across feature builds (FD-025) ---
+// --- Backend selection across feature builds ---
 
 #[cfg(feature = "llvm")]
 #[test]
 fn backend_llvm_compiles_and_runs() {
-    // The llvm backend now lowers the IR (FD-049): it emits a native exe,
+    // The llvm backend now lowers the IR: it emits a native exe,
     // reports `cb: wrote …`, and exits 0. The produced exe runs and prints the
     // program's output. (The exhaustive interp==llvm parity check is the
     // `diff_llvm` suite; this is the CLI-contract smoke.)

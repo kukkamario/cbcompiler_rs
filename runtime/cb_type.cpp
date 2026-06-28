@@ -1,19 +1,19 @@
-// CoolBasic user-`Type` instance runtime (FD-049 Phase 3a).
+// CoolBasic user-`Type` instance runtime.
 //
 // C-ABI heap + linked-list helpers that ONLY the LLVM/AOT backend calls; the
 // interpreter keeps its Rust Slab/TypeList heap (preserving its observability).
 // The two backends share a SPECIFICATION — the interpreter is the
 // differential-test oracle — not code. See cb_type.h for the contract.
 //
-// CORE TU (FD-016): Allegro-free, includes only cb_runtime_core.h (via
+// CORE TU: Allegro-free, includes only cb_runtime_core.h (via
 // cb_type.h), part of cb_runtime_core. The trap pattern mirrors cb_array.cpp:
 // trap() is a no-op when no host is connected (the gtest path), and in an AOT
 // exe the default host's raise_error writes stderr and exits 1
 // (cb_standalone.cpp), so every fault collapses to one exit-1 path.
 //
-// Nodes are conservatively LEAKED (malloc, never freed), exactly like Phase-2
-// arrays and Phase-1 string temps; `Delete` only unlinks and sets a per-node
-// `deleted` flag (no generation slab). Single-threaded (the runtime contract).
+// Nodes are conservatively LEAKED (malloc, never freed), like arrays and string
+// temps; `Delete` only unlinks and sets a per-node `deleted` flag (no
+// generation slab). Single-threaded (the runtime contract).
 
 #include "cb_type.h"
 
@@ -38,7 +38,7 @@ struct CbTypeList {
 // Null for First/Last/Each) — the diff harness cannot tell them apart.
 std::vector<CbTypeList*> g_lists;
 
-// Raise an FD-015 runtime error with `msg`, if a host is connected. With no host
+// Raise a runtime error with `msg`, if a host is connected. With no host
 // (the native gtest target) this is a no-op and the caller falls through to its
 // safe default — never UB. Modeled on cb_array.cpp's trap().
 void trap(const char* msg) {

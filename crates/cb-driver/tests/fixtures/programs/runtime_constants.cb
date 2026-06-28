@@ -1,4 +1,4 @@
-// FD-029: runtime-defined constants. On/Off (Int), PI (Float), and the cbKey*
+// Runtime-defined constants. On/Off (Int), PI (Float), and the cbKey*
 // scancode family. Headless: KeyDown returns 0 with no window open, but the
 // constant still resolves to its scancode (asserted via arithmetic below).
 

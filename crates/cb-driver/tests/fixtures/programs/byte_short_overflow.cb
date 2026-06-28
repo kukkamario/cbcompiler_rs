@@ -1,4 +1,4 @@
-' Byte/Short arithmetic wraparound via computed values (FD-049 review F16).
+' Byte/Short arithmetic wraparound via computed values.
 ' Byte/Short are storage-only: they widen (unsigned) to Int for arithmetic and
 ' narrow back (truncate) only on a store to a Byte/Short slot. Literals out of
 ' range are a compile error, so overflow must come from computation.

@@ -1,4 +1,4 @@
-// CoolBasic tilemap runtime (FD-036 Phase 3).
+// CoolBasic tilemap runtime.
 //
 // One active tilemap (CoolBasic keeps a single tilemap): a tile grid
 // with four layers (0=background, 1=foreground, 2=collision, 3=data) plus a
@@ -57,7 +57,7 @@ namespace cb::map {
 namespace {
 
 // The single active tilemap. LoadMap/MakeMap free and
-// replace it. Process-global is safe: the VM is single-threaded (FD-036).
+// replace it. Process-global is safe: the VM is single-threaded.
 CbMap* active_map = nullptr;
 
 // Wall-clock time (al_get_time seconds) of the last tile-animation tick; -1 means
@@ -132,7 +132,7 @@ void draw_layer(int level) {
             int32_t tile = cb_map_get(d, level, gx, gy);
             if (tile <= 0) continue;
             // Animated tiles advance through consecutive tileset ids;
-            // currentFrame stays 0 until the Phase 5 game-loop update tick.
+            // currentFrame stays 0 until the game-loop update tick.
             int32_t draw_id = tile;
             if ((uint32_t)tile < d.currentFrame.size()) {
                 draw_id = tile + (int32_t)d.currentFrame[tile];
@@ -153,9 +153,8 @@ void set_tile_impl(int32_t tile, int32_t length, int32_t slowness) {
     CbMapData& d = active_map->data;
     if ((uint32_t)tile >= d.tileCount) {
         uint32_t new_count = (uint32_t)tile + 1;
-        // Grow the anim arrays, defaulting new slots correctly. (The reference's
-        // setTile has a realloc bug here: it writes the slowness default into
-        // the *old* freed array, leaving the new slots uninitialised — fixed.)
+        // Grow the anim arrays, defaulting new slots correctly: resize() seeds
+        // every new slot, so none are left uninitialised.
         d.animLength.resize(new_count, 0);
         d.animSlowness.resize(new_count, 1);
         d.currentFrame.resize(new_count, 0.0f);
@@ -170,7 +169,7 @@ void set_tile_impl(int32_t tile, int32_t length, int32_t slowness) {
 // ─── Creation / destruction ─────────────────────────────────────────────
 
 // LoadMap(mapPath, tilesetPath): parse the .til, load+mask the tileset, replace
-// any existing map. Returns Null on any failure (FD-018 null-opaque precedent).
+// any existing map. Returns Null on any failure (null-opaque precedent).
 extern "C" CbMap* cb_rt_load_map(const CbString* map_path, const CbString* tileset_path) {
     std::vector<uint8_t> bytes;
     if (!read_file(read_cb_string(map_path), bytes)) return nullptr;
@@ -279,11 +278,11 @@ extern "C" void cb_rt_paint_object_map(CbMap* map_ignored, const CbImage* img) {
     active_map->painted = true;
 }
 
-// ─── Render pass (glue for the Phase-4 object orchestrator; see cb_map.h) ─
+// ─── Render pass (glue for the object orchestrator; see cb_map.h) ─
 
 int active(void) { return active_map != nullptr ? 1 : 0; }
 
-// FD-036 Phase 5: expose the active map's parsed grid for object map-collision
+// Expose the active map's parsed grid for object map-collision
 // (type 4) and ObjectSight. Null when no map is loaded — callers guard it (a
 // safe no-op rather than a null-deref). The CbMapData carries the tile
 // dims, the layer-2 collision grid, and the map's world position/centring.
@@ -291,7 +290,7 @@ const CbMapData* active_data(void) {
     return active_map ? &active_map->data : nullptr;
 }
 
-// FD-036: advance animated map tiles, time-based (the CoolBasic formula).
+// Advance animated map tiles, time-based (the CoolBasic formula).
 // currentFrame += elapsedSeconds / (slowness * animSpeed), where the elapsed
 // time is the real wall-clock delta since the last tick (al_get_time) — so the
 // animation is frame-rate independent (with no FrameLimit the game loop runs
@@ -302,10 +301,9 @@ const CbMapData* active_data(void) {
 // `tile + (int)currentFrame[tile]`. Runs only while playing (animSpeed > 0, set
 // by PlayObject(Map)).
 //
-// (Supersedes an earlier "deterministic frame-step": it was frame-rate-dependent
-// and far too fast, and its wrap never advanced an animLength==1 tile. No headless
-// test exercises tile animation — every fixture asset has animLength==0 — so the
-// determinism it bought was moot.)
+// A per-tick step (rather than this delta-time one) would never advance an
+// animLength==1 tile. No headless test exercises tile animation — every fixture
+// asset has animLength==0.
 void tick_animation(void) {
     if (!active_map || active_map->animSpeed <= 0.0f) {
         map_anim_last_time = -1.0;  // stopped → re-seed the delta on resume

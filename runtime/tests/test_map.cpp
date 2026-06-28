@@ -1,4 +1,4 @@
-// FD-036 Phase 3: unit tests for the pure tilemap data + parser in cb_map_data.h.
+// Unit tests for the pure tilemap data + parser in cb_map_data.h.
 // No display / Allegro needed — the header is self-contained (mirrors
 // test_camera.cpp). These pin the .til binary format (magic bytes, the two
 // absolute seeks, the on-disk layer order 0/2/1/3, and the tileCount-vs-
@@ -234,7 +234,7 @@ TEST(MapCreate, EmptyGrid) {
     EXPECT_EQ(cb_map_get(m, 0, 3, 2), 9);
 }
 
-// FD-036: tile animation advance (cb_map_advance_frame). Regression for the
+// Tile animation advance (cb_map_advance_frame). Regression for the
 // animLength==1 case (a real cdm2.til tile): it is a 2-frame tile (tile, tile+1).
 // CoolBasic resets to 0 once (int)cur EXCEEDS animLength, so (int)cur ranges
 // 0..animLength. The earlier wrap kept cur in [0, animLength), so an animLength==1

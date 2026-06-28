@@ -1,4 +1,4 @@
-// FD-036: masking / alpha-blend pipeline tests. These pin the fix for masking
+// Masking / alpha-blend pipeline tests. These pin the fix for masking
 // having no visible effect: (1) the runtime now uses a source-over alpha blender
 // + alpha-capable bitmap format, so a keyed (alpha=0) pixel is transparent at
 // draw time instead of overwriting opaque; (2) MaskImage keeps a pristine copy

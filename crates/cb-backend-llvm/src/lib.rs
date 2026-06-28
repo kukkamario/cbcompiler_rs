@@ -1,13 +1,13 @@
 //! LLVM backend for CoolBasic IR.
 //!
 //! Under the `codegen` feature this drives the full AOT pipeline: lower the
-//! CoolBasic IR to an in-memory `inkwell` module (FD-049), emit a native object,
+//! CoolBasic IR to an in-memory `inkwell` module, emit a native object,
 //! and link it — against the CoolBasic runtime closure — into a runnable
-//! executable (FD-048). Phase 1 lowers the scalar core: user functions, control
+//! executable. It lowers the scalar core: user functions, control
 //! flow, runtime calls, strings, and `Print`; the produced exe's stdout + exit
 //! code match the interpreter (the reference oracle). Without `codegen`,
 //! [`Backend::execute`] still reports the gap (driver exit 3) so the driver
-//! dispatches through the shared trait (FD-044) ahead of codegen.
+//! dispatches through the shared trait ahead of codegen.
 
 use std::path::PathBuf;
 
@@ -23,8 +23,8 @@ mod emit;
 mod link;
 
 /// The LLVM / AOT backend. The `source`/`output` paths are injected at
-/// construction (FD-048 decision 3) because the IR carries no source path and
-/// the [`Backend::execute`] signature (FD-044) passes only `&Program` +
+/// construction because the IR carries no source path and
+/// the [`Backend::execute`] signature passes only `&Program` +
 /// `&Interner` — so codegen could not otherwise name the artifact. They are
 /// unused in the no-`codegen` stub build.
 pub struct LlvmBackend {
@@ -88,7 +88,7 @@ impl Backend for LlvmBackend {
     }
 
     /// Stub path: codegen is compiled out, so report the gap explicitly (driver
-    /// exit 3) rather than silently doing nothing (FD-025).
+    /// exit 3) rather than silently doing nothing.
     #[cfg(not(feature = "codegen"))]
     fn execute(
         &self,
@@ -102,7 +102,7 @@ impl Backend for LlvmBackend {
     }
 }
 
-// AOT smoke tests (FD-047 linkage check + FD-048 emit→link→run). Gated on
+// AOT smoke tests: a linkage check plus emit→link→run. Gated on
 // `codegen` so the default LLVM-free build has no dead code and needs no LLVM
 // install. The link test exercises whatever runtime cb-runtime-sys built — the
 // full Allegro closure locally, the SDK-free core on CI.
@@ -120,7 +120,7 @@ mod codegen_smoke {
     #[test]
     fn trivial_module_links_and_runs() {
         // A minimal `i32 main() { ret 0 }` built directly, then emit→link→run.
-        // Keeps the FD-048 object-emit + runtime-closure-resolution smoke green
+        // Keeps the object-emit + runtime-closure-resolution smoke green
         // independent of the IR→LLVM lowering (which the diff suite exercises).
         let ctx = inkwell::context::Context::create();
         let module = ctx.create_module("cb_smoke");
@@ -141,7 +141,7 @@ mod codegen_smoke {
 
         emit::write_module(&module, &obj).expect("emit object");
         // Whole-archive the runtime so the closure must actually resolve, not
-        // just parse as link args (FD-048 decision 2).
+        // just parse as link args.
         link::link(&obj, &exe, link::WholeArchive::Yes).expect("link runtime closure");
 
         let status = std::process::Command::new(&exe)

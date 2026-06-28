@@ -33,7 +33,7 @@ pub const E_LITERAL_OVERFLOW: DiagnosticCode = DiagnosticCode::new("E0326");
 pub const E_CONST_FLOAT_DIV_ZERO: DiagnosticCode = DiagnosticCode::new("E0327");
 /// A built-in runtime command name was used as a variable via an implicit
 /// assignment. Implicit declarations may not shadow commands; an explicit
-/// `Dim` is required (FD-027).
+/// `Dim` is required.
 pub const E_RUNTIME_COMMAND_AS_VAR: DiagnosticCode = DiagnosticCode::new("E0328");
 /// A bare overloaded or built-in command name was used in value position to
 /// take its address. Only non-overloaded user-defined functions/subs have a
@@ -41,8 +41,8 @@ pub const E_RUNTIME_COMMAND_AS_VAR: DiagnosticCode = DiagnosticCode::new("E0328"
 pub const E_ADDRESS_OF_UNSUPPORTED: DiagnosticCode = DiagnosticCode::new("E0329");
 /// A reserved-but-unsupported type name (`Bool`, `Boolean`, `UInt`,
 /// `UInteger`, `ULong`) was used in a type position. These names stay reserved
-/// (cb_syntax.md §1.5/§3.1) but denote no type since FD-035 narrowed the
-/// scalar set to Byte/Short/Int/Long/Float/String.
+/// (cb_syntax.md §1.5/§3.1) but denote no type since the scalar set was
+/// narrowed to Byte/Short/Int/Long/Float/String.
 pub const E_RESERVED_TYPE: DiagnosticCode = DiagnosticCode::new("E0330");
 /// An implicit declaration (a first assignment with no sigil and no `As`) could
 /// not infer a type from its value — the value is `Null` (no concrete reference

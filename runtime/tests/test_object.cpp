@@ -1,4 +1,4 @@
-// FD-036 Phase 4: unit tests for the pure object math in cb_object_data.h. No
+// Unit tests for the pure object math in cb_object_data.h. No
 // display / Allegro needed — the header is self-contained (mirrors
 // test_map.cpp / test_camera.cpp). These pin the GetAngle2/PointObject and
 // Distance2 formulas, the MoveObject heading, the animated-frame slice (with a
@@ -53,7 +53,7 @@ TEST(ObjectMove, HeadingDelta) {
 
 // Animated-frame slice on a multi-row, non-square sheet: texture 4px wide, 2x3
 // frames -> framesX = 2. Frames 2..5 (rows 1,2) lock the /framesX + *frameHeight
-// math; the cbimage.cpp Phase-1 bug (/framesY, *frameWidth) would mis-slice them.
+// math; a /framesY, *frameWidth slice would mis-slice them.
 TEST(ObjectFrame, MultiRowNonSquareSlice) {
     struct Case {
         int32_t frame, col, row, left, top;

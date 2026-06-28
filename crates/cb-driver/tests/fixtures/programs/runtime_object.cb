@@ -1,4 +1,4 @@
-// FD-036 Phase 4: sprite Objects. Headless-safe — asserts deterministic object
+// Sprite Objects. Headless-safe — asserts deterministic object
 // STATE (position, angle, slots, life, frame, size, enumeration count) with no
 // display. The on-screen render is exercised by the visual/manual smoke; the
 // pure object math is unit-tested in runtime/tests/test_object.cpp.
@@ -124,4 +124,4 @@ Print Str(count)                    // 3
 
 // ─── Render smoke: DrawScreen composites the object pass (no-op headless) ─
 DrawScreen
-Print "fd036_object_done"
+Print "object_done"

@@ -164,7 +164,7 @@ impl<'a> Checker<'a> {
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
         // Reject reserved-but-unsupported type names (Bool/Boolean/UInt/
-        // UInteger/ULong) with a clear diagnostic (FD-035). They parse as type
+        // UInteger/ULong) with a clear diagnostic. They parse as type
         // atoms, so we catch them here instead of as a generic parse error.
         if let Node::TypeExpr(cb_frontend::ast::TypeExpr::Primitive { kw }) = &self.arena[id]
             && types::is_reserved_type_kw(*kw)
@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
     /// would resolve to `Array { elem: TypeRef(p) }` while `New P[3]` produces
     /// `Array { elem: StructVal(p) }`, so checker decisions (field access,
     /// copy-vs-reference, For-Each element typing) ran on the wrong kind for
-    /// arrays of structs (FD-034).
+    /// arrays of structs.
     fn refine_type(&self, ty: Type) -> Type {
         match ty {
             Type::TypeRef { name } => {
@@ -276,7 +276,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Declare an explicit user variable that is allowed to *shadow* a runtime
-    /// command of the same name (FD-027).
+    /// command of the same name.
     ///
     /// If `name` is currently bound in `scope` to a runtime command
     /// (`RuntimeFn`/`OverloadSet`), the catalog entry is replaced so the name
@@ -313,7 +313,7 @@ impl<'a> Checker<'a> {
             cb_ir::types::IrType::Void => Type::Void,
             cb_ir::types::IrType::RuntimeType(name) => {
                 // Intern the catalog's original spelling. The interner folds
-                // case-insensitively (FD-026), so lowercasing is redundant for
+                // case-insensitively, so lowercasing is redundant for
                 // matching and would make diagnostics echo a lowercased name.
                 let sym = self.interner.intern(name);
                 Type::RuntimeType { name: sym }
@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
     ///
     /// Functions and constants are registered separately, AFTER pass 1, because
     /// their collision handling depends on user declarations landing first
-    /// (FD-027 user-function shadowing, FD-029 reserved-constant diagnostics).
+    /// (user-function shadowing, reserved-constant diagnostics).
     fn register_runtime_types(&mut self, catalog: &RuntimeCatalog) {
         let top = self.current_scope;
         let span = Span::new(0, 0, cb_diagnostics::source::FileId::SYNTHETIC);
@@ -422,7 +422,7 @@ impl<'a> Checker<'a> {
             let _ = self.symbols.declare(top, sym, decl);
         }
 
-        // Register runtime-defined constants (FD-029). These fold at compile
+        // Register runtime-defined constants. These fold at compile
         // time like a user `Const` (lower.rs inlines DeclKind::Constant) and,
         // being in the hoist list, are visible inside functions too. Unlike
         // runtime functions, a name collision with a user declaration is an
@@ -1841,10 +1841,10 @@ impl<'a> Checker<'a> {
                 match (op, val) {
                     (UnOp::Neg, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_neg())),
                     (UnOp::Neg, ConstValue::Float(v)) => Some(ConstValue::Float(-v)),
-                    // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`, FD-028).
+                    // Unary `+` is absolute value (CoolBasic `+x` ≡ `Abs(x)`).
                     (UnOp::Plus, ConstValue::Int(v)) => Some(ConstValue::Int(v.wrapping_abs())),
                     (UnOp::Plus, ConstValue::Float(v)) => Some(ConstValue::Float(v.abs())),
-                    // `Not` yields Int 1/0 (FD-035): non-zero → 0, 0 → 1.
+                    // `Not` yields Int 1/0: non-zero → 0, 0 → 1.
                     (UnOp::Not, ConstValue::Int(v)) => Some(ConstValue::Int((v == 0) as i64)),
                     _ => None,
                 }
@@ -1932,7 +1932,7 @@ impl<'a> Checker<'a> {
             if is_command {
                 // `name` resolves to a built-in command and the user never
                 // declared it. An implicit assignment may not shadow a command
-                // (FD-027) — tell them to declare it explicitly with `Dim`.
+                // — tell them to declare it explicitly with `Dim`.
                 let name_str = self.interner.resolve(name).to_owned();
                 self.diagnostics.push(Diagnostic::error(
                     E_RUNTIME_COMMAND_AS_VAR,
@@ -2032,7 +2032,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Coerce a single-name declaration's initializer to its declared type so
-    /// lowering emits the right `Convert` (FD-035 / mirror `check_assign`).
+    /// lowering emits the right `Convert` (mirror `check_assign`).
     /// Shared by `Dim` and `Global`; `check_expr` runs unconditionally (even
     /// with empty `names`) to match the prior inline behavior, while the
     /// coercion itself is single-name.
@@ -2075,8 +2075,8 @@ impl<'a> Checker<'a> {
                 span: dn.name_span,
                 is_global: false,
             };
-            // An explicit `Dim` may shadow a runtime command of the same name
-            // (FD-027); reserved runtime constants/types still clash.
+            // An explicit `Dim` may shadow a runtime command of the same name;
+            // reserved runtime constants/types still clash.
             self.declare_var_shadowing(self.current_scope, name, decl, E_DUPLICATE_DECL);
         }
 
@@ -2436,7 +2436,7 @@ impl<'a> Checker<'a> {
         // rewind and any alias dangles, exactly as for `Delete First(T)` (§3.3
         // worked example). Previously these were classified lvalue but the
         // lowerer only emitted IR for `Ident`, so the statement silently
-        // vanished (FD-034).
+        // vanished.
         let class = match &self.arena[operand] {
             Node::Expr(Expr::Ident { .. }) => crate::DeleteClass::Lvalue,
             _ => crate::DeleteClass::Rvalue,
@@ -2501,7 +2501,7 @@ fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstV
             Some(ConstValue::String(format!("{a}{b}")))
         }
 
-        // Integer comparison — yields Int 1/0 (FD-035)
+        // Integer comparison — yields Int 1/0
         (BinOp::Eq, ConstValue::Int(a), ConstValue::Int(b)) => {
             Some(ConstValue::Int((a == b) as i64))
         }
@@ -2521,7 +2521,7 @@ fn eval_const_binary(op: BinOp, l: &ConstValue, r: &ConstValue) -> Option<ConstV
             Some(ConstValue::Int((a >= b) as i64))
         }
 
-        // Integer logical ops — operands tested as `<> 0`, result Int 1/0 (FD-035)
+        // Integer logical ops — operands tested as `<> 0`, result Int 1/0
         (BinOp::And, ConstValue::Int(a), ConstValue::Int(b)) => {
             Some(ConstValue::Int(((*a != 0) && (*b != 0)) as i64))
         }
@@ -2766,10 +2766,10 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
-    // ── FD-042: default type inference for implicit declarations ─────────
+    // ── default type inference for implicit declarations ─────────
 
     #[test]
-    fn fd042_infer_float_from_value() {
+    fn infer_float_from_value() {
         // `x = 3.14` infers Float (not the old Integer default), so a later
         // Integer-sigil reference conflicts. Under the old default `x%` would
         // have matched and produced no E0302.
@@ -2782,7 +2782,7 @@ mod tests {
     }
 
     #[test]
-    fn fd042_infer_string_no_coercion_error() {
+    fn infer_string_no_coercion_error() {
         // `s = "hi"` infers String. Under the old Integer default this was a
         // String→Int coercion error (E0317); now it is clean.
         let result = analyze_src("s = \"hi\"\n");
@@ -2790,7 +2790,7 @@ mod tests {
     }
 
     #[test]
-    fn fd042_infer_array_from_new() {
+    fn infer_array_from_new() {
         // `a = New Integer[10]` infers `Integer[]`, so the variable is indexable
         // with no `Dim`. Under the old default this was an Array→Int coercion
         // error plus an index-non-array error.
@@ -2799,21 +2799,21 @@ mod tests {
     }
 
     #[test]
-    fn fd042_infer_int_from_literal_regression() {
+    fn infer_int_from_literal_regression() {
         // An int literal still yields Integer — the common case is unchanged.
         let result = analyze_src("x = 5\nx% = 6\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
-    fn fd042_null_cannot_infer_e0331() {
+    fn null_cannot_infer_e0331() {
         // `x = Null` on an undeclared var has no type to infer — E0331.
         let result = analyze_src("x = Null\n");
         assert_eq!(error_codes(&result), vec!["E0331"]);
     }
 
     #[test]
-    fn fd042_self_reference_use_before_decl_e0300() {
+    fn self_reference_use_before_decl_e0300() {
         // `x = x + 1` on an undeclared `x` is now a use-before-declaration error
         // (E0300) — exactly one diagnostic, no cascade.
         let result = analyze_src("x = x + 1\n");
@@ -2821,7 +2821,7 @@ mod tests {
     }
 
     #[test]
-    fn fd042_for_infer_float_from_bounds() {
+    fn for_infer_float_from_bounds() {
         // A `For` variable with Float bounds is inferred Float, so a later
         // Integer-sigil reference conflicts (E0302).
         let result = analyze_src("For i = 1.0 To 10.0\nNext i\ni% = 2\n");
@@ -2833,7 +2833,7 @@ mod tests {
     }
 
     #[test]
-    fn fd042_for_infer_int_from_bounds_regression() {
+    fn for_infer_int_from_bounds_regression() {
         // Integer bounds still yield an Integer loop variable.
         let result = analyze_src("For i = 1 To 10\nNext i\ni% = 2\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -2855,21 +2855,21 @@ mod tests {
 
     #[test]
     fn pass2_comparison_returns_int() {
-        // Comparisons yield Int 1/0 — there is no Bool type (FD-035).
+        // Comparisons yield Int 1/0 — there is no Bool type.
         let result = analyze_src("Dim x As Integer\nx = 1 > 2\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn pass2_logical_and_or() {
-        // Logical ops yield Int; True/False are Int 1/0 (FD-035).
+        // Logical ops yield Int; True/False are Int 1/0.
         let result = analyze_src("Dim x As Integer\nx = True And False\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]
     fn pass2_reserved_type_names_are_e0330() {
-        // Bool/Boolean/UInt/UInteger/ULong are reserved but unsupported (FD-035).
+        // Bool/Boolean/UInt/UInteger/ULong are reserved but unsupported.
         for src in [
             "Dim x As Bool\n",
             "Dim x As Boolean\n",
@@ -2888,7 +2888,7 @@ mod tests {
     #[test]
     fn pass2_dim_byte_literal_overflow_e0326() {
         // An out-of-range integer literal in a Dim initializer is a hard error
-        // now that Dim initializers are coerced to the declared type (FD-035).
+        // now that Dim initializers are coerced to the declared type.
         let result = analyze_src("Dim b As Byte = 300\n");
         assert!(
             error_codes(&result).contains(&"E0326"),
@@ -2899,8 +2899,8 @@ mod tests {
 
     #[test]
     fn pass2_dim_in_range_narrow_literal_is_silent() {
-        // An in-range literal coerces silently — a known-safe constant
-        // (FD-020/FD-035): Short is 16-bit unsigned, 40000 fits.
+        // An in-range literal coerces silently — a known-safe constant:
+        // Short is 16-bit unsigned, 40000 fits.
         let result = analyze_src("Dim s As Short = 40000\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
@@ -3062,7 +3062,7 @@ mod tests {
 
     #[test]
     fn pass2_intrinsic_len_on_string() {
-        // Len(s$) is valid and yields an Integer (FD-013 Batch 2).
+        // Len(s$) is valid and yields an Integer.
         let result = analyze_src("Dim n As Integer\nn = Len(\"hello\")\n");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
@@ -3078,7 +3078,7 @@ mod tests {
         );
     }
 
-    // ── pass 2 tests: diagnostic assertion sweep (FD-031) ───────────────
+    // ── pass 2 tests: diagnostic assertion sweep ───────────────
 
     #[test]
     fn pass2_operator_type_mismatch_e0301() {
@@ -3165,7 +3165,7 @@ mod tests {
 
     #[test]
     fn pass2_type_name_as_value_mismatched_slot_e0311() {
-        // A bare Type name used as a value into a mismatched slot. Before FD-031
+        // A bare Type name used as a value into a mismatched slot. Previously
         // this leaked a `TypeRef` Debug repr through E0317; now it is E0311.
         let result =
             analyze_src("Type Foo\nField x As Integer\nEndType\nDim a As Integer\na = Foo\n");
@@ -3179,7 +3179,7 @@ mod tests {
     #[test]
     fn pass2_type_name_as_value_matching_slot_e0311() {
         // The soundness hole: a bare Type name returned into a matching-typed
-        // slot compiled clean before FD-031. It must now be rejected as E0311.
+        // slot previously compiled clean. It must now be rejected as E0311.
         let result = analyze_src(
             "Type Foo\nField x As Integer\nEndType\n\
              Function makeFoo() As Foo\nReturn Foo\nEndFunction\n",
@@ -3361,7 +3361,7 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
-    // ── FD-020: numeric & For-loop semantics ────────────────────────────
+    // ── numeric & For-loop semantics ────────────────────────────
 
     #[test]
     fn literal_overflow_narrow_int_e0326() {
@@ -3560,7 +3560,7 @@ mod tests {
         }
     }
 
-    // FD-041: a catalog with the Sound surface — the `Sound` (tag 17) and
+    // A catalog with the Sound surface — the `Sound` (tag 17) and
     // `SoundChannel` (tag 18) opaque types, plus enough of the command set to pin
     // the naming trap (Set/Stop/SoundPlaying take a SoundChannel, not a Sound) and
     // the opaque strictness. Only the representative arities are registered.
@@ -3649,7 +3649,7 @@ mod tests {
     }
 
     #[test]
-    fn type_field_of_runtime_type_refined_fd036() {
+    fn type_field_of_runtime_type_refined() {
         // A user Type field declared with a runtime opaque type (`As Object`)
         // must refine to `RuntimeType`, not the pass-1 placeholder `TypeRef`, so
         // it matches runtime functions producing/consuming `Object`. Regression
@@ -3686,7 +3686,7 @@ mod tests {
     }
 
     #[test]
-    fn function_param_and_return_of_runtime_type_refined_fd036() {
+    fn function_param_and_return_of_runtime_type_refined() {
         // The reorder also fixes function signatures: a param/return annotated
         // with a runtime type is resolved in pass 1 and must refine too.
         let mut catalog = catalog_of(vec![rt_func(
@@ -3710,10 +3710,10 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
-    // ── sound: the SoundChannel-vs-Sound naming trap (FD-041) ───────────────
+    // ── sound: the SoundChannel-vs-Sound naming trap ───────────────
 
     #[test]
-    fn sound_channel_ops_accept_channel_fd041() {
+    fn sound_channel_ops_accept_channel() {
         // The trap: SetSound/StopSound/SoundPlaying name "Sound" but take a
         // SoundChannel (PlaySound's return), and PlaySound's preloaded form and
         // its filename form both type as SoundChannel. All correct → no diags.
@@ -3730,7 +3730,7 @@ mod tests {
     }
 
     #[test]
-    fn sound_channel_op_rejects_sound_handle_fd041() {
+    fn sound_channel_op_rejects_sound_handle() {
         // StopSound takes a SoundChannel; handing it a `Sound` is the trap firing
         // — the lone overload's param type can't accept it (E0317, cannot convert
         // one opaque handle to the other).
@@ -3742,8 +3742,8 @@ mod tests {
     }
 
     #[test]
-    fn fd042_infer_opaque_runtime_type_fd041() {
-        // FD-042: `s = LoadSound(...)` with no `Dim` infers the opaque `Sound`
+    fn infer_opaque_runtime_type() {
+        // `s = LoadSound(...)` with no `Dim` infers the opaque `Sound`
         // type, so `DeleteSound s` (which takes a `Sound`) resolves cleanly.
         // Under the old Integer default this was a Sound→Int coercion error.
         let catalog = sound_catalog();
@@ -3754,7 +3754,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_sound_rejects_channel_handle_fd041() {
+    fn delete_sound_rejects_channel_handle() {
         // The mirror image: DeleteSound takes a `Sound`; a SoundChannel is wrong.
         let catalog = sound_catalog();
         let src = "Dim ch As SoundChannel = PlaySound(\"music.ogg\")\n\
@@ -3764,7 +3764,7 @@ mod tests {
     }
 
     #[test]
-    fn play_sound_statement_form_discards_channel_fd041() {
+    fn play_sound_statement_form_discards_channel() {
         // PlaySound is a hybrid: used as a statement, the returned SoundChannel is
         // simply discarded. A value-returning call in statement position is legal
         // (no void overload needed, and a void one would be ambiguous).
@@ -3777,7 +3777,7 @@ mod tests {
     }
 
     #[test]
-    fn sound_handles_reject_arithmetic_and_ordering_fd041() {
+    fn sound_handles_reject_arithmetic_and_ordering() {
         // Strict opaque handles: arithmetic and ordering on a Sound/SoundChannel
         // are type errors (E0301), exactly like every other runtime opaque type.
         let catalog = sound_catalog();
@@ -3799,10 +3799,10 @@ mod tests {
     }
 
     #[test]
-    fn sound_handle_equality_and_null_allowed_fd041() {
+    fn sound_handle_equality_and_null_allowed() {
         // Equality and `= Null` are the ONLY operators allowed on an opaque
         // handle (assignment, identity, null check) — pin that they don't error.
-        // Both comparisons yield Int 1/0 (FD-035), assigned to plain Integers.
+        // Both comparisons yield Int 1/0, assigned to plain Integers.
         let catalog = sound_catalog();
         let result = analyze_with_catalog(
             "Dim s As Sound = LoadSound(\"a\")\n\
@@ -3814,7 +3814,7 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
-    // ── runtime constants (FD-029) ──────────────────────────────────────
+    // ── runtime constants ──────────────────────────────────────
 
     #[test]
     fn runtime_constant_folds_in_expr() {
@@ -3837,7 +3837,7 @@ mod tests {
     #[test]
     fn user_const_colliding_with_runtime_is_e0303() {
         // A user declaration that reuses a reserved runtime-constant name is a
-        // duplicate-declaration error (FD-029 Q2 = error). Hoisted form.
+        // duplicate-declaration error. Hoisted form.
         let catalog = catalog_with_consts(vec![const_int("On", 1)]);
         let result = analyze_with_catalog("Const On = 5\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0303"]);
@@ -3853,7 +3853,7 @@ mod tests {
         assert_eq!(error_codes(&result), vec!["E0303"]);
     }
 
-    // ── runtime command name collisions (FD-027) ───────────────────────
+    // ── runtime command name collisions ───────────────────────
 
     #[test]
     fn explicit_dim_shadows_runtime_command() {

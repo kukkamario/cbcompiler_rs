@@ -1,4 +1,4 @@
-// FD-049 Phase 3a: unit tests for the native user-`Type` runtime (cb_type.cpp).
+// Unit tests for the native user-`Type` runtime (cb_type.cpp).
 // These drive the bare extern "C" cb_rt_type_* helpers directly, like
 // test_array.cpp. No trap host is connected (cb_runtime_init is never called),
 // so cb_host() returns null: a fault is a silent no-op returning the safe

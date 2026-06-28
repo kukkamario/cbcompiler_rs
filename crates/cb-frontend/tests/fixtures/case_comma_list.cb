@@ -1,4 +1,4 @@
-// FD-004 #11: pin the comma-separated `Case` values path (§6.2).
+// Pin the comma-separated `Case` values path (§6.2).
 
 Select x
     Case 1, 2, 3

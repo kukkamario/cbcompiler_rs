@@ -1,7 +1,7 @@
 #ifndef CB_OBJECT_DATA_H
 #define CB_OBJECT_DATA_H
 
-// Pure object math for the sprite-Object subsystem (FD-036 Phase 4). Header-only
+// Pure object math for the sprite-Object subsystem. Header-only
 // and Allegro-free so the angle/distance/heading/frame-slice/size/turn/animation/
 // life helpers can be unit-tested without a display (mirrors cb_camera_math.h /
 // cb_map_data.h). cb_object.cpp wraps a live CbObject (Allegro bitmap + registry)
@@ -98,7 +98,7 @@ inline int32_t cb_object_size_y(double size_x, double size_y, double angle_deg) 
 }
 
 // ─── Animation advance + life ───────────────────────────────────────────
-// The per-update-tick state the Phase-5 game loop will drive. Pinned here now so
+// The per-update-tick state the game loop will drive. Pinned here now so
 // the behaviour is regression-locked before the loop exists. The fields mirror
 // CoolBasic's per-object animation members.
 struct CbAnimState {

@@ -44,7 +44,7 @@ fn run(name: &str) {
 }
 
 /// Like [`run`], but skips when the linked runtime has no graphics/input — the
-/// SDK-free build (FD-033), whose language-core catalog omits the Allegro-
+/// SDK-free build, whose language-core catalog omits the Allegro-
 /// backed functions these fixtures call (sema would reject them as unknown).
 fn run_graphics(name: &str) {
     if !cb_runtime_sys::HAS_GRAPHICS {
@@ -240,18 +240,18 @@ fn sigil_optional() {
     run("sigil_optional");
 }
 
-// FD-042: a bare implicit declaration infers its type from the assigned value
+// A bare implicit declaration infers its type from the assigned value
 // (String / Float / array / For variable) — no `Dim` or sigil needed. Headless.
 #[test]
-fn type_inference_fd042() {
-    run("type_inference_fd042");
+fn type_inference() {
+    run("type_inference");
 }
 
-// FD-042: an opaque `Object` handle inferred from `MakeObject()` with no `Dim`.
+// An opaque `Object` handle inferred from `MakeObject()` with no `Dim`.
 // Graphics-gated (needs the Allegro-backed object runtime).
 #[test]
-fn object_inference_fd042() {
-    run_graphics("object_inference_fd042");
+fn object_inference() {
+    run_graphics("object_inference");
 }
 
 #[test]
@@ -277,8 +277,8 @@ fn runtime_string() {
 }
 
 #[test]
-fn runtime_string_fd017() {
-    run("runtime_string_fd017");
+fn runtime_string_extended() {
+    run("runtime_string_extended");
 }
 
 #[test]
@@ -287,26 +287,26 @@ fn runtime_system() {
 }
 
 #[test]
-fn runtime_memblock_fd039() {
-    // Memory blocks are Allegro-free (FD-039), so this runs in BOTH the full and
+fn runtime_memblock() {
+    // Memory blocks are Allegro-free, so this runs in BOTH the full and
     // SDK-free builds — plain `run`, not `run_graphics`. Covers alloc/zero-fill,
     // unsigned Byte/Short + signed Int + 32-bit Float round-trips, little-endian
     // byte order, resize preserve/zero-fill, MemCopy, and Null default. The
     // out-of-bounds trap path is in cli.rs; the C++ edge cases in
     // runtime/tests/test_memblock.cpp.
-    run("runtime_memblock_fd039");
+    run("runtime_memblock");
 }
 
 #[test]
-fn runtime_file_fd040() {
-    // File I/O is Allegro-free (FD-040), so this runs in BOTH the full and
+fn runtime_file() {
+    // File I/O is Allegro-free, so this runs in BOTH the full and
     // SDK-free builds. Isolated cwd (the fixture writes a relative file), not
     // graphics-gated. Covers binary + text round-trips, unsigned/signed/32-bit
     // conventions, position/EOF, lenient past-EOF reads, and the filesystem
     // queries. Trap paths (null handle, CopyFile over an existing dst) are in
     // cli.rs; C++ edge cases (ReadLine endings, search, embedded NUL) in
     // runtime/tests/test_file.cpp.
-    run_isolated("runtime_file_fd040");
+    run_isolated("runtime_file");
 }
 
 #[test]
@@ -315,13 +315,13 @@ fn runtime_image() {
 }
 
 #[test]
-fn runtime_gfx_fd017() {
-    run_graphics("runtime_gfx_fd017");
+fn runtime_gfx() {
+    run_graphics("runtime_gfx");
 }
 
 #[test]
-fn runtime_image_fd017() {
-    run_graphics("runtime_image_fd017");
+fn runtime_image_ops() {
+    run_graphics("runtime_image_ops");
 }
 
 #[test]
@@ -330,70 +330,70 @@ fn collide_images() {
 }
 
 #[test]
-fn runtime_image_fd036() {
+fn runtime_image_spritesheet() {
     // Writes a sprite sheet via SaveImage and reloads it with LoadAnimImage, so
     // it needs an isolated working directory.
-    run_graphics_isolated("runtime_image_fd036");
+    run_graphics_isolated("runtime_image_spritesheet");
 }
 
 #[test]
-fn runtime_camera_fd036() {
+fn runtime_camera() {
     // Asserts deterministic camera state (CameraX/Y/Angle); the world<->screen
     // affine math is unit-tested headlessly in runtime/tests/test_camera.cpp.
-    run_graphics("runtime_camera_fd036");
+    run_graphics("runtime_camera");
 }
 
 #[test]
-fn runtime_map_fd036() {
+fn runtime_map() {
     // MakeMap dims + GetMap2/EditMap round-trips, and LoadMap of the real
     // CoolBasic asset testmap.til + tileset.bmp (byte-verified format). The
     // world<->tile math is unit-tested headlessly in runtime/tests/test_map.cpp.
-    run_graphics_with_assets("runtime_map_fd036", &["testmap.til", "tileset.bmp"]);
+    run_graphics_with_assets("runtime_map", &["testmap.til", "tileset.bmp"]);
 }
 
 #[test]
-fn runtime_object_fd036() {
+fn runtime_object() {
     // MakeObject/Position/Rotate/Turn/slot/life round-trips, GetAngle2/Distance2,
     // CloneObject pos+angle reset, a built sprite-sheet object (Play/Stop/Loop/
     // Size/Frame), PaintObject, and InitObjectList/NextObject enumeration. Writes
     // the sheet via SaveImage, so it needs an isolated working directory. The pure
     // object math is unit-tested headlessly in runtime/tests/test_object.cpp.
-    run_graphics_isolated("runtime_object_fd036");
+    run_graphics_isolated("runtime_object");
 }
 
 #[test]
-fn runtime_collision_fd036() {
+fn runtime_collision() {
     // ObjectsOverlap (box/circle/pixel-stub/invalid-type), the 1-based collision
     // query surface, and SetupCollision registration (object-object + the type-4
     // Map overload). Deterministic state, no display. The persistent per-tick
-    // collision path is covered by runtime_gameloop_fd036 (Phase 5c); the
+    // collision path is covered by runtime_gameloop; the
     // resolution geometry by runtime/tests/test_collision.cpp.
-    run_graphics("runtime_collision_fd036");
+    run_graphics("runtime_collision");
 }
 
 #[test]
-fn runtime_pick_fd036() {
+fn runtime_pick() {
     // ObjectPick raycast + PickedObject/X/Y/Angle, ObjectSight (map-wall DDA), and
     // the object-aware camera funcs (PointCamera/CameraFollow/CloneCamera*/
     // CameraPick/ScreenPositionObject). Deterministic state, no display: the
     // screen<->world transform uses the 400x300 design size via cb_camera_math.
-    // CameraFollow's per-frame motion is covered by runtime_gameloop_fd036 (5c).
-    run_graphics("runtime_pick_fd036");
+    // CameraFollow's per-frame motion is covered by runtime_gameloop.
+    run_graphics("runtime_pick");
 }
 
 #[test]
-fn runtime_emitter_fd038() {
+fn runtime_emitter() {
     // Particle emitters: MakeEmitter returns the Object handle (no distinct type),
     // so object commands drive it and it enumerates; the Particle* commands wire
     // up (3-/4-arg movement, emission, animation); and the emitter is excluded
     // from both ObjectsOverlap/SetupCollision and ObjectPickable/ObjectPick (real
-    // CB — see FD-038). Driven through UpdateGame. The particle simulation math is
+    // CB). Driven through UpdateGame. The particle simulation math is
     // unit-tested headlessly in runtime/tests/test_particle.cpp.
-    run_graphics("runtime_emitter_fd038");
+    run_graphics("runtime_emitter");
 }
 
 #[test]
-fn runtime_gameloop_fd036() {
+fn runtime_gameloop() {
     // UpdateGame drives the per-tick advancement: ObjectLife decrement + auto-
     // delete, animation frame advance, and the persistent SetupCollision checks
     // (report records-but-doesn't-move; circle slide applies the resolved
@@ -401,12 +401,12 @@ fn runtime_gameloop_fd036() {
     // The UpdateGame/DrawGame/DrawScreen dedup flags need a real display and are a
     // deferred visual smoke; the per-tick math is unit-tested in test_object.cpp /
     // test_collision.cpp.
-    run_graphics_isolated("runtime_gameloop_fd036");
+    run_graphics_isolated("runtime_gameloop");
 }
 
 #[test]
-fn runtime_text_fd018() {
-    run_graphics("runtime_text_fd018");
+fn runtime_text() {
+    run_graphics("runtime_text");
 }
 
 #[test]
@@ -415,15 +415,15 @@ fn runtime_input() {
 }
 
 #[test]
-fn runtime_constants_fd029() {
+fn runtime_constants() {
     // The cbKey* constants resolve SDK-free, but this fixture also calls
     // KeyDown (an input function), so it needs the full runtime. Constant
     // decoding itself is covered by the cb-runtime-sys unit tests in both modes.
-    run_graphics("runtime_constants_fd029");
+    run_graphics("runtime_constants");
 }
 
 #[test]
-fn runtime_sound_fd041() {
+fn runtime_sound() {
     // LoadSound -> PlaySound -> StopSound -> SoundPlaying -> DeleteSound through
     // the Sound/SoundChannel opaque types, incl. the PlaySound statement form and
     // the streamed filename overload. Staged with a real .wav so a host with audio
@@ -431,5 +431,5 @@ fn runtime_sound_fd041() {
     // after StopSound is 0 whether or not audio is available), since the audible
     // behaviour needs a real device (deferred). The gain/pan/speed math and the
     // channel pool liveness are unit-tested headlessly in test_sound.cpp.
-    run_graphics_with_assets("runtime_sound_fd041", &["beep.wav"]);
+    run_graphics_with_assets("runtime_sound", &["beep.wav"]);
 }

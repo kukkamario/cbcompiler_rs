@@ -1,4 +1,4 @@
-' Multi-dimensional Redim (FD-049 review F15): both dimensions change, and the
+' Multi-dimensional Redim: both dimensions change, and the
 ' result is a fresh zero-filled array.
 Dim grid As Int[,] = New Int[2, 2]
 grid[0, 0] = 1

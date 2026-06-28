@@ -1,4 +1,4 @@
-// FD-036 multi-frame sprite sheets. Headless: build a 4x9 sheet in memory with a
+// Multi-frame sprite sheets. Headless: build a 4x9 sheet in memory with a
 // distinct color in each frame's top-left pixel, SaveImage it to a BMP (in the
 // test's isolated temp cwd), then LoadAnimImage it back as 2x3 frames (2 columns
 // x 3 rows = 6 frames, indices 0..5 row-major).
@@ -6,7 +6,7 @@
 // Each DrawImage(anim, 0, 0, frame) must reproduce the LOADED image's pixel at
 // that frame's CORRECT source origin. Comparing the drawn pixel against
 // GetPixel(anim, srcX, srcY) isolates slicing from BMP round-trip fidelity and
-// pins the slice-bug #1/#2 fix: cbEnchanted's `/framesY` + `*frameWidth` would
+// pins the slice-bug #1/#2 fix: the buggy `/framesY` + `*frameWidth` formula would
 // read the wrong cell for frames 2..5 on this multi-row, non-square sheet.
 
 Dim sheet As Image
@@ -20,11 +20,11 @@ PutPixel(2, 3, 40, 40, 0)   // frame 3  (col 1, row 1)
 PutPixel(0, 6, 40, 0, 40)   // frame 4  (col 0, row 2)
 PutPixel(2, 6, 0, 40, 40)   // frame 5  (col 1, row 2)
 Unlock()
-SaveImage(sheet, "fd036_sheet.bmp", 0)
+SaveImage(sheet, "spritesheet.bmp", 0)
 DeleteImage(sheet)
 
 Dim anim As Image
-anim = LoadAnimImage("fd036_sheet.bmp", 2, 3, 0, 6)
+anim = LoadAnimImage("spritesheet.bmp", 2, 3, 0, 6)
 If anim = Null Then Print "load_FAILED"
 
 Dim target As Image
@@ -89,4 +89,4 @@ DeleteImage(anim)
 DeleteImage(target)
 DeleteImage(solo)
 DeleteImage(mk)
-Print "fd036_done"
+Print "spritesheet_done"

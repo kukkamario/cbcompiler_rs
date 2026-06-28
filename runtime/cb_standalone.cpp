@@ -1,13 +1,13 @@
-// CoolBasic runtime — standalone (AOT) program lifecycle (FD-049 decision A).
+// CoolBasic runtime — standalone (AOT) program lifecycle.
 //
 // CORE TU: provides the entry-point glue the native/LLVM backend links against
 // when it emits a self-contained executable. The backend emits a trivial
 //   int main() { cb_rt_standalone_run(cb_user_main); return 0; }
 // plus `cb_user_main` (the lowered top-level body). This TU supplies the default
-// host (the FD-015 trap channel) and the clean-exit path.
+// host (the trap channel) and the clean-exit path.
 //
-// Allegro-free and functionality-agnostic, so it belongs in cb_runtime_core
-// (FD-016): it references only the core handshake (cb_runtime_init) and the
+// Allegro-free and functionality-agnostic, so it belongs in cb_runtime_core:
+// it references only the core handshake (cb_runtime_init) and the
 // core string primitives (for raise_error's message). It carries NO `main`, so
 // it never collides with the interpreter binary — which statically links the
 // runtime and drives cb_runtime_init through its own host (cb-backend-interp).
@@ -45,7 +45,7 @@ extern "C" void cb_rt_exit(int32_t code) {
     std::exit(code);
 }
 
-// Default host callbacks (FD-015). Plain file-static functions assigned to the
+// Default host callbacks. Plain file-static functions assigned to the
 // CbHostApi function-pointer fields, mirroring cb_host.cpp's run_teardowns.
 static void default_request_exit(int32_t code) {
     cb_rt_exit(code);
@@ -65,7 +65,7 @@ static void default_raise_error(const CbString* msg) {
 }
 
 extern "C" void cb_rt_trap_null_fnptr(void) {
-    // Raise the same FD-015 error the interpreter's NullFnPtr trap reports, so a
+    // Raise the same error the interpreter's NullFnPtr trap reports, so a
     // null fn-ptr call in the native exe writes a stderr trap message (not a
     // silent exit). The default host's raise_error writes stderr + exits; the
     // trailing cb_rt_exit(1) covers a host whose raise_error returns.
@@ -83,7 +83,7 @@ extern "C" void cb_rt_trap_null_fnptr(void) {
 extern "C" int32_t cb_rt_standalone_run(void (*user_main)(void)) {
 #ifdef _WIN32
     // Put stdout in binary mode so cb_rt_print's '\n' is not translated to
-    // CRLF (FD-049 review F12). The interpreter writes raw bytes through Rust's
+    // CRLF. The interpreter writes raw bytes through Rust's
     // stdout, so this makes the native exe byte-identical — an embedded CR+LF
     // (Chr$(13)+Chr$(10)) no longer becomes "\r\r\n". No-op on Unix.
     _setmode(_fileno(stdout), _O_BINARY);

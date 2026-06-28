@@ -1,4 +1,4 @@
-' Redim to a SMALLER size (FD-049 review F15): a fresh, zero-initialised array,
+' Redim to a SMALLER size: a fresh, zero-initialised array,
 ' no stale data carried from the larger original.
 Dim arr As Int[] = New Int[5]
 arr[0] = 1

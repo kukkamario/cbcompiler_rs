@@ -3,7 +3,7 @@
 
 #include <string>
 
-// System font-name resolution (FD-018).
+// System font-name resolution.
 //
 // Given a font *family name* such as "Courier New", returns an absolute path to
 // a matching `.ttf`, or "" when no match is found. The caller (LoadFont / the

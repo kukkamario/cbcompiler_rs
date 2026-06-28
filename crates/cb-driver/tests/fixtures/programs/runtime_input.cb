@@ -1,4 +1,4 @@
-// FD-013 Batch 5: input runtime, headless coverage.
+// Input runtime, headless coverage.
 //
 // With no window open, no input events ever arrive (the keyboard/mouse event
 // sources are only registered once Screen() opens a display), so every
@@ -27,7 +27,7 @@ Print Str(MouseMoveX())
 Print Str(MouseMoveY())
 Print Str(MouseMoveZ())
 
-// FD-017 additions. Headless: the char/button queues are empty and the arrow
+// Keyboard and mouse queries. Headless: the char/button queues are empty and the arrow
 // keys are up, so GetKey/GetMouse and Left/Right/Up/DownKey return 0. WaitKey/
 // WaitMouse have no event queue to block on, so they return 0 immediately
 // (never hang). ClearKeys/ClearMouse/PositionMouse/ShowMouse are no-ops here.

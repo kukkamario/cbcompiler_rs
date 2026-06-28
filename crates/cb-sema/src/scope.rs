@@ -160,7 +160,7 @@ impl SymbolTable {
     ///
     /// Unlike [`declare`](Self::declare) this never fails on a collision. It is
     /// used when an explicit user declaration is permitted to *shadow* a
-    /// runtime-seeded command of the same name (FD-027) — the catalog entry is
+    /// runtime-seeded command of the same name — the catalog entry is
     /// overwritten so the name now resolves to the user's declaration.
     pub(crate) fn force_declare(&mut self, scope: ScopeId, name: Symbol, decl: Declaration) {
         debug_assert!(

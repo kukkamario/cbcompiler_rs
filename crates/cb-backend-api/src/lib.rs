@@ -7,7 +7,7 @@
 //! behind a `Box<dyn Backend>`, so its run site stays backend-agnostic.
 //!
 //! Deliberately holds **no** process/exit-code policy of its own — the driver
-//! maps a [`BackendOutcome`] / [`BackendError`] onto an OS exit code (FD-025).
+//! maps a [`BackendOutcome`] / [`BackendError`] onto an OS exit code.
 //! Do not leak backend-specific types (LLVM, interpreter internals) into here.
 
 use std::path::PathBuf;
@@ -75,7 +75,7 @@ impl BackendError {
 }
 
 /// Classifies a [`BackendError`] so the driver can pick the right exit code
-/// while keeping all OS-exit policy in one place (FD-025).
+/// while keeping all OS-exit policy in one place.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum BackendErrorKind {
     /// Recognised backend with no codegen yet → driver exit 3.

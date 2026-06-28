@@ -781,7 +781,7 @@ impl<'a> Lowerer<'a> {
                 let val = self.lower_expr(operand);
                 let ir_op = match op {
                     UnOp::Neg => IrUnOp::Neg,
-                    // CoolBasic unary `+` is absolute value, not identity (FD-028).
+                    // CoolBasic unary `+` is absolute value, not identity.
                     UnOp::Plus => IrUnOp::Abs,
                     UnOp::Not => IrUnOp::Not,
                     UnOp::BinNot => IrUnOp::BinNot,
@@ -1049,7 +1049,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_short_circuit(&mut self, op: BinOp, lhs: NodeId, rhs: NodeId, span: Span) -> Reg {
         // Allocate a unique temp local for the result. Logical ops yield Int
-        // 1/0 (FD-035), so the temp and both short-circuit constants are Int.
+        // 1/0, so the temp and both short-circuit constants are Int.
         let tmp = self.alloc_temp("@sc", IrType::Int);
 
         let lhs_reg = self.lower_expr(lhs);

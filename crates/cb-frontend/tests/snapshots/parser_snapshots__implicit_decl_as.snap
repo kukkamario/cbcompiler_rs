@@ -1,25 +1,24 @@
 ---
 source: crates/cb-frontend/tests/parser_snapshots.rs
-assertion_line: 536
 expression: "snapshot_parser_fixture(\"implicit_decl_as\")"
 ---
 Program (5 top-level statements)
-  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 71..90
-    TypeExpr::Primitive(string) @ 76..82
-    Expr::StrLit("asd", Plain) @ 85..90
-  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 91..107
-    TypeExpr::Primitive(integer) @ 96..103
-    Expr::IntLit(0) @ 106..107
-  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 108..137
-    TypeExpr::Array(rank=1) @ 114..121
-      TypeExpr::Primitive(float) @ 114..119
-    Expr::New(Array, dims=1) @ 124..137
-      TypeExpr::Primitive(float) @ 128..133
-      Expr::IntLit(10) @ 134..136
-  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 138..162
-    TypeExpr::Named @ 143..149
-    Expr::New(Type) @ 152..162
-      TypeExpr::Named @ 156..162
-  Stmt::Assign @ 235..240
-    Expr::Ident(sigil=None) @ 235..236
-    Expr::IntLit(5) @ 239..240
+  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 60..79
+    TypeExpr::Primitive(string) @ 65..71
+    Expr::StrLit("asd", Plain) @ 74..79
+  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 80..96
+    TypeExpr::Primitive(integer) @ 85..92
+    Expr::IntLit(0) @ 95..96
+  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 97..126
+    TypeExpr::Array(rank=1) @ 103..110
+      TypeExpr::Primitive(float) @ 103..108
+    Expr::New(Array, dims=1) @ 113..126
+      TypeExpr::Primitive(float) @ 117..122
+      Expr::IntLit(10) @ 123..125
+  Stmt::Dim(names=1, has_ty=true, has_init=true) @ 127..151
+    TypeExpr::Named @ 132..138
+    Expr::New(Type) @ 141..151
+      TypeExpr::Named @ 145..151
+  Stmt::Assign @ 224..229
+    Expr::Ident(sigil=None) @ 224..225
+    Expr::IntLit(5) @ 228..229

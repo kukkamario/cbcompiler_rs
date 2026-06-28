@@ -1,4 +1,4 @@
-' A bare Float condition (FD-049 review F10). CoolBasic accepts any numeric
+' A bare Float condition. CoolBasic accepts any numeric
 ' expression as a condition with no coercion, so a Float reg flows straight
 ' into BranchIf. The LLVM backend computes truthiness as `f# <> 0.0` (UNE),
 ' matching the interpreter's `is_truthy` (`*v != 0.0`).

@@ -1,4 +1,4 @@
-' FD-041: sound surface smoke. Exercises the full command path end to end —
+' Sound surface smoke. Exercises the full command path end to end —
 ' LoadSound -> PlaySound -> StopSound -> SoundPlaying -> DeleteSound — through the
 ' opaque Sound / SoundChannel types and the PlaySound statement form.
 '

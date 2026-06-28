@@ -1,4 +1,4 @@
-// FD-018 text & font smoke test. Headless: drawing targets a memory-bitmap
+// Text & font smoke test. Headless: drawing targets a memory-bitmap
 // image (DrawToImage), so the Text / CenterText / VerticalText draw paths run
 // without a window. The asserted output uses only font-independent invariants
 // (empty width is 0; the monospace default font doubles width for doubled

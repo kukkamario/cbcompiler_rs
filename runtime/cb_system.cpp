@@ -1,4 +1,4 @@
-// CoolBasic system / time runtime (FD-013 Batch 3).
+// CoolBasic system / time runtime.
 //
 // Timer / Wait / MakeError. Two design choices worth calling out:
 //   - Timer uses a monotonic WALL clock (std::chrono::steady_clock) rather than
@@ -53,7 +53,7 @@ extern "C" void cb_rt_make_error(const CbString* msg) {
     std::fputc('\n', stderr);
 }
 
-// ─── Date / Time (FD-017) ─────────────────────────────────────────────
+// ─── Date / Time ──────────────────────────────────────────────────────
 
 namespace {
 CbString* str_from(const std::string& s) {

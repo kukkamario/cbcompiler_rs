@@ -48,7 +48,7 @@ pub struct CbFuncDesc {
     pub flags: u32,
 }
 
-/// A runtime-defined global constant (FD-029, catalog v6). Mirrors C
+/// A runtime-defined global constant (catalog v6). Mirrors C
 /// `CbConstDesc`. The C side stores the value in a `union { int64_t i; double f; }`;
 /// we mirror it as raw bits (`value_bits`) and decode per `tag`, which keeps
 /// this module free of Rust union field access.
@@ -96,7 +96,7 @@ pub struct CbStringApi {
 }
 
 /// Host API delivered to the runtime at startup via [`runtime_init`] — the
-/// Runtime Trap Channel (FD-015, catalog v5). The runtime calls these to ask
+/// Runtime Trap Channel (catalog v5). The runtime calls these to ask
 /// the host to terminate cleanly or raise a runtime error; each callback
 /// records the intent and returns (it never unwinds the C frame). `size` /
 /// `abi_version` are caller-set ABI guards. Mirrors C `CbHostApi`.
@@ -117,7 +117,7 @@ pub struct CbRuntimeHooks {
     pub about_to_exit: Option<extern "C" fn()>,
 }
 
-// ── ABI layout pins (FD-024) ───────────────────────────────────────────
+// ── ABI layout pins ────────────────────────────────────────────────────
 // Mirror the C `static_assert`s in runtime/cb_runtime_core.h. Any drift in
 // either the Rust mirror or the C struct fails the build on its own side
 // before a mismatched layout can cross the FFI boundary. Offsets guard the
@@ -136,13 +136,13 @@ const _: () = {
 pub const CB_CATALOG_VERSION: u32 = 6;
 
 /// Whether the linked runtime includes the Allegro-backed graphics, text, and
-/// input functions. `false` in the SDK-free build (FD-033), where `build.rs`
+/// input functions. `false` in the SDK-free build, where `build.rs`
 /// could not (or was told not to) build the full Allegro runtime and compiled
 /// only the language-core TUs. Tests and tools use this to skip graphics-
 /// dependent work cleanly instead of failing on absent catalog entries.
 pub const HAS_GRAPHICS: bool = cfg!(not(cb_no_allegro));
 
-/// Host trap-channel ABI version (FD-015/FD-024). Mirrors C `CB_HOST_ABI_VERSION`.
+/// Host trap-channel ABI version. Mirrors C `CB_HOST_ABI_VERSION`.
 /// Versions the `CbHostApi`/`CbRuntimeHooks` handshake independently of the
 /// catalog data format — see [`runtime_init`].
 pub const CB_HOST_ABI_VERSION: u32 = 1;
@@ -151,7 +151,7 @@ const CB_TYPE_BYTE: u32 = 1;
 const CB_TYPE_SHORT: u32 = 2;
 const CB_TYPE_INT: u32 = 3;
 // UInt/ULong/Bool are reserved wire codes for types the language no longer
-// supports (FD-035). Kept numerically stable for ABI compatibility with the
+// supports. Kept numerically stable for ABI compatibility with the
 // C++ runtime header; decoding one is a hard error (no catalog entry uses them).
 const CB_TYPE_UINT: u32 = 4;
 const CB_TYPE_LONG: u32 = 5;
@@ -166,11 +166,11 @@ const CB_TYPE_STRING: u32 = 9;
 // Sema reads it as pure metadata ([`load_catalog`]); the interpreter
 // additionally resolves each entry's `fn_ptr` ([`resolve_bindings`]) and
 // dispatches through it via libffi. Splitting the two is what lets a
-// metadata-only compiler avoid link-depending on the executable runtime (FD-045).
+// metadata-only compiler avoid link-depending on the executable runtime.
 unsafe extern "C" {
     pub fn cb_runtime_get_catalog() -> *const CbCatalog;
 
-    /// Metadata-only catalog entry point (FD-045): the same catalog data with
+    /// Metadata-only catalog entry point: the same catalog data with
     /// null `fn_ptr`s, exported by a tiny Allegro-free object that references no
     /// runtime function body. [`load_catalog`] reads this, so sema / a native
     /// backend can type-check without linking the executable runtime.
@@ -181,7 +181,7 @@ unsafe extern "C" {
     /// verify retain/release lifecycle; not part of `CbStringApi`.
     pub fn cb_rt_string_test_refcount(s: *const CbString) -> i32;
 
-    // String<->number conversion primitives (FD-046). Bare symbols, like
+    // String<->number conversion primitives. Bare symbols, like
     // `cb_rt_string_test_refcount` above — NOT catalog `CB_FN` rows and NOT in
     // `CbStringApi`, so they touch neither the catalog data, `CB_CATALOG_VERSION`,
     // nor the drift guard. They service the IR Convert/ConvertExplicit opcodes,
@@ -201,18 +201,18 @@ unsafe extern "C" {
     pub fn cb_rt_string_to_float(s: *const CbString) -> f64;
 
     /// Lexicographic byte comparison shared by the interpreter and the native
-    /// backend (FD-049 decision C). `<0` / `0` / `>0`; null operands are treated
+    /// backend. `<0` / `0` / `>0`; null operands are treated
     /// as empty. Bare symbol like the conversion primitives above — not a catalog
     /// row, not in `CbStringApi`. The interpreter repoints its inline string
     /// relations onto this so there is one ordering oracle.
     pub fn cb_rt_string_compare(a: *const CbString, b: *const CbString) -> i32;
 
-    /// Runtime Trap Channel handshake (FD-015): hand the runtime its host API
+    /// Runtime Trap Channel handshake: hand the runtime its host API
     /// and receive the hook table back. See [`runtime_init`] for the safe
     /// wrapper. Each plugin DLL exports this alongside `cb_runtime_get_catalog`.
     pub fn cb_runtime_init(host: *const CbHostApi) -> *const CbRuntimeHooks;
 
-    /// Teardown-registration seam (FD-043). A functionality module registers an
+    /// Teardown-registration seam. A functionality module registers an
     /// at-exit teardown the `about_to_exit` hook will dispatch to, without core
     /// referencing its Allegro symbols. Bare symbol like the conversion/refcount
     /// primitives above — not a catalog row. Currently registered only on the
@@ -221,7 +221,7 @@ unsafe extern "C" {
 
     /// Instrumentation hook — how many times the `about_to_exit` teardown
     /// dispatch has run. Bare symbol; used by tests to assert the teardown
-    /// channel fires (FD-043). Defined in the Allegro-free `cb_host` TU, so it
+    /// channel fires. Defined in the Allegro-free `cb_host` TU, so it
     /// links in both the full and SDK-free builds.
     pub fn cb_rt_test_teardown_count() -> i32;
 }
@@ -230,8 +230,8 @@ unsafe extern "C" {
 /// The single place the raw `cb_runtime_get_catalog()` FFI result is turned
 /// into a safe reference; the full-catalog consumers ([`string_api`],
 /// [`resolve_bindings`]) start here so the null-check (and its message) live
-/// in exactly one spot (DR-R2). Sema's metadata path reads the sibling
-/// [`fetch_catalog_meta`] instead (FD-045).
+/// in exactly one spot. Sema's metadata path reads the sibling
+/// [`fetch_catalog_meta`] instead.
 ///
 /// # Safety
 /// Relies on the runtime returning either null or a pointer valid for
@@ -244,7 +244,7 @@ fn fetch_catalog() -> Result<&'static CbCatalog, String> {
     Ok(unsafe { &*ptr })
 }
 
-/// Fetch the metadata-only catalog pointer (FD-045) and null-check it. Mirrors
+/// Fetch the metadata-only catalog pointer and null-check it. Mirrors
 /// [`fetch_catalog`] but reads `cb_runtime_get_catalog_meta()` — the catalog
 /// compiled with null `fn_ptr`s and no executable-runtime link dependency. This
 /// is the catalog sema sees.
@@ -259,7 +259,7 @@ fn fetch_catalog_meta() -> Result<&'static CbCatalog, String> {
 /// Validate a catalog's reported version against the version this crate was
 /// built against. One message, shared by the fatal-by-panic [`string_api`]
 /// startup path and the recoverable [`decode_catalog`] path so the two cannot
-/// drift (DR-R3).
+/// drift.
 fn check_catalog_version(version: u32) -> Result<(), String> {
     if version != CB_CATALOG_VERSION {
         return Err(format!(
@@ -275,11 +275,11 @@ fn check_catalog_version(version: u32) -> Result<(), String> {
 /// `Err` for the driver's diagnostic flow, this **panics**: a missing or
 /// version-mismatched catalog at the point the interpreter needs the string
 /// runtime is an unrecoverable startup misconfiguration (fatal-by-panic at
-/// init, FD-024) that should surface immediately rather than be absorbed. The
+/// init) that should surface immediately rather than be absorbed. The
 /// version check is shared with [`load_catalog`]'s decode path via
 /// [`check_catalog_version`] so the two cannot drift; the fetch reads the
 /// **full** catalog ([`fetch_catalog`]) — the one carrying the string API —
-/// whereas sema's [`load_catalog`] reads the metadata-only catalog (FD-045).
+/// whereas sema's [`load_catalog`] reads the metadata-only catalog.
 pub fn string_api() -> &'static CbStringApi {
     let catalog = fetch_catalog().unwrap_or_else(|e| panic!("{e}"));
     check_catalog_version(catalog.version).unwrap_or_else(|e| panic!("{e}"));
@@ -290,8 +290,8 @@ pub fn string_api() -> &'static CbStringApi {
     unsafe { &*catalog.strings }
 }
 
-/// Deliver the host API to the runtime (the Runtime Trap Channel handshake,
-/// FD-015) and return the hook table the runtime wants connected. Call once at
+/// Deliver the host API to the runtime (the Runtime Trap Channel handshake)
+/// and return the hook table the runtime wants connected. Call once at
 /// interpreter startup, before any runtime function runs. `host` must outlive
 /// every runtime call — pass a `&'static`.
 ///
@@ -321,7 +321,7 @@ pub fn runtime_init(host: &'static CbHostApi) -> Result<&'static CbRuntimeHooks,
 
 // ── Safe conversion ────────────────────────────────────────────────────
 
-/// Load the runtime catalog (as **metadata only**, FD-045) and convert it to a
+/// Load the runtime catalog (as **metadata only**) and convert it to a
 /// `RuntimeCatalog` suitable for passing to `cb_sema::analyze`. Thin wrapper:
 /// fetch + null-check the metadata catalog pointer via [`fetch_catalog_meta`],
 /// then hand it to [`decode_catalog`], which holds all version/layout validation
@@ -332,7 +332,7 @@ pub fn load_catalog() -> Result<RuntimeCatalog, String> {
 }
 
 /// Resolve the `symbol → fn_ptr` bindings the interpreter needs to dispatch
-/// runtime calls (FD-045). Reads the **full** linked runtime catalog
+/// runtime calls. Reads the **full** linked runtime catalog
 /// (`cb_runtime_get_catalog()`), which carries live function pointers — unlike
 /// the metadata-only catalog [`load_catalog`] decodes. Every entry must have a
 /// non-null `fn_ptr`; a null here means the executable runtime was not linked,
@@ -372,7 +372,7 @@ pub fn resolve_bindings() -> Result<HashMap<String, unsafe extern "C" fn()>, Str
 
 /// Like [`resolve_bindings`], but first reconciles the **metadata** catalog
 /// ([`load_catalog`]'s source) against the **full** binding catalog and fails if
-/// they have drifted (FD-045 Phase C drift guard).
+/// they have drifted (the drift guard).
 ///
 /// Once metadata and bindings come from independently-built objects, the
 /// compile-time `#fn` symbol↔pointer tie that `CB_FN` used to guarantee no
@@ -409,8 +409,8 @@ fn signature_keys(catalog: &RuntimeCatalog) -> Vec<String> {
     keys
 }
 
-/// Structurally compare the metadata catalog against the binding (full) catalog
-/// (FD-045 Phase C). Returns `Err` describing the first drift found: a symbol
+/// Structurally compare the metadata catalog against the binding (full) catalog.
+/// Returns `Err` describing the first drift found: a symbol
 /// present in one catalog but not the other, or a function whose signature
 /// differs between them. Pure over its inputs so it is unit-testable with
 /// hand-built catalogs (the live catalogs match by construction).
@@ -423,7 +423,7 @@ fn reconcile_catalogs(meta: &RuntimeCatalog, full: &RuntimeCatalog) -> Result<()
         let missing: Vec<&str> = meta_syms.difference(&full_syms).copied().collect();
         let extra: Vec<&str> = full_syms.difference(&meta_syms).copied().collect();
         return Err(format!(
-            "catalog drift (FD-045): metadata and runtime symbol sets differ — \
+            "catalog drift: metadata and runtime symbol sets differ — \
              metadata-only symbols: {missing:?}, runtime-only symbols: {extra:?}"
         ));
     }
@@ -439,7 +439,7 @@ fn reconcile_catalogs(meta: &RuntimeCatalog, full: &RuntimeCatalog) -> Result<()
             .find(|(a, b)| a != b)
             .map(|(a, b)| format!("metadata `{a}` vs runtime `{b}`"))
             .unwrap_or_else(|| "function count differs between catalogs".to_string());
-        return Err(format!("catalog signature drift (FD-045): {diff}"));
+        return Err(format!("catalog signature drift: {diff}"));
     }
 
     Ok(())
@@ -582,7 +582,7 @@ fn decode_catalog(catalog: &CbCatalog) -> Result<RuntimeCatalog, String> {
                 .map_err(|e| format!("invalid UTF-8 in constant name at index {i}: {e}"))?
                 .to_string();
             // The C union holds either an int64 or a double; decode by tag.
-            // Only Int and Float are supported (see CbConstDesc / FD-029).
+            // Only Int and Float are supported (see CbConstDesc).
             let (ty, value) = match cd.tag {
                 CB_TYPE_INT => (IrType::Int, RuntimeConstValue::Int(cd.value_bits as i64)),
                 CB_TYPE_FLOAT => (
@@ -615,7 +615,7 @@ fn type_tag_to_ir_type(tag: u32, custom_types: &HashMap<u32, String>) -> Result<
         CB_TYPE_LONG => Ok(IrType::Long),
         CB_TYPE_FLOAT => Ok(IrType::Float),
         CB_TYPE_STRING => Ok(IrType::String),
-        // Reserved, unsupported types (FD-035). The wire codes stay stable for
+        // Reserved, unsupported types. The wire codes stay stable for
         // ABI compatibility, but no catalog entry uses them, so decoding one is
         // a hard error rather than a silent fallback.
         CB_TYPE_UINT | CB_TYPE_ULONG | CB_TYPE_BOOL => {
@@ -640,27 +640,27 @@ mod tests {
         let catalog = load_catalog().expect("catalog should load");
 
         // Type declarations: TestHandle (tag 10), the Image graphics handle
-        // (tag 11, FD-013 Batch 4), and the Font handle (tag 12, FD-018).
+        // (tag 11), and the Font handle (tag 12).
         let types_by_name: std::collections::HashMap<&str, &RuntimeTypeDesc> =
             catalog.types.iter().map(|t| (t.name.as_str(), t)).collect();
         assert_eq!(types_by_name["TestHandle"].tag, 10);
-        // Memblock (FD-039, tag 15) and File (FD-040, tag 16) are Allegro-free,
+        // Memblock (tag 15) and File (tag 16) are Allegro-free,
         // so they are advertised in BOTH the full and SDK-free catalogs (unlike
         // the graphics handles below).
         assert_eq!(types_by_name["Memblock"].tag, 15);
         assert_eq!(types_by_name["File"].tag, 16);
         // Image/Font (and the graphics/input functions below) exist only in the
-        // full Allegro build; the SDK-free catalog (FD-033) advertises just
+        // full Allegro build; the SDK-free catalog advertises just
         // TestHandle, Memblock, File, and the language-core functions.
         #[cfg(not(cb_no_allegro))]
         {
             assert_eq!(catalog.types.len(), 9);
             assert_eq!(types_by_name["Image"].tag, 11);
             assert_eq!(types_by_name["Font"].tag, 12);
-            // Object is tag 13 (FD-036 Phase 4); Map is tag 14 (Phase 3).
+            // Object is tag 13; Map is tag 14.
             assert_eq!(types_by_name["Object"].tag, 13);
             assert_eq!(types_by_name["Map"].tag, 14);
-            // Sound is tag 17, SoundChannel tag 18 (FD-041). Both Allegro-
+            // Sound is tag 17, SoundChannel tag 18. Both Allegro-
             // dependent, so they exist only in the full build. The CB-visible
             // name is "SoundChannel", not "Channel".
             assert_eq!(types_by_name["Sound"].tag, 17);
@@ -669,7 +669,7 @@ mod tests {
         #[cfg(cb_no_allegro)]
         assert_eq!(catalog.types.len(), 3);
 
-        // Metadata carries no fn_ptr (FD-045); sanity-check the symbol instead.
+        // Metadata carries no fn_ptr; sanity-check the symbol instead.
         for func in &catalog.functions {
             assert!(
                 !func.c_symbol.is_empty(),
@@ -714,7 +714,7 @@ mod tests {
         assert_eq!(abs_float.params[0].ty, IrType::Float);
         assert_eq!(abs_float.return_ty, IrType::Float);
 
-        // Memory blocks (FD-039). Allegro-free, so present in BOTH builds. The
+        // Memory blocks. Allegro-free, so present in BOTH builds. The
         // `Memblock` handle is the tag-15 opaque type; Peek*/Poke* take it +
         // an Int offset, Float peek/poke use the CB Float (f64) end.
         let memblock_ty = IrType::RuntimeType("Memblock".to_string());
@@ -772,7 +772,7 @@ mod tests {
             assert!(by_symbol.contains_key(sym), "missing memblock entry {sym}");
         }
 
-        // File I/O (FD-040). Allegro-free, so present in BOTH builds. `File` is
+        // File I/O. Allegro-free, so present in BOTH builds. `File` is
         // the tag-16 opaque handle; OpenTo* return it, the read/write/query funcs
         // take it + Int/Float/String, and the filesystem funcs take String paths.
         let file_ty = IrType::RuntimeType("File".to_string());
@@ -862,7 +862,7 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_color"].params.len(), 3);
             assert_eq!(by_symbol["cb_rt_line"].params.len(), 4);
 
-            // Game loop (FD-036 Phase 5): UpdateGame/DrawGame are 0-arg commands.
+            // Game loop: UpdateGame/DrawGame are 0-arg commands.
             let update_game = by_symbol["cb_rt_update_game"];
             assert_eq!(update_game.name, "updategame");
             assert_eq!(update_game.params.len(), 0);
@@ -872,7 +872,7 @@ mod tests {
             assert_eq!(draw_game.params.len(), 0);
             assert_eq!(draw_game.return_ty, IrType::Void);
 
-            // Graphics: Image opaque-handle plumbing (FD-013 Batch 4).
+            // Graphics: Image opaque-handle plumbing.
             let make_image = by_symbol["cb_rt_make_image"];
             assert_eq!(make_image.name, "makeimage");
             assert_eq!(
@@ -888,7 +888,7 @@ mod tests {
             );
             assert_eq!(get_pixel.return_ty, IrType::Int);
 
-            // FD-036 multi-frame sprite sheets. Each optional `frame`/`useMask`
+            // Multi-frame sprite sheets. Each optional `frame`/`useMask`
             // arg is its own arity overload (the catalog has no default-arg
             // mechanism); LoadAnimImage returns the existing `Image` type.
             let image_ty = IrType::RuntimeType("Image".to_string());
@@ -931,7 +931,7 @@ mod tests {
             assert_eq!(box_frame_mask.name, "drawimagebox");
             assert_eq!(box_frame_mask.params.len(), 9);
 
-            // Input: keyboard + mouse queries (FD-013 Batch 5). All are
+            // Input: keyboard + mouse queries. All are
             // Int->Int or ()->Int catalog entries dispatched generically.
             let key_down = by_symbol["cb_rt_key_down"];
             assert_eq!(key_down.name, "keydown");
@@ -954,7 +954,7 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_mouse_move_x"].params.len(), 0);
             assert_eq!(by_symbol["cb_rt_mouse_z"].return_ty, IrType::Int);
 
-            // Camera transform core (FD-036 Phase 2). No new opaque type — all
+            // Camera transform core. No new opaque type — all
             // Float/Int params and Float/Void returns. RotateCamera/TurnCamera
             // take two angle args (logical, render) feeding two independent
             // fields; DrawToWorld's three flags are Int.
@@ -1003,7 +1003,7 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_mouse_wy"].name, "mousewy");
             assert_eq!(by_symbol["cb_rt_mouse_wy"].return_ty, IrType::Float);
 
-            // Tile maps (FD-036 Phase 3). `Map` is the opaque return of
+            // Tile maps. `Map` is the opaque return of
             // LoadMap/MakeMap (and EditMap's ignored first param). GetMap takes
             // world Floats; GetMap2/EditMap take 1-based Int grid coords. SetTile
             // has a 2- and 3-arg arity overload sharing the CB name.
@@ -1058,7 +1058,7 @@ mod tests {
             assert_eq!(set_tile_slow.name, "settile");
             assert_eq!(set_tile_slow.params.len(), 3);
 
-            // Objects / sprites (FD-036 Phase 4). `Object` is the opaque tag-13
+            // Objects / sprites. `Object` is the opaque tag-13
             // handle that the creation funcs return and the rest borrow. Spot-
             // check the overload families: the z/rotQuality arity overloads, the
             // dual getter/setter slots, and PaintObject's three type-distinct
@@ -1198,7 +1198,7 @@ mod tests {
             assert_eq!(next_object.return_ty, object_ty);
             assert_eq!(by_symbol["cb_rt_init_object_list"].params.len(), 0);
 
-            // Collision (FD-036 Phase 5). SetupCollision is two type-distinct
+            // Collision. SetupCollision is two type-distinct
             // overloads — object-object (param[1] Object) and the type-4 Map form
             // (param[1] Map) — like PaintObject. ObjectRange/ObjectsOverlap have an
             // optional-arg arity overload. GetCollision returns an Object handle.
@@ -1251,7 +1251,7 @@ mod tests {
             assert_eq!(by_symbol["cb_rt_objects_overlap3"].name, "objectsoverlap");
             assert_eq!(by_symbol["cb_rt_objects_overlap3"].params.len(), 3);
 
-            // Picking & line of sight (FD-036 Phase 5). PickedObject returns an
+            // Picking & line of sight. PickedObject returns an
             // Object handle; PixelPick is a no-op stub (1-/2-arg); ObjectSight
             // returns Int. ScreenPositionObject is (Object, Float, Float).
             let pickable = by_symbol["cb_rt_object_pickable"];
@@ -1285,7 +1285,7 @@ mod tests {
             assert_eq!(spo.params[0].ty, object_ty);
             assert_eq!(spo.params[1].ty, IrType::Float);
 
-            // Object-aware camera (FD-036 Phase 5). PointCamera/CameraFollow/
+            // Object-aware camera. PointCamera/CameraFollow/
             // Clone* take an Object; CameraPick takes two screen Floats.
             let point_cam = by_symbol["cb_rt_point_camera"];
             assert_eq!(point_cam.name, "pointcamera");
@@ -1310,7 +1310,7 @@ mod tests {
             assert_eq!(cam_pick.params.len(), 2);
             assert_eq!(cam_pick.params[0].ty, IrType::Float);
 
-            // Particle emitters (FD-038). MakeEmitter returns the Object handle
+            // Particle emitters. MakeEmitter returns the Object handle
             // (no new type); ParticleMovement is a 3-arg + 4-arg (accel) overload
             // pair; the Particle* commands all take an Object (the emitter).
             let make_emitter = by_symbol["cb_rt_make_emitter"];
@@ -1342,7 +1342,7 @@ mod tests {
             assert_eq!(panim.params[0].ty, object_ty);
             assert_eq!(panim.params[1].ty, IrType::Int);
 
-            // Sound (FD-041). `Sound` (tag 17) is the loaded sample; `SoundChannel`
+            // Sound. `Sound` (tag 17) is the loaded sample; `SoundChannel`
             // (tag 18) is a playing channel. LoadSound/DeleteSound take a Sound;
             // PlaySound is two source-typed overloads (preloaded Sound vs filename
             // String), each with a 1/2/3/4-arg arity family supplying the optional
@@ -1442,7 +1442,7 @@ mod tests {
         );
         assert_eq!(use_h.return_ty, IrType::Int);
 
-        // Constants (FD-029): On/Off/PI plus the cbKey* scancode family.
+        // Constants: On/Off/PI plus the cbKey* scancode family.
         let consts_by_name: std::collections::HashMap<&str, &RuntimeConstDesc> = catalog
             .constants
             .iter()
@@ -1539,8 +1539,8 @@ mod tests {
 
     #[test]
     fn runtime_init_roundtrip() {
-        // FD-015: handing the runtime a host API returns a non-null hook table
-        // whose size guard matches our mirror struct. FD-043: about_to_exit is
+        // Handing the runtime a host API returns a non-null hook table
+        // whose size guard matches our mirror struct. about_to_exit is
         // now wired (the teardown-dispatch entry point), so the slot is
         // non-null in every build, and invoking it bumps the teardown counter.
         extern "C" fn noop_exit(_code: i32) {}
@@ -1555,7 +1555,7 @@ mod tests {
         assert_eq!(hooks.size as usize, std::mem::size_of::<CbRuntimeHooks>());
         let about_to_exit = hooks
             .about_to_exit
-            .expect("FD-043: about_to_exit is wired to the teardown dispatch");
+            .expect("about_to_exit is wired to the teardown dispatch");
         // Firing the hook runs the (possibly empty) teardown list exactly once.
         // Nothing else in this test binary fires it, so the delta is exact.
         let before = unsafe { cb_rt_test_teardown_count() };
@@ -1566,7 +1566,7 @@ mod tests {
 
     #[test]
     fn runtime_init_rejects_abi_mismatch() {
-        // FD-024: a host advertising a different host ABI is declined by the C
+        // A host advertising a different host ABI is declined by the C
         // `cb_runtime_init` (returns null), surfaced as Err — never stored. The
         // rejection path leaves g_host untouched, so this is safe to run beside
         // the happy-path roundtrip test.
@@ -1606,7 +1606,7 @@ mod tests {
     #[test]
     fn reserved_type_tags_are_rejected() {
         // UInt/ULong/Bool wire codes are kept for ABI stability but are no
-        // longer supported types (FD-035) — decoding one must be an error.
+        // longer supported types — decoding one must be an error.
         let empty = HashMap::new();
         for tag in [CB_TYPE_UINT, CB_TYPE_ULONG, CB_TYPE_BOOL] {
             assert!(type_tag_to_ir_type(tag, &empty).is_err());
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[test]
     fn decode_allows_null_fn_ptr() {
-        // FD-045: a null fn_ptr is valid *metadata* — the metadata-only catalog
+        // A null fn_ptr is valid *metadata* — the metadata-only catalog
         // carries no pointers. Decoding must accept it (the interpreter resolves
         // pointers separately via resolve_bindings()).
         let name = CString::new("foo").unwrap();
@@ -1757,7 +1757,7 @@ mod tests {
         assert_eq!(decoded.functions[0].c_symbol, "cb_rt_foo");
     }
 
-    // ── FD-045 drift guard (reconcile_catalogs) ────────────────────────────
+    // ── drift guard (reconcile_catalogs) ───────────────────────────────────
 
     fn rt_desc(name: &str, sym: &str, params: &[IrType], ret: IrType) -> FuncDesc {
         FuncDesc {

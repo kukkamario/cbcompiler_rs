@@ -1,4 +1,4 @@
-// FD-049 Phase 2: unit tests for the native array runtime (cb_array.cpp). These
+// Unit tests for the native array runtime (cb_array.cpp). These
 // drive the bare extern "C" cb_rt_array_* helpers directly, like
 // test_memblock.cpp. No trap host is connected (cb_runtime_init is never
 // called), so cb_host() returns null: a fault is a silent no-op returning the

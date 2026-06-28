@@ -1,4 +1,4 @@
-// FD-004 #8: `Redim` accepts array rank markers on the element type.
+// `Redim` accepts array rank markers on the element type.
 
 // Plain — resize a 1D Integer array.
 Redim arr1 As Integer[10]

@@ -27,7 +27,7 @@ pub fn interpret(program: &Program, interner: &Interner) -> Result<i32, InterpEr
     interp.run()
 }
 
-/// The interpreter exposed as a [`Backend`] (FD-044). Runs the program
+/// The interpreter exposed as a [`Backend`]. Runs the program
 /// in-process via [`interpret`] and reports the program's own exit code; an
 /// interpreter trap becomes a [`BackendError`] the driver maps to exit 1.
 ///

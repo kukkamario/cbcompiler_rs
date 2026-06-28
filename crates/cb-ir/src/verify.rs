@@ -646,7 +646,7 @@ mod tests {
         verify(&prog);
     }
 
-    // ── Strong block-ID invariant (FD-023) ──────────────────────────────
+    // ── Strong block-ID invariant ──────────────────────────────
 
     #[test]
     #[should_panic(expected = "has no blocks")]
@@ -707,7 +707,7 @@ mod tests {
         verify(&prog);
     }
 
-    // ── body_index / bijection checks (FD-023) ──────────────────────────
+    // ── body_index / bijection checks ──────────────────────────
 
     #[test]
     #[should_panic(expected = "body_index 5 out of range")]
@@ -782,7 +782,7 @@ mod tests {
         verify(&prog);
     }
 
-    // ── Accept-cases for previously untested IR (FD-023) ─────────────────
+    // ── Accept-cases for previously untested IR ─────────────────
 
     #[test]
     fn accept_halt_terminator() {

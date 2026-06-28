@@ -87,11 +87,11 @@ fn arithmetic_mul() {
 #[test]
 fn float_arithmetic() {
     let out = run("Dim x As Float = 1.5 + 2.5\nPrint Str(x)");
-    // FD-046: CB's float format always keeps >=1 fractional digit -> "4.0".
+    // CB's float format always keeps >=1 fractional digit -> "4.0".
     assert_eq!(out, "4.0\n");
 }
 
-// FD-020: Int(Float) rounds to nearest, ties away from zero (cb_runtime.md
+// Int(Float) rounds to nearest, ties away from zero (cb_runtime.md
 // §Math). Positive ties round up, negative ties round down (away from zero),
 // and non-tie values round to the nearest — not truncation toward zero.
 #[test]
@@ -115,7 +115,7 @@ fn int_conversion_rounds_half_away_from_zero() {
 
 #[test]
 fn str_of_float_uses_cb_six_sig_fig_format() {
-    // FD-046: number->String is delegated to the shared core-runtime formatter.
+    // number->String is delegated to the shared core-runtime formatter.
     // Fixed-point keeps >=1 fractional digit; 6 sig figs; scientific outside
     // E in [-3, 7]. End-to-end check that the interp routes Str(Float) there.
     let cases = [
@@ -134,7 +134,7 @@ fn str_of_float_uses_cb_six_sig_fig_format() {
 
 #[test]
 fn float_of_string_is_lenient_prefix_parse() {
-    // FD-046: String->Float is now a lenient strtod-style prefix parse (the old
+    // String->Float is now a lenient strtod-style prefix parse (the old
     // interp did a strict full parse: "22yo" -> 0.0). Matches the real CoolBasic.
     assert_eq!(run(r#"Print Str(Float("22yo"))"#), "22.0\n");
     assert_eq!(run(r#"Print Str(Float("3.14xyz"))"#), "3.14\n");
@@ -143,7 +143,7 @@ fn float_of_string_is_lenient_prefix_parse() {
 
 #[test]
 fn int_of_string_takes_leading_integer() {
-    // FD-046: String->Int parses a leading integer, stopping at the first
+    // String->Int parses a leading integer, stopping at the first
     // non-digit (including '.', so "22.5" -> 22 — a deliberate divergence from
     // CB's exact-".5"-rounds-up quirk).
     assert_eq!(run(r#"Print Str(Int("3x"))"#), "3\n");
@@ -206,7 +206,7 @@ fn abs_float() {
 
 #[test]
 fn unary_plus_is_abs_int() {
-    // FD-028: unary `+` is absolute value, identical to Abs.
+    // unary `+` is absolute value, identical to Abs.
     let out = run("Print Str(+(-5))");
     assert_eq!(out, "5\n");
 }
@@ -219,7 +219,7 @@ fn unary_plus_is_abs_float() {
 
 #[test]
 fn unary_plus_const_folds_to_abs() {
-    // FD-028: `+` in a constant expression folds to the absolute value.
+    // `+` in a constant expression folds to the absolute value.
     let out = run("Const c = +(-7)\n\
          Print Str(c)");
     assert_eq!(out, "7\n");
@@ -317,7 +317,7 @@ fn type_delete_and_continue_iteration() {
     assert_eq!(out, "4\n");
 }
 
-// FD-034 item 3: For Each over a rank-2 array visits every element in row-major
+// For Each over a rank-2 array visits every element in row-major
 // order (last index varies fastest), not just dimension 0. Before the fix this
 // trapped on the first iteration (single flat index into a 2-D array).
 #[test]
@@ -335,7 +335,7 @@ fn for_each_multidim_array_row_major() {
     assert_eq!(out, "1\n2\n3\n4\n5\n6\n");
 }
 
-// FD-034 item 2: `Delete <field>` is an rvalue delete that actually frees the
+// `Delete <field>` is an rvalue delete that actually frees the
 // node — it is no longer silently dropped. The freed node is unlinked from the
 // Type list, so a later For Each sees only the survivor. Before the fix the
 // statement emitted no IR and the node stayed in the list (total would be 3).
@@ -358,7 +358,7 @@ fn delete_field_frees_node() {
     assert_eq!(out, "1\n");
 }
 
-// FD-034 item 2: the same for `Delete <array element>` — the referenced node is
+// the same for `Delete <array element>` — the referenced node is
 // freed, leaving only the survivor in the Type list.
 #[test]
 fn delete_array_element_frees_node() {
@@ -537,7 +537,7 @@ fn observer_sees_function_calls() {
     assert_eq!(output_str, "42\n");
 }
 
-// FD-019: a user `Call`'s result is delivered to `after_inst`. When the Call
+// a user `Call`'s result is delivered to `after_inst`. When the Call
 // pushes a frame the result isn't known yet, so the hook is deferred until the
 // callee returns and fired against the call site — previously it was skipped
 // entirely, leaving a debugger watching the call site blind to the result.
@@ -589,7 +589,7 @@ fn observer_sees_call_result() {
     );
 }
 
-// FD-015: a runtime function that raises an error via the trap channel
+// a runtime function that raises an error via the trap channel
 // surfaces as an `Err(RuntimeError)` from `run` AND fires `on_runtime_error`.
 struct ErrorRecorder {
     errors: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
@@ -626,7 +626,7 @@ fn observer_sees_runtime_error() {
     assert_eq!(*seen.borrow(), vec!["boom".to_string()]);
 }
 
-// FD-043: the runtime teardown hook fires `on_exit` exactly once on every
+// the runtime teardown hook fires `on_exit` exactly once on every
 // termination path, carrying the resolved process exit code.
 struct ExitRecorder {
     exits: std::rc::Rc<std::cell::RefCell<Vec<i32>>>,
@@ -776,7 +776,7 @@ fn trap_double_delete() {
     ));
 }
 
-// ── FD-019: interpreter correctness & memory-safety regressions ─────────
+// ── interpreter correctness & memory-safety regressions ─────────
 
 #[test]
 fn shift_right_logical_on_negative() {
@@ -807,7 +807,7 @@ fn shift_right_basic() {
 
 #[test]
 fn value_struct_field_write_then_read() {
-    // The defining FD-019 bug #2 case: a write to a value-struct field must
+    // A write to a value-struct field must
     // persist (it previously updated a throwaway register copy).
     let out = run("Struct Vec2\n\
            Field x As Int\n\
@@ -864,7 +864,7 @@ fn array_of_structs_field_write_read() {
 
 #[test]
 fn array_of_structs_defaults_to_zero_struct() {
-    // FD-019 bug #4: array-of-struct elements default to a zero-initialised
+    // array-of-struct elements default to a zero-initialised
     // struct, not Null — field access must not trap.
     let out = run("Struct P\n\
            Field x As Int\n\
@@ -876,7 +876,7 @@ fn array_of_structs_defaults_to_zero_struct() {
 
 #[test]
 fn array_negative_dimension_is_clean_error() {
-    // FD-019 bug #3: a negative dimension must be a clean RuntimeError, not a
+    // a negative dimension must be a clean RuntimeError, not a
     // multi-exabyte allocation that aborts the process.
     let err = run_err(
         "Dim n As Int = -1\n\
@@ -932,7 +932,7 @@ fn negative_array_index_write_is_clean_error() {
     );
 }
 
-// ── FD-032: first-class functions (address-of + indirect call) ─────────
+// ── first-class functions (address-of + indirect call) ─────────
 
 #[test]
 fn function_pointer_roundtrip() {
@@ -996,7 +996,7 @@ fn trap_null_function_pointer() {
     ));
 }
 
-// ── FD-032: multi-dimensional arrays ───────────────────────────────────
+// ── multi-dimensional arrays ───────────────────────────────────
 
 #[test]
 fn array_len_by_dimension() {
@@ -1009,7 +1009,7 @@ fn array_len_by_dimension() {
     assert_eq!(out, "2\n2\n3\n");
 }
 
-// ── FD-032: heap lifecycle under iteration ─────────────────────────────
+// ── heap lifecycle under iteration ─────────────────────────────
 
 #[test]
 fn for_each_multiple_mid_list_deletes() {
@@ -1042,12 +1042,12 @@ fn for_each_multiple_mid_list_deletes() {
     assert_eq!(out, "9\n");
 }
 
-// ── FD-035: narrow integer widths + Int-as-boolean (cb_syntax.md §3.1/§3.4) ──
+// ── narrow integer widths + Int-as-boolean (cb_syntax.md §3.1/§3.4) ──
 
 #[test]
 fn short_holds_documented_unsigned_range() {
     // cb_syntax.md §3.1: Short is 16-bit UNSIGNED, so 40000 is in range. The
-    // Dim initializer is now coerced to the declared type (FD-035), so `s`
+    // Dim initializer is now coerced to the declared type, so `s`
     // genuinely holds a Value::Short(u16) rather than a plain Int.
     let out = run("Dim s As Short = 40000\nPrint Str(s)");
     assert_eq!(out, "40000\n");
@@ -1057,7 +1057,7 @@ fn short_holds_documented_unsigned_range() {
 fn short_wraps_modulo_65536_on_assignment() {
     // Short is 16-bit unsigned: 40000 + 30000 = 70000 narrows to 4464
     // (70000 mod 65536) on the store-back Convert. A non-literal value avoids
-    // the E0326 literal-overflow error (FD-035 widen-to-Int + narrow-on-store).
+    // the E0326 literal-overflow error (widen-to-Int + narrow-on-store).
     let out = run("Dim s As Short = 40000\ns = s + 30000\nPrint Str(s)");
     assert_eq!(out, "4464\n");
 }
@@ -1065,22 +1065,22 @@ fn short_wraps_modulo_65536_on_assignment() {
 #[test]
 fn true_false_are_int_one_and_zero() {
     // There is no Bool type: True/False are the Int constants 1/0, so they add
-    // like integers (FD-035, cb_syntax.md §1.6).
+    // like integers (cb_syntax.md §1.6).
     let out = run("Print Str(True + True)");
     assert_eq!(out, "2\n");
 }
 
 #[test]
 fn comparison_yields_int_one_or_zero() {
-    // Comparisons yield Int 1/0 (FD-035), printable as plain integers.
+    // Comparisons yield Int 1/0, printable as plain integers.
     assert_eq!(run("Print Str(5 > 3)"), "1\n");
     assert_eq!(run("Print Str(5 < 3)"), "0\n");
 }
 
 #[test]
 fn dim_float_from_int_literal_coerces() {
-    // `Dim x As Float = 1` coerces the Int literal to Float on init (FD-035
-    // broadened the Dim-init coercion). Float 1.0 prints as "1.0" (FD-046).
+    // `Dim x As Float = 1` coerces the Int literal to Float on init.
+    // Float 1.0 prints as "1.0".
     let out = run("Dim x As Float = 1\nPrint Str(x)");
     assert_eq!(out, "1.0\n");
 }
@@ -1095,7 +1095,7 @@ fn byte_wraps_modulo_256_on_assignment() {
     assert_eq!(out, "44\n");
 }
 
-// ── FD-032: observer across nested calls ───────────────────────────────
+// ── observer across nested calls ───────────────────────────────
 
 #[test]
 fn observer_sees_nested_call_results() {

@@ -1,34 +1,33 @@
 ---
 source: crates/cb-frontend/tests/parser_snapshots.rs
-assertion_line: 563
 expression: "snapshot_parser_fixture(\"delete_statement\")"
 ---
 Program (8 top-level statements)
-  Stmt::Delete @ 315..323
-    Expr::Ident(sigil=None) @ 322..323
-  Stmt::Delete @ 324..339
-    Expr::Field @ 331..339
-      Expr::Ident(sigil=None) @ 331..332
-  Stmt::Delete @ 340..353
-    Expr::Index(rank=1) @ 347..353
-      Expr::Ident(sigil=None) @ 347..350
-      Expr::IntLit(0) @ 351..352
-  Stmt::Delete @ 520..540
-    Expr::Call(args=1) @ 527..540
-      Expr::Ident(sigil=None) @ 527..532
-      Expr::Ident(sigil=None) @ 533..539
-  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 680..703
-    Expr::Field @ 683..689
-      Expr::Ident(sigil=None) @ 683..684
-    Stmt::Delete @ 695..703
-      Expr::Ident(sigil=None) @ 702..703
-  Stmt::Error @ 827..828
-  Stmt::Error @ 1028..1029
-  Stmt::ExprStmt @ 1030..1037
-    Expr::Call(args=1) @ 1030..1037
-      Expr::Ident(sigil=None) @ 1030..1035
-      Expr::IntLit(1) @ 1036..1037
+  Stmt::Delete @ 307..315
+    Expr::Ident(sigil=None) @ 314..315
+  Stmt::Delete @ 316..331
+    Expr::Field @ 323..331
+      Expr::Ident(sigil=None) @ 323..324
+  Stmt::Delete @ 332..345
+    Expr::Index(rank=1) @ 339..345
+      Expr::Ident(sigil=None) @ 339..342
+      Expr::IntLit(0) @ 343..344
+  Stmt::Delete @ 512..532
+    Expr::Call(args=1) @ 519..532
+      Expr::Ident(sigil=None) @ 519..524
+      Expr::Ident(sigil=None) @ 525..531
+  Stmt::If(form=SingleLine, elseifs=0, has_else=false) @ 672..695
+    Expr::Field @ 675..681
+      Expr::Ident(sigil=None) @ 675..676
+    Stmt::Delete @ 687..695
+      Expr::Ident(sigil=None) @ 694..695
+  Stmt::Error @ 819..820
+  Stmt::Error @ 1020..1021
+  Stmt::ExprStmt @ 1022..1029
+    Expr::Call(args=1) @ 1022..1029
+      Expr::Ident(sigil=None) @ 1022..1027
+      Expr::IntLit(1) @ 1028..1029
 
 --- DIAGNOSTICS ---
-ERROR[E0206] expected expression, found end of line @ 827..828
-ERROR[E0206] expected expression, found `:` @ 1028..1029
+ERROR[E0206] expected expression, found end of line @ 819..820
+ERROR[E0206] expected expression, found `:` @ 1020..1021

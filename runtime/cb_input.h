@@ -1,7 +1,7 @@
 #ifndef CB_INPUT_H
 #define CB_INPUT_H
 
-// Internal input glue (FD-013 Batch 5). NOT part of the catalog ABI and NOT
+// Internal input glue. NOT part of the catalog ABI and NOT
 // registered as CB-visible runtime functions. cb_gfx.cpp owns the Allegro event
 // queue and calls these from DrawScreen to advance the input state machine each
 // frame; cb_input.cpp implements them. They reference ALLEGRO_EVENT, so they

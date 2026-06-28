@@ -1,4 +1,4 @@
-// FD-017 image additions (single-frame). Headless: MakeImage falls back to a
+// Image additions (single-frame). Headless: MakeImage falls back to a
 // memory bitmap and clears to opaque black, so clone / resize / rotate / pick /
 // overlap / collide / default-mask all run without a display.
 

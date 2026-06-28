@@ -1,7 +1,7 @@
-//! FD-021 regression tests: the parser must never abort the process on
+//! Regression tests: the parser must never abort the process on
 //! pathologically nested input.
 //!
-//! Before FD-021 the parser recursed once per nesting level with no depth
+//! Earlier the parser recursed once per nesting level with no depth
 //! cap, so a few-thousand-deep `((((…))))` overflowed the stack and aborted
 //! (`exit 134`). The `parser_props` `no_panic_on_arbitrary_utf8` proptest
 //! can't realistically generate thousands of balanced delimiters, so these
@@ -27,8 +27,8 @@ fn has_nesting_too_deep(r: &cb_frontend::ParseResult) -> bool {
 
 #[test]
 fn deeply_nested_parens_yield_diagnostic_not_abort() {
-    // `x = ((((…1…))))` — the exact shape that aborted the process before
-    // FD-021. Reaching this line at all (no `exit 134`) is most of the test.
+    // `x = ((((…1…))))` — the exact shape that aborted the process. Reaching
+    // this line at all (no `exit 134`) is most of the test.
     let src = format!("x = {}1{}", "(".repeat(DEEP), ")".repeat(DEEP));
     let r = parse_src(&src);
     assert!(
@@ -112,7 +112,7 @@ fn moderately_nested_input_still_parses_without_diagnostic() {
     );
 }
 
-// ── SpanExt::slice (FD-021 #2) ──────────────────────────────────────────
+// ── SpanExt::slice ───────────────────────────────────────────────────────
 
 #[test]
 fn span_slice_on_valid_range_returns_text() {

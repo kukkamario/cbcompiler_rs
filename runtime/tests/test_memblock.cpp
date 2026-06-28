@@ -1,4 +1,4 @@
-// FD-039: unit tests for the memory-block runtime (cb_memblock.cpp). These
+// Unit tests for the memory-block runtime (cb_memblock.cpp). These
 // drive the extern "C" cb_rt_* entry points directly (like test_input.cpp), so
 // the target links cb_runtime. No display / Allegro is touched.
 //

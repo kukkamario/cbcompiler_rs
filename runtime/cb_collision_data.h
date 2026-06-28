@@ -1,8 +1,8 @@
 #ifndef CB_COLLISION_DATA_H
 #define CB_COLLISION_DATA_H
 
-// Pure collision + picking geometry for the sprite-Object subsystem (FD-036
-// Phase 5). Header-only and Allegro-free so the overlap predicates, the box/
+// Pure collision + picking geometry for the sprite-Object subsystem.
+// Header-only and Allegro-free so the overlap predicates, the box/
 // circle collision-resolution math, the contact-angle formula, and the object
 // raycast/point tests can be unit-tested without a display (mirrors
 // cb_object_data.h / cb_camera_math.h / cb_map_data.h). cb_object.cpp wraps the

@@ -13,8 +13,8 @@ pub trait SpanExt {
     /// Returns `""` if the span is out of range, inverted, or lands on a
     /// non-`char`-boundary byte offset — it never panics. This matches the
     /// defensive convention of `parser::span_slice` and
-    /// `string_value::slice`; FD-021 closed the gap where this method used
-    /// raw `&source[start..end]` indexing (a latent panic on a bad offset).
+    /// `string_value::slice`; raw `&source[start..end]` indexing here would be
+    /// a latent panic on a bad offset.
     fn slice(self, source: &str) -> &str;
 }
 

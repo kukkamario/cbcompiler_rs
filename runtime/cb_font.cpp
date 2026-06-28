@@ -1,4 +1,4 @@
-// CoolBasic font resolution (FD-018).
+// CoolBasic font resolution.
 //
 // Resolves a font *family name* (e.g. "Courier New") to a font file path so
 // LoadFont and the default font can be loaded by name. Font arguments that look
@@ -213,7 +213,7 @@ std::string cb::font::find(const char* font, bool is_bold, bool is_italic) {
 // FONTCONFIG_FOUND is defined by runtime/CMakeLists.txt when find_package
 // (Fontconfig) succeeds on a non-Windows build; it then links the library too.
 // Without it (fontconfig not installed) this branch compiles out and font
-// resolution falls back to Allegro's builtin font — see CMakeLists (FD-022).
+// resolution falls back to Allegro's builtin font — see CMakeLists.
 #ifdef FONTCONFIG_FOUND
 #include <fontconfig/fontconfig.h>
 

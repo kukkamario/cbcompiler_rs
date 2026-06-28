@@ -1,5 +1,5 @@
-' Walk the type-instance linked list backward via Previous() (FD-049 review
-' F14), starting from Last and stepping off the first node to Null. CoolBasic
+' Walk the type-instance linked list backward via Previous(), starting from Last
+' and stepping off the first node to Null. CoolBasic
 ' uses Previous (not Before).
 Type Node
     Field v As Int

@@ -5,7 +5,7 @@ t = Timer()
 Wait(1)
 If Timer() >= t Then Print "timer_monotonic"
 
-// FD-017 date/time/process info — environment-dependent, so assert structure
+// Date/time/process info — environment-dependent, so assert structure
 // (exact values change every run) and that each call succeeds.
 If Len(Time()) = 8 Then Print "time_len_ok"
 If Len(Date()) > 0 Then Print "date_ok"

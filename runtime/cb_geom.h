@@ -3,7 +3,7 @@
 
 // Pure geometry helpers shared by the graphics runtime (cb_gfx.cpp) and the
 // native C++ unit tests. Header-only (inline) so this Allegro-free logic can be
-// exercised without linking cb_gfx.cpp or Allegro. (FD-022)
+// exercised without linking cb_gfx.cpp or Allegro.
 
 // AABB overlap helper (CoolBasic's RectRectTest: box = left=x, right=x+w,
 // top=y-h, bottom=y; epsilon keeps shared edges from counting).

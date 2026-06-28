@@ -1,12 +1,12 @@
-//! CoolBasic parser. Spec: `docs/cb_syntax.md` §2 and FD-002.
+//! CoolBasic parser. Spec: `docs/cb_syntax.md` §2.
 //!
-//! Top-down recursive-descent parser with a Pratt loop for expressions; see
-//! FD-002 for the architectural rationale. The parser is recovering — every
+//! Top-down recursive-descent parser with a Pratt loop for expressions. The
+//! parser is recovering — every
 //! [`ParseError`] is captured at the nearest statement boundary, turned into
 //! an `Stmt::Error` node, and the cursor resynchronises past the next sync
 //! token (see [`Parser::sync_to_stmt_boundary`]). Expression-level recovery
-//! is currently coarse — errors bubble to statement boundary. Refine in a
-//! future FD when concrete cases motivate it.
+//! is currently coarse — errors bubble to statement boundary. Refine when
+//! concrete cases motivate it.
 
 use std::num::NonZeroU32;
 
@@ -27,11 +27,11 @@ pub const E_UNTERMINATED_BLOCK: DiagnosticCode = DiagnosticCode::new("E0203");
 pub const E_MISMATCHED_END_KEYWORD: DiagnosticCode = DiagnosticCode::new("E0204");
 pub const E_INVALID_TYPE_EXPR: DiagnosticCode = DiagnosticCode::new("E0205");
 pub const E_BAD_STATEMENT: DiagnosticCode = DiagnosticCode::new("E0206");
-// E0207 retired (FD-031) — a reserved word can never reach a name slot (the
+// E0207 retired — a reserved word can never reach a name slot (the
 // lexer emits `Keyword` tokens, lexer.rs:972-977), so such inputs are rejected
 // earlier as E0201/E0202; code number left unused.
 // E0208 (E_INVALID_ESCAPE) and E0209 (E_BAD_RAW_INDENT) live in
-// `string_value.rs` next to their emission sites. FD-004 #17.
+// `string_value.rs` next to their emission sites.
 pub const E_MULTI_NAME_NOT_ALLOWED: DiagnosticCode = DiagnosticCode::new("E0210");
 pub const E_FIELD_OUTSIDE_TYPE_BODY: DiagnosticCode = DiagnosticCode::new("E0211");
 pub const E_SINGLELINE_IF_DISALLOWS_ELSEIF: DiagnosticCode = DiagnosticCode::new("E0212");
@@ -42,7 +42,7 @@ pub const E_DUPLICATE_DEFAULT: DiagnosticCode = DiagnosticCode::new("E0216");
 pub const E_NEXT_SIGIL_MISMATCH: DiagnosticCode = DiagnosticCode::new("E0217");
 /// Expression or type nesting exceeded [`MAX_RECURSION_DEPTH`]. Emitted
 /// instead of letting unbounded parser recursion overflow the stack and
-/// abort the process. FD-021.
+/// abort the process.
 pub const E_NESTING_TOO_DEEP: DiagnosticCode = DiagnosticCode::new("E0218");
 /// Internal compiler error — emitted only from defensive branches that
 /// should be unreachable by the parser invariants. Surfaced (rather than
@@ -370,7 +370,7 @@ pub(crate) struct Parser<'t> {
     /// level) would parse-error, sync, stop at the same token, and loop
     /// forever. See `recovery_endfunction_at_top_level_does_not_loop`.
     ///
-    /// FD-004 #9: the `Span` field is preserved so any forced-progress
+    /// The `Span` field is preserved so any forced-progress
     /// `Stmt::Error` node can span from the original error to the bumped
     /// token, instead of pinning the Error to just the bumped token's span.
     last_error: Option<(usize, Span)>,
@@ -380,7 +380,7 @@ pub(crate) struct Parser<'t> {
     /// (e.g. thousands of `(`) yields an `E0218` diagnostic instead of a
     /// stack-overflow abort. Reset to 0 at each statement boundary in
     /// `parse_stmt`, so a `?`-aborted sub-parse never inflates the next
-    /// statement's depth. FD-021.
+    /// statement's depth.
     recursion_depth: u32,
 }
 
@@ -424,7 +424,7 @@ impl<'t> Parser<'t> {
         // operator chains, and nested calls all recurse through here, so a
         // pathological input (`((((…))))`, `----…x`, `f(g(h(…)))`) would
         // otherwise overflow the stack and abort. Inc/dec is balanced on
-        // every path by splitting the work into `_inner`. FD-021.
+        // every path by splitting the work into `_inner`.
         self.recursion_depth += 1;
         if self.recursion_depth > MAX_RECURSION_DEPTH {
             self.recursion_depth -= 1;
@@ -473,7 +473,7 @@ impl<'t> Parser<'t> {
 
     /// Emit the `E0218` "nesting too deep" diagnostic at the current token
     /// and return an `Expr::Error` recovery node. Used by the recursion
-    /// guard in [`Parser::parse_expr_bp`]. FD-021.
+    /// guard in [`Parser::parse_expr_bp`].
     fn nesting_too_deep_expr(&mut self) -> NodeId {
         let span = self.cursor.peek_tok().span;
         self.diagnostics.push(Diagnostic::error(
@@ -521,7 +521,7 @@ impl<'t> Parser<'t> {
                 Ok(self.alloc(Node::Expr(Expr::StrLit { value, kind }), tok.span))
             }
             // `True`/`False` are the Integer constants 1/0 — there is no Bool
-            // type (FD-035, `docs/cb_syntax.md` §1.6).
+            // type (`docs/cb_syntax.md` §1.6).
             TokenKind::Keyword(Kw::True) => {
                 self.cursor.bump();
                 Ok(self.alloc(Node::Expr(Expr::IntLit(1)), tok.span))
@@ -538,7 +538,7 @@ impl<'t> Parser<'t> {
             // Next(n), String(s, count) — each is also a type or loop
             // keyword, so this arm only fires when followed by `(`; otherwise it
             // falls through to the type/keyword handling elsewhere. (`Bool(v)`
-            // was removed with the Bool type — FD-035.)
+            // was removed with the Bool type.)
             TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::Next | Kw::String)
                 if matches!(self.cursor.peek_n(1), TokenKind::Punct(Punct::LParen)) =>
             {
@@ -599,7 +599,7 @@ impl<'t> Parser<'t> {
         // `kind` is supplied by [`postfix_op`], which is the single source of
         // truth for "this token starts a postfix": the exhaustive match below
         // cannot drift out of sync with the binding-power table the way the
-        // former peek-and-re-match + `unreachable!` arm could. FD-021.
+        // former peek-and-re-match + `unreachable!` arm could.
         match kind {
             PostfixKind::Call => {
                 self.cursor.bump(); // `(`
@@ -617,8 +617,8 @@ impl<'t> Parser<'t> {
                     .cursor
                     .expect_punct(Punct::RBracket, "in index expression")?;
                 if indices.is_empty() {
-                    // `arr[]` is not a valid index expression. FD-004 #6:
-                    // returning a malformed `Index { indices: [] }` would
+                    // `arr[]` is not a valid index expression.
+                    // Returning a malformed `Index { indices: [] }` would
                     // force every downstream consumer to special-case empty
                     // indices; `Expr::Error` is the standard
                     // diagnostic-already-emitted carrier.
@@ -639,7 +639,7 @@ impl<'t> Parser<'t> {
                     span,
                 ))
             }
-            // `\` and `.` are interchangeable `Type` field accessors (FD-028):
+            // `\` and `.` are interchangeable `Type` field accessors:
             // `player\x` is the legacy CoolBasic form, `player.x` the dotted
             // alias. Both produce `Expr::Field`.
             PostfixKind::Field => {
@@ -694,7 +694,7 @@ impl<'t> Parser<'t> {
                 // Trailing comma / empty list element: a `,` immediately
                 // followed by the closer (or another `,`). Targeted message
                 // rather than the generic "expected expression" the recursive
-                // `parse_expr_bp` would otherwise produce (F-P6).
+                // `parse_expr_bp` would otherwise produce.
                 if self.cursor.at_punct(close) || self.cursor.at_punct(Punct::Comma) {
                     return Err(ParseError {
                         diag: Box::new(Diagnostic::error(
@@ -731,9 +731,9 @@ impl<'t> Parser<'t> {
                 .expect_punct(Punct::RBracket, "in `New` array dimensions")?;
             let span = new_tok.span.merge(close.span);
             if dims.is_empty() {
-                // FD-004 #6: previously emitted a diagnostic and returned a
+                // Previously emitted a diagnostic and returned a
                 // malformed `NewKind::Array { dims: [] }`; downstream code
-                // (e.g. lvalue checks for FD-005 `Delete`) would then need to
+                // (e.g. lvalue checks for `Delete`) would then need to
                 // special-case the empty-dims shape. `Expr::Error` is the
                 // standard "diagnostic was already emitted" carrier.
                 self.diagnostics.push(Diagnostic::error(
@@ -761,7 +761,7 @@ impl<'t> Parser<'t> {
 
     /// Parse a full type expression: an atom (primitive, named, fn-ptr, or
     /// parenthesised) followed by zero or more postfix array brackets. See
-    /// `cb_syntax.md` §5.4 and the FD-002 plan §B.6.
+    /// `cb_syntax.md` §5.4.
     pub(crate) fn parse_type_expr(&mut self) -> Result<NodeId, ParseError> {
         let atom = self.parse_type_atom()?;
         self.parse_array_brackets(atom)
@@ -775,7 +775,7 @@ impl<'t> Parser<'t> {
         // return/param chains) always funnels through here, so the same
         // recursion guard as `parse_expr_bp` applies. The depth counter is
         // shared between expression and type recursion, which is the
-        // conservative choice for a mixed nest like `New (((T)))`. FD-021.
+        // conservative choice for a mixed nest like `New (((T)))`.
         self.recursion_depth += 1;
         if self.recursion_depth > MAX_RECURSION_DEPTH {
             self.recursion_depth -= 1;
@@ -975,7 +975,7 @@ impl<'t> Parser<'t> {
         // recursion gateways is balanced on success, but a `?`-aborted
         // sub-parse unwinds straight to here without running the matching
         // decrements; resetting prevents that leftover depth from causing a
-        // spurious `E0218` in a later statement. FD-021.
+        // spurious `E0218` in a later statement.
         self.recursion_depth = 0;
         // Forced-progress guard: if the previous call errored, ran sync, and
         // left us at exactly this position, retrying `parse_stmt_inner` here
@@ -994,7 +994,7 @@ impl<'t> Parser<'t> {
             if matches!(self.cursor.peek(), TokenKind::Eof) {
                 // Allocate a placeholder Error so the program still has a node
                 // attributed to this position; the diagnostic was already
-                // emitted on the previous turn. FD-004 #9: span the Error
+                // emitted on the previous turn. Span the Error
                 // from the original error site to the bumped token so the
                 // recovered range is visible.
                 let span = orig_span.merge(bad.span);
@@ -1159,7 +1159,7 @@ impl<'t> Parser<'t> {
     }
 
     /// Handle a statement that starts with an `Ident`: either a `Label` (per
-    /// §6.4), an implicit declaration with `As Type =` (per §4.1, FD-004 #4),
+    /// §6.4), an implicit declaration with `As Type =` (per §4.1),
     /// or an assignment / expression statement / paren-less call.
     ///
     /// Uses pure lookahead (`peek_n`); never bumps speculatively.
@@ -1203,7 +1203,7 @@ impl<'t> Parser<'t> {
     }
 
     /// Parse an implicit declaration with `As` annotation:
-    /// `<name>[<sigil>] As <Type> = <expr>` (§4.1, FD-004 #4). Produces a
+    /// `<name>[<sigil>] As <Type> = <expr>` (§4.1). Produces a
     /// single-name local `Stmt::VarDecl` with the type and initializer. The `= <expr>`
     /// tail is required; without it sema can't tell an implicit decl from a
     /// dangling `Ident As Type` (which has no statement meaning), and any
@@ -1400,7 +1400,7 @@ impl<'t> Parser<'t> {
                 TokenKind::IntLit(v) if v > u32::MAX as u64 => {
                     // A positive integer literal, but too large for the u32
                     // loop-break depth. Distinct message from the generic
-                    // non-positive / non-literal case (F-P8).
+                    // non-positive / non-literal case.
                     self.cursor.bump();
                     self.diagnostics.push(Diagnostic::error(
                         E_BREAK_COUNT_NOT_POSITIVE_INT_LITERAL,
@@ -1588,7 +1588,7 @@ impl<'t> Parser<'t> {
                 span
             }
             _ => {
-                // FD-004 #13: `parse_block_until` should only return when a
+                // `parse_block_until` should only return when a
                 // closer-shaped token is present (or EOF, which it already
                 // diagnosed). If we somehow land here, surface a structured
                 // internal-error diagnostic so a future invariant violation
@@ -1850,7 +1850,7 @@ impl<'t> Parser<'t> {
     /// next token is `closer`, returns its span. Otherwise returns the current
     /// span and — unless we're at EOF (where `parse_block_until` already
     /// emitted E0203) — reports the wrong/missing closer via
-    /// `consume_block_closer`. Shared by `While`/`For`/`For Each`. (F-P2)
+    /// `consume_block_closer`. Shared by `While`/`For`/`For Each`.
     fn close_loop_block(&mut self, closer: Kw, opener: Span, name: &str) -> Span {
         match self.cursor.peek() {
             TokenKind::Keyword(kw) if kw == closer => self.cursor.bump().span,
@@ -1905,7 +1905,7 @@ impl<'t> Parser<'t> {
                 // emitted E0203 — don't double-report. Otherwise the block was
                 // closed by a token that isn't `Forever`/`While`, so report it
                 // via `consume_block_closer` like While/For do through
-                // `close_loop_block` (F-P4). Fall back to RepeatForever so the
+                // `close_loop_block`. Fall back to RepeatForever so the
                 // AST is usable.
                 if !matches!(self.cursor.peek(), TokenKind::Eof) {
                     let _ = self.consume_block_closer(Kw::Forever, opener, "Repeat");
@@ -1995,8 +1995,8 @@ impl<'t> Parser<'t> {
         ))
     }
 
-    /// Parse an optional name after `Next` (§6.3). Accepts sigilled idents
-    /// (FD-004 #5); when the sigil differs from the loop variable's, emit
+    /// Parse an optional name after `Next` (§6.3). Accepts sigilled idents;
+    /// when the sigil differs from the loop variable's, emit
     /// `E0217` so the parser doesn't silently drop the user's name. The
     /// loop-var name match (e.g. `For i = … Next j`) is sema's job — only the
     /// sigil is checked here because the parser already has it.
@@ -2039,7 +2039,7 @@ impl<'t> Parser<'t> {
         let scrutinee = self.parse_expr_bp(0)?;
         self.cursor.eat_newlines();
         let mut arms = Vec::new();
-        // FD-004 #10: track the span of the first `Default` arm so a second
+        // Track the span of the first `Default` arm so a second
         // one can be diagnosed with a secondary label pointing at it.
         let mut first_default_span: Option<Span> = None;
         loop {
@@ -2653,7 +2653,7 @@ impl<'t> Parser<'t> {
         // (`Integer[]`) on the element. The bracket-with-expression that
         // follows (`[N, M]`) is the dim-list, which `parse_array_brackets`
         // refuses to consume (it only matches empty/comma-only brackets).
-        // FD-004 #8: this was previously `parse_type_atom`, which rejected
+        // This was previously `parse_type_atom`, which rejected
         // `Redim arr As Integer[][10]`.
         let elem_ty = self.parse_type_expr()?;
         self.cursor
@@ -2800,7 +2800,7 @@ fn is_expr_start(k: TokenKind) -> bool {
             // (Int(v), Float(v), String(s,n)). Treating them as expression
             // starts lets them appear as a paren-less call argument
             // (`Print String("ab", 3)`); parse_primary still requires the `(`.
-            // (`Bool(v)` was removed with the Bool type — FD-035.)
+            // (`Bool(v)` was removed with the Bool type.)
             | TokenKind::Keyword(Kw::Int | Kw::Integer | Kw::Float | Kw::String)
     )
 }
@@ -2879,11 +2879,10 @@ fn bare_name_span(tok_span: Span, sigil: Option<Sigil>) -> Span {
 }
 
 /// Whether a keyword names a primitive type accepted by the type-expression
-/// parser. `Int`/`Integer` are spelling-preserving aliases (FD-004 #3); sema
+/// parser. `Int`/`Integer` are spelling-preserving aliases; sema
 /// treats the pair as equivalent. The reserved-but-unsupported names (`Bool`,
 /// `Boolean`, `UInt`, `UInteger`, `ULong`) are accepted here so sema can
-/// reject them with a clear diagnostic rather than a generic parse error
-/// (FD-035).
+/// reject them with a clear diagnostic rather than a generic parse error.
 fn is_primitive_type_kw(kw: Kw) -> bool {
     matches!(
         kw,
@@ -2912,7 +2911,7 @@ const CMP_LBP: u8 = 16;
 /// [`E_NESTING_TOO_DEEP`] and recovers instead of recursing further.
 /// Generous for any real CoolBasic source (legitimate nesting runs to the
 /// low tens) yet far below the ~thousands of frames that overflow the
-/// process stack. FD-021.
+/// process stack.
 const MAX_RECURSION_DEPTH: u32 = 256;
 
 /// Minimum binding power for the LHS of a statement-level expression /
@@ -2920,7 +2919,7 @@ const MAX_RECURSION_DEPTH: u32 = 256;
 /// consume `=` (and the other comparison operators) into the LHS — letting
 /// `parse_expr_or_assign_stmt` see a top-level `=` and dispatch to
 /// assignment. See the doc on that function for the design rationale.
-/// FD-004 #15: derived from `CMP_LBP` (was a hand-written `17`).
+/// Derived from `CMP_LBP` (was a hand-written `17`).
 const STMT_LHS_MIN_BP: u8 = CMP_LBP + 1;
 
 /// Infix operator lookup: binding power **and** the [`BinOp`] it maps to,
@@ -2929,7 +2928,7 @@ const STMT_LHS_MIN_BP: u8 = CMP_LBP + 1;
 /// mapping into a single function means the two can never drift out of
 /// sync — the former `infix_bp`/`binop_from` split required an `.expect()`
 /// in the Pratt loop to bridge them, which was a latent panic on any future
-/// table edit. FD-021.
+/// table edit.
 ///
 /// The levels follow `docs/cb_syntax.md` §5.1; numeric values are chosen so
 /// every level is strictly above the one below it and unary / postfix slot
@@ -2968,9 +2967,8 @@ fn infix_op(kind: &TokenKind) -> Option<(u8, u8, BinOp)> {
 /// The binding power is 30, **one below** `^`'s right-bp (also 30) so that
 /// `-2 ^ 2` parses as `-(2 ^ 2)`, matching §5.1 (unary tighter than every
 /// infix except `^`, which extracts its right operand "around" the unary).
-/// The original FD-002 table had this at 32 — that produced `(-2) ^ 2`,
-/// which contradicts the spec. See the FD-002 plan §B.4 for the trace;
-/// recap:
+/// An earlier table had this at 32 — that produced `(-2) ^ 2`,
+/// which contradicts the spec. The trace:
 ///
 ///   `-2 ^ 2`:
 ///     outer `parse_expr_bp(0)` sees `-`, recurses with min_bp = 30.
@@ -2993,12 +2991,12 @@ fn prefix_op(kind: &TokenKind) -> Option<(u8, UnOp)> {
 /// callee/array/target before any surrounding operator. The [`PostfixKind`]
 /// is what [`Parser::parse_postfix`] dispatches on, so this table is the
 /// single source of truth for "is this a postfix token" — no `unreachable!`
-/// re-match. FD-021.
+/// re-match.
 fn postfix_op(kind: &TokenKind) -> Option<(u8, PostfixKind)> {
     Some(match kind {
         TokenKind::Punct(Punct::LParen) => (34, PostfixKind::Call),
         TokenKind::Punct(Punct::LBracket) => (34, PostfixKind::Index),
-        // Field access: `.` and its `\` alias (FD-028).
+        // Field access: `.` and its `\` alias.
         TokenKind::Punct(Punct::Dot) | TokenKind::Op(Op::BackSlash) => (34, PostfixKind::Field),
         _ => return None,
     })
@@ -3007,7 +3005,6 @@ fn postfix_op(kind: &TokenKind) -> Option<(u8, PostfixKind)> {
 /// Which postfix form a token introduces. Produced by [`postfix_op`] and
 /// consumed by [`Parser::parse_postfix`] via an exhaustive match, so the
 /// binding-power table and the postfix dispatch share one source of truth.
-/// FD-021.
 #[derive(Debug, Clone, Copy)]
 enum PostfixKind {
     /// `(args…)` — a call.
@@ -3320,7 +3317,7 @@ mod expr_tests {
 
     #[test]
     fn backslash_field_chain_mixed_with_dot() {
-        // FD-028: `\` and `.` are interchangeable field accessors and chain
+        // `\` and `.` are interchangeable field accessors and chain
         // freely. a\b.c\d → Field(Field(Field(a, b), c), d)
         let src = "a\\b.c\\d";
         let (arena, root, diags) = parse_expr(src);
@@ -3412,7 +3409,7 @@ mod expr_tests {
 
     #[test]
     fn str_lit_escaped() {
-        // FD-051: `$"..."` is the escape-aware form; `\n` decodes to a newline.
+        // `$"..."` is the escape-aware form; `\n` decodes to a newline.
         let src = "$\"a\\nb\"";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
@@ -3427,7 +3424,7 @@ mod expr_tests {
 
     #[test]
     fn str_lit_plain_is_verbatim() {
-        // FD-051: a plain `"..."` is verbatim — `\n` stays two characters.
+        // A plain `"..."` is verbatim — `\n` stays two characters.
         let src = "\"a\\nb\"";
         let (arena, root, diags) = parse_expr(src);
         assert!(diags.is_empty());
@@ -3776,7 +3773,7 @@ mod stmt_tests {
 
     #[test]
     fn arg_list_trailing_comma_reports() {
-        // F-P6: a trailing comma in a call argument list gets a targeted
+        // A trailing comma in a call argument list gets a targeted
         // "expected expression after `,`" message (E0206) instead of the
         // generic "expected expression, found ...".
         let src = "f(1,)\n";
@@ -3791,7 +3788,7 @@ mod stmt_tests {
 
     #[test]
     fn break_count_overflow() {
-        // F-P8: a positive integer literal that exceeds u32::MAX gets a
+        // A positive integer literal that exceeds u32::MAX gets a
         // distinct "exceeds the maximum" message (still E0213), not the
         // misleading "must be a positive integer literal".
         let src = "Break 5000000000\n";
@@ -4333,7 +4330,7 @@ mod block_tests {
 
     #[test]
     fn repeat_wrong_closer_reports() {
-        // F-P4: a non-EOF wrong closer (here `EndIf`) used to fabricate
+        // A non-EOF wrong closer (here `EndIf`) used to fabricate
         // RepeatForever with NO diagnostic. Now it routes through
         // `consume_block_closer` like While/For, emitting E0204.
         let src = "Repeat\n  a\nEndIf\n";
@@ -4354,7 +4351,7 @@ mod block_tests {
 
     #[test]
     fn repeat_eof_no_double_report() {
-        // F-P4: at EOF, parse_block_until already emits E0203 — don't add a
+        // At EOF, parse_block_until already emits E0203 — don't add a
         // second mismatched-closer diagnostic.
         let src = "Repeat\n  a\n";
         let r = parse_src(src);
@@ -4584,7 +4581,7 @@ mod block_tests {
         // A malformed `Case` value (`*` cannot start an expression) must not
         // discard the rest of the block: the parser records the diagnostic,
         // resyncs to the next arm, and the well-formed `Case 2` survives.
-        // (Mirrors `parse_record_body`'s per-item recovery — finding F-P3.)
+        // (Mirrors `parse_record_body`'s per-item recovery.)
         let src = "Select x\n  Case *\n  Case 2\n    a\nEndSelect\n";
         let r = parse_src(src);
         assert!(
@@ -5283,7 +5280,7 @@ mod decl_tests {
         );
     }
 
-    /// FD-004 #7: the stray-`Field` recovery loop stops at `:` so a trailing
+    /// The stray-`Field` recovery loop stops at `:` so a trailing
     /// statement on the same line still parses. The loop must NOT consume
     /// past the `:` separator.
     #[test]

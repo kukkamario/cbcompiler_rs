@@ -323,7 +323,7 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.extend_from_slice(indices);
             }
             Expr::Field { target, .. } => {
-                // FD-004 #12: field name is a bare Span, not a child node.
+                // Field name is a bare Span, not a child node.
                 out.push(*target);
             }
             Expr::Paren { inner } => out.push(*inner),
@@ -593,7 +593,7 @@ fn snapshot_parser_fixture_preserve_trivia(name: &str) -> String {
     };
     let (tokens, lex_diags) = tokenize(&src, FileId(0), opts);
     // Drop everything except significant tokens + Continuation, so the parser
-    // is exercised with the exact mix the FD-004 #1 fix targets. We KEEP
+    // is exercised with the exact mix that continuation handling targets. We KEEP
     // Continuation tokens precisely so the cursor's skip path runs.
     let tokens: Vec<_> = tokens
         .into_iter()

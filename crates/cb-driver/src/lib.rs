@@ -1,7 +1,7 @@
 //! `cb-driver` shared compile pipeline.
 //!
 //! The front half of the driver, factored out of `main.rs` so multiple thin
-//! binaries can share it (FD-044 executable-topology prep): read a `.cb` file,
+//! binaries can share it: read a `.cb` file,
 //! tokenize + parse it, render diagnostics, optionally dump the AST/IR, run
 //! semantic analysis, and lower to backend-agnostic IR. The pipeline is
 //! deliberately **backend-free** — it returns the lowered [`cb_ir::Program`]
@@ -113,7 +113,7 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
     // The AST dump needs only the parsed arena — never the runtime catalog or
     // semantic analysis — so emit it up front. This lets a dump-only build
     // (`--no-default-features`, no runtime linked) inspect the AST even when
-    // the runtime catalog cannot be loaded (DR-R1).
+    // the runtime catalog cannot be loaded.
     if opts.dump_ast {
         println!("Program ({} top-level statements):", program.len());
         let mut buf = String::new();
@@ -139,7 +139,7 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
     // Semantic analysis needs the runtime function catalog. The catalog is
     // required to lower/run the program or to dump IR, but a pure `--dump-ast`
     // does not need it — so a catalog-load failure is only fatal when the
-    // lowered IR is actually required (DR-R1). The AST is already printed.
+    // lowered IR is actually required. The AST is already printed.
     let runtime_catalog = match cb_runtime_sys::load_catalog() {
         Ok(c) => c,
         Err(msg) => {

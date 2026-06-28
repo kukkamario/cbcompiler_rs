@@ -1,4 +1,4 @@
-// CoolBasic math runtime (FD-013), C++20.
+// CoolBasic math runtime, C++20.
 //
 // CoolBasic semantics honored here:
 //   - Trigonometric functions work in DEGREES, not radians. Sin/Cos/Tan
@@ -86,7 +86,7 @@ extern "C" double cb_rt_wrap_angle(double a) {
     return a;
 }
 
-// ─── Curves & overlap (FD-017) ────────────────────────────────────────
+// ─── Curves & overlap ──────────────────────────────────────────────────
 //
 // CurveValue/CurveAngle ease `current` toward `target` by `1/smoothness` of
 // the gap each call. CurveAngle takes the shortest path around the 360° wrap.
@@ -128,7 +128,7 @@ extern "C" int32_t cb_rt_box_overlap(double x1, double y1, double w1, double h1,
 
 // ─── Random ───────────────────────────────────────────────────────────
 //
-// Random semantics follow CoolBasic exactly (FD-017): `randf()` is [0,1);
+// Random semantics follow CoolBasic exactly: `randf()` is [0,1);
 // `rand(n)` is uniform_int over the INCLUSIVE [0,n]. Hence Rand(low,high) is
 // inclusive [low,high] and Rnd(low,high) is [low,high). The `high < low` branch
 // is the documented special case (NOT a swap): Rnd -> randf()*low,

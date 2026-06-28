@@ -1,4 +1,4 @@
-// FD-022: unit tests for the pure UTF-8 helpers in cb_utf8.h. No display /
+// Unit tests for the pure UTF-8 helpers in cb_utf8.h. No display /
 // Allegro needed.
 
 #include "cb_utf8.h"

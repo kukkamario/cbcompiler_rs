@@ -1,4 +1,4 @@
-//! Link step for the AOT pipeline (FD-048).
+//! Link step for the AOT pipeline.
 //!
 //! Takes the emitted object file and drives a compiler *driver* (`clang` on
 //! Windows, `cc` on Unix) to produce a runnable executable: CRT startup glue +
@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Runtime link metadata, re-exported by build.rs from cb-runtime-sys (FD-048).
+// Runtime link metadata, re-exported by build.rs from cb-runtime-sys.
 const FLAVOR: &str = env!("CB_RT_FLAVOR"); // "full" | "sdkfree"
 const LIB_DIR: &str = env!("CB_RT_LIB_DIR"); // cb-runtime-sys OUT_DIR
 const RUNTIME_LIBS: &str = env!("CB_RT_RUNTIME_LIBS"); // comma-separated archive names
@@ -52,7 +52,7 @@ pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
     cmd.arg("-o").arg(exe);
 
     // Windows: force the dynamic (/MD) CRT to match Rust and the plugin-DLL
-    // model (CLAUDE.md, FD-048 decision 1). Three things are needed:
+    // model (CLAUDE.md). Three things are needed:
     //   * `/nodefaultlib:libcmt` neutralizes the static-CRT default the clang gnu
     //     driver hardcodes on the link line;
     //   * the dynamic CRT import libs are named *explicitly* — `-fms-runtime-lib=dll`
@@ -191,7 +191,7 @@ fn resolve_lib(lib_dir: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// Locate the link driver. On Windows, anchor on the vcpkg LLVM 18 prefix so we
-/// use the pinned clang and not any stray clang on PATH (FD-048 decision 1);
+/// use the pinned clang and not any stray clang on PATH;
 /// vcpkg surfaces `clang.exe` under `bin/` only via the junction prefix, else at
 /// `tools/llvm/`. On Unix, prefer the build-time discovered `cc`, then PATH.
 fn find_driver() -> Result<PathBuf, String> {

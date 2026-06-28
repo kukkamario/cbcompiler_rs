@@ -6,8 +6,7 @@ use std::process::Command;
 fn strip_unc(path: PathBuf) -> PathBuf {
     // Strip the \\?\ UNC prefix that confuses MSVC on Windows. Only relevant on
     // Windows. Requires a UTF-8 path; `build_full` later unwraps `to_str()` on
-    // this path anyway, so demanding UTF-8 here changes no valid-path behavior
-    // (FD-024).
+    // this path anyway, so demanding UTF-8 here changes no valid-path behavior.
     if !cfg!(windows) {
         return path;
     }
@@ -15,7 +14,7 @@ fn strip_unc(path: PathBuf) -> PathBuf {
     PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s))
 }
 
-/// Translation units with zero Allegro dependency: the FD-016 "core" (string
+/// Translation units with zero Allegro dependency: the "core" (string
 /// primitives in `cb_string.cpp` + the `cb_runtime_init` host handshake in
 /// `cb_host.cpp`), the Allegro-free functionality (`cb_math.cpp`, the string
 /// library `cb_strfuncs.cpp`, `cb_system.cpp`, the memory blocks in
@@ -23,7 +22,7 @@ fn strip_unc(path: PathBuf) -> PathBuf {
 /// compiled with `-DCB_NO_ALLEGRO` so its graphics/input/text `CB_FN` rows — the
 /// only things that would otherwise force a link against Allegro — are guarded
 /// out. This is enough to build a real catalog of every language-core runtime
-/// function (FD-033).
+/// function.
 const SDK_FREE_TUS: &[&str] = &[
     "cb_string.cpp",
     "cb_host.cpp",
@@ -111,7 +110,7 @@ fn main() {
         "CB_RUNTIME_FORCE_SDK_FREE and CB_RUNTIME_REQUIRE_ALLEGRO are both set — pick one"
     );
 
-    // Path selection (FD-033):
+    // Path selection:
     //   • forced SDK-free            → cc build, no probing
     //   • required Allegro           → CMake build, fatal on failure
     //   • auto (default)             → CMake when the toolchain is present and
@@ -180,7 +179,7 @@ fn build_sdk_free(out_dir: &Path, runtime_src: &Path) {
 
     println!("cargo:rustc-cfg=cb_no_allegro");
 
-    // FD-048: advertise this single core archive to dependents (cb-backend-llvm)
+    // Advertise this single core archive to dependents (cb-backend-llvm)
     // as `DEP_CB_RUNTIME_*` so the AOT link step links whatever runtime was
     // actually built — here the Allegro-free core, with no transitive closure.
     // `cc` already emitted the `rustc-link-*` directives for our own binary; this
@@ -190,12 +189,12 @@ fn build_sdk_free(out_dir: &Path, runtime_src: &Path) {
     println!("cargo:lib_dir={}", out_dir.display());
     println!("cargo:runtime_libs=cb_runtime_sdkfree");
 
-    // FD-045: the metadata catalog must match this SDK-free runtime's catalog,
+    // The metadata catalog must match this SDK-free runtime's catalog,
     // so compile it under the same CB_NO_ALLEGRO switch.
     build_meta(runtime_src, true);
 }
 
-/// Compile the metadata-only catalog object (FD-045): just `catalog.cpp` under
+/// Compile the metadata-only catalog object: just `catalog.cpp` under
 /// `-DCB_METADATA_ONLY`, exposing `cb_runtime_get_catalog_meta()` — a tiny,
 /// Allegro-free object with null function pointers that references no runtime
 /// function body (its only external symbol is the CRT `_fltused`). Sema reads it
@@ -369,11 +368,11 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
-    // FD-045: emit the matching metadata-only catalog object (full catalog, no
+    // Emit the matching metadata-only catalog object (full catalog, no
     // CB_NO_ALLEGRO) so sema can read the catalog without the executable runtime.
     build_meta(runtime_src, false);
 
-    // FD-048: surface the full runtime link closure to dependents (cb-backend-llvm)
+    // Surface the full runtime link closure to dependents (cb-backend-llvm)
     // via `DEP_CB_RUNTIME_*` so the AOT link step replays the same libs onto
     // clang/cc. Additive — the `rustc-link-*` directives above are unchanged.
     // The CB archives land in OUT_DIR (under `Release/` on the MSVC multi-config

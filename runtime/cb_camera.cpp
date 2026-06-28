@@ -1,4 +1,4 @@
-// CoolBasic camera runtime (FD-036 Phase 2).
+// CoolBasic camera runtime.
 //
 // The world<->screen camera: a world position, two independent angle fields, and
 // zoom, plus the DrawToWorld flags. The transform arithmetic lives in the
@@ -8,7 +8,7 @@
 // ABI (see cb_runtime.h / the catalog DSL): CB Float args arrive as `double`,
 // Int as `int32_t`; Float-returning funcs return `double`.
 //
-// Dual-angle model (FD-036, a CoolBasic quirk): `camera_angle` (degrees)
+// Dual-angle model (a CoolBasic quirk): `camera_angle` (degrees)
 // is what CameraAngle() reports and what MoveCamera's heading uses;
 // `camera_rad_angle` (radians) feeds the world matrix. RotateCamera/TurnCamera
 // set them from separate args, so they may intentionally diverge — do not
@@ -44,7 +44,7 @@ int g_draw_cmd_to_world = 0;
 int g_draw_image_to_world = 0;
 int g_draw_text_to_world = 0;
 
-// CameraFollow state (FD-036 Phase 5). When following, the camera steps toward
+// CameraFollow state. When following, the camera steps toward
 // the target once per frame (cb::camera::update_follow, called from DrawScreen).
 bool is_following = false;
 int follow_style = 0;
@@ -141,10 +141,10 @@ extern "C" double cb_rt_mouse_wy(void) {
     return y;
 }
 
-// ─── Object-aware camera (FD-036 Phase 5) ───────────────────────────────
+// ─── Object-aware camera ───────────────────────────────
 
 // PointCamera(obj): rotate the logical/reported camera angle to face the object.
-// Bug fix: the reference passed obj.Y for BOTH atan2 args; we use X then Y. Sets
+// The atan2 takes the X delta then the Y delta. Sets
 // only camera_angle (the logical field) — the world matrix angle
 // (camera_rad_angle) stays independent, matching CoolBasic.
 extern "C" void cb_rt_point_camera(const CbObject* obj) {
@@ -172,7 +172,7 @@ extern "C" void cb_rt_clone_camera_position(const CbObject* obj) {
     camera_y = cb_rt_object_y(obj);
 }
 
-// CloneCameraOrientation(obj): snap the camera angle to the object's. Bug #4 fix:
+// CloneCameraOrientation(obj): snap the camera angle to the object's. We
 // set BOTH the logical angle and the render (matrix) angle so the view actually
 // rotates (setting only the logical field leaves the matrix desynced).
 extern "C" void cb_rt_clone_camera_orientation(const CbObject* obj) {
@@ -260,7 +260,7 @@ void screen_to_world(double* x, double* y) {
 }
 
 // Step the camera toward its follow target once. Called per frame from
-// DrawScreen (Phase 5c). No-op when not following.
+// DrawScreen. No-op when not following.
 void update_follow(void) {
     if (!is_following || !follow_target) return;
     double tx = cb_rt_object_x(follow_target);

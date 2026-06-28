@@ -100,7 +100,7 @@ impl<W: WriteColor> Renderer for CliRenderer<W> {
 /// The renderer degrades instead of aborting — [`to_codespan`] drops the
 /// snippet and folds the label's message into a note. This keeps a synthetic
 /// span (e.g. a built-in/runtime declaration site) from swallowing an
-/// otherwise-renderable real error (FD-027). Genuine caller bugs — an inverted
+/// otherwise-renderable real error. Genuine caller bugs — an inverted
 /// span, or an unknown *non-synthetic* `FileId` — still fail hard.
 fn validate_label(label: &Label, sources: &SourceMap) -> io::Result<()> {
     // All-builds backstop for the same `end >= start` invariant that
@@ -148,7 +148,7 @@ fn to_codespan(diag: &Diagnostic) -> cs_diag::Diagnostic<usize> {
     let mut labels = Vec::with_capacity(1 + diag.secondary.len());
     // A label on a synthetic span has no source snippet to underline. Rather
     // than drop its message entirely, preserve it as a note so the diagnostic
-    // still carries the information (FD-027).
+    // still carries the information.
     let mut degraded_notes: Vec<String> = Vec::new();
     push_label_or_note(
         &diag.primary,
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn emit_synthetic_label_degrades() {
         // A secondary label on the synthetic sentinel must NOT abort the whole
-        // diagnostic (which would swallow the real error — FD-027). It renders
+        // diagnostic (which would swallow the real error). It renders
         // without a snippet, and its message is preserved as a note.
         let mut sources = SourceMap::new();
         let file = sources.add("real.cb".into(), "Dim box As Int\n".into());

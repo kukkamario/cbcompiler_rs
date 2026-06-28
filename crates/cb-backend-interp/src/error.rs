@@ -14,7 +14,7 @@ pub enum InterpErrorKind {
     Trap(TrapKind),
     RuntimeError(String),
     /// Clean program exit requested by the runtime via the trap channel
-    /// (FD-015 `request_exit`). Carried as an error so it propagates up the
+    /// (`request_exit`). Carried as an error so it propagates up the
     /// `?` chain like a trap, but `run` intercepts it and converts it to
     /// `Ok(code)` — it should never reach the driver's error path.
     Exit(i32),

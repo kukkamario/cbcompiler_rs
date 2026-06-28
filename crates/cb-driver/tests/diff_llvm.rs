@@ -1,12 +1,12 @@
-//! Differential AOT tests (FD-049): the interpreter is the oracle, the LLVM
+//! Differential AOT tests: the interpreter is the oracle, the LLVM
 //! backend is the unit under test. For each fixture we run `cb --backend interp`
 //! (its stdout + exit code), then `cb --backend llvm -o <tmp> <file>`, run the
 //! produced native exe, and assert the two agree on **both** newline-normalized
 //! stdout and exit code. The driver only *emits* the exe — this harness runs it.
 //!
 //! Gated on both backends being present (`--features llvm` keeps `interp`). The
-//! fixtures are the Phase-1 scalar core + control flow + user functions +
-//! Allegro-free runtime calls + strings, plus the Phase-2 array surface
+//! fixtures are the scalar core + control flow + user functions +
+//! Allegro-free runtime calls + strings, plus the array surface
 //! (Dim/New/index/Redim/Len/For Each); user Types / graphics remain out of
 //! scope and excluded.
 #![cfg(all(feature = "llvm", feature = "interp"))]
@@ -85,7 +85,7 @@ fn run_both(name: &str) -> Outcome {
 
 /// Assert stdout + exit code agree between the two backends. Both exit codes
 /// must be `Some`: on Unix a signal-killed process yields `None`, so a
-/// `SIGSEGV`/`SIGABRT` could otherwise compare equal-by-absence (F18).
+/// `SIGSEGV`/`SIGABRT` could otherwise compare equal-by-absence.
 fn assert_agree(name: &str, o: &Outcome) {
     assert_eq!(
         o.want_stdout, o.got_stdout,
@@ -112,7 +112,7 @@ fn run_diff(name: &str) {
 
 /// A fault fixture: in addition to stdout/exit-code parity, the produced exe
 /// must have written a (non-empty) trap message to stderr — guarding against a
-/// silent or signal-kill divergence on the LLVM side (F18). The exact text is
+/// silent or signal-kill divergence on the LLVM side. The exact text is
 /// not compared (it differs between the Rust interp and the C runtime).
 fn run_diff_trap(name: &str) {
     let o = run_both(name);
@@ -146,7 +146,7 @@ macro_rules! diff_trap_tests {
     };
 }
 
-// Scalar core + control flow + user functions (pure Phase-1, no runtime calls
+// Scalar core + control flow + user functions (no runtime calls
 // beyond Print).
 diff_tests! {
     int_arithmetic,
@@ -173,10 +173,10 @@ diff_tests! {
     runtime_math,
     runtime_sqrt,
     runtime_string,
-    runtime_string_fd017,
+    runtime_string_extended,
 }
 
-// Arrays (FD-049 Phase 2): Dim/New/index/Redim/Len/For Each over native heap
+// Arrays: Dim/New/index/Redim/Len/For Each over native heap
 // arrays. Fault fixtures (out-of-bounds / empty / negative-index traps) live in
 // the `diff_trap_tests!` block below.
 diff_tests! {
@@ -193,7 +193,7 @@ diff_tests! {
     array_param,
 }
 
-// User Types (FD-049 Phase 3a): New/field access, the type-instance linked list
+// User Types: New/field access, the type-instance linked list
 // (First/Last/Next/Previous + For Each), Delete (lvalue rewind + rvalue),
 // field-projection StorePlace, and reference equality. These link the new
 // cb_type.cpp heap helpers.
@@ -202,13 +202,13 @@ diff_tests! {
     type_multi_field,
     type_modify_in_function,
     type_pass_to_function,
-    type_inference_fd042,
+    type_inference,
     type_first_each_delete,
     type_previous,
     type_ref_equality,
 }
 
-// Value structs (FD-049 Phase 3b): inline LLVM aggregates with value semantics —
+// Value structs: inline LLVM aggregates with value semantics —
 // scalar field read/write, value-copy independence, nested `a.b.c`, struct array
 // elements, String-field copy/reassign refcount, and by-value param copy.
 diff_tests! {
@@ -222,7 +222,7 @@ diff_tests! {
     struct_return_string,
 }
 
-// Function pointers (FD-049 Phase 3c): FuncAddr (bare-name address-of) and
+// Function pointers: FuncAddr (bare-name address-of) and
 // CallIndirect through a `Function(...)` value. The null-call fault fixture
 // lives in the `diff_trap_tests!` block below.
 diff_tests! {
@@ -234,7 +234,7 @@ diff_tests! {
 // Fault fixtures: programs that trap at runtime (out-of-bounds / empty /
 // negative array index, null fn-ptr call). Beyond stdout + exit-code parity,
 // these assert the produced exe wrote a non-empty stderr trap message and that
-// neither side was signal-killed (F18). Both backends print their pre-trap
+// neither side was signal-killed. Both backends print their pre-trap
 // output, then trap and exit 1.
 diff_trap_tests! {
     array_oob,

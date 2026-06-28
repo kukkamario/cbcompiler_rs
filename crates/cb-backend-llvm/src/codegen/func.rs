@@ -1,4 +1,4 @@
-//! Per-function lowering: IR blocks/instructions/terminators → LLVM (FD-049).
+//! Per-function lowering: IR blocks/instructions/terminators → LLVM.
 //!
 //! One LLVM block is pre-created per IR `BlockId` (so forward branches resolve);
 //! locals become entry-block `alloca` slots (zero/null-initialized, then the
@@ -7,7 +7,7 @@
 //! dominance, a value is always available where it is used without phi nodes
 //! (mutable variables flow through the alloca slots, not registers).
 //!
-//! String refcounting follows FD-049 decision B: producers own +1, loads retain,
+//! String refcounting: producers own +1, loads retain,
 //! stores release-old then move-in, call args borrow, and unconsumed owned temps
 //! are released after their last use (from the regtypes pass). Every String
 //! local slot is released at each `Return`.
@@ -48,7 +48,7 @@ pub(super) struct FunctionLowerer<'a, 'ctx, 'f> {
     /// SSA reg → its LLVM value.
     regs: HashMap<Reg, BasicValueEnum<'ctx>>,
     /// One reusable entry-block `[maxRank x i64]` scratch buffer for array
-    /// index/dims lists (FD-049 Phase 2). A per-instruction alloca inside a
+    /// index/dims lists. A per-instruction alloca inside a
     /// loop body would grow the O0 stack each iteration; this single buffer is
     /// rewritten and consumed synchronously by each `cb_rt_array_*` call. The
     /// struct-of-i64 layout is contiguous (passed as the `int64_t*` arg) and
@@ -124,8 +124,8 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 .map_err(berr)?;
             self.locals.push(slot);
         }
-        // One reusable `[maxRank x i64]` scratch for array index/dims lists
-        // (FD-049 Phase 2). Allocated once in the entry block — never per
+        // One reusable `[maxRank x i64]` scratch for array index/dims lists.
+        // Allocated once in the entry block — never per
         // instruction — so a loop body with an indexed array does not grow the
         // O0 stack each iteration. Skipped entirely when the function has no
         // array ops (max rank 0).
@@ -214,8 +214,8 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             | IrType::Array { .. }
             | IrType::TypeRef(_)
             | IrType::FnPtr(_) => self.cg.ptr_t().const_null().into(),
-            // A value struct default-inits to a zeroed aggregate (FD-049 Phase
-            // 3b); its String sub-fields are then set to the empty sentinel by
+            // A value struct default-inits to a zeroed aggregate; its String
+            // sub-fields are then set to the empty sentinel by
             // `init_struct_strings` (const-zero gives null, violating the
             // never-null-`CbString*` invariant).
             IrType::StructVal(_) => basic_type(self.cg.ctx, &self.cg.program.struct_defs, ty)?
@@ -224,7 +224,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 .into(),
             other => {
                 return Err(format!(
-                    "local of type {other:?} is out of scope for the Phase-1 LLVM backend"
+                    "local of type {other:?} is out of scope for the LLVM backend"
                 ));
             }
         })
@@ -311,7 +311,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.lower_call(inst, *callee, args)?;
             }
 
-            // ── Arrays (FD-049 Phase 2) ────────────────────────────────
+            // ── Arrays ────────────────────────────────
             InstKind::NewArray { elem_type, dims } => {
                 let handle = self.build_new_array(elem_type, dims)?;
                 self.bind(inst, handle);
@@ -381,7 +381,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 dims,
             } => {
                 // Fresh, zero-initialised array; the slot's old handle leaks
-                // (arrays are not freed/refcounted in Phase 2). No preserve.
+                // (arrays are not freed/refcounted). No preserve.
                 let handle = self.build_new_array(elem_type, dims)?;
                 self.cg
                     .builder
@@ -401,7 +401,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.lower_store_place(root, path, *value)?;
             }
 
-            // ── User Types (FD-049 Phase 3a) ───────────────────────────
+            // ── User Types ───────────────────────────
             InstKind::NewType { type_def } => {
                 let node = self.build_new_type(*type_def)?;
                 self.bind(inst, node);
@@ -448,7 +448,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.lower_delete_lvalue(slot)?;
             }
 
-            // ── Function pointers (FD-049 Phase 3c) ────────────────────
+            // ── Function pointers ────────────────────
             InstKind::FuncAddr { func } => {
                 let decl = &self.cg.program.func_table[func.0 as usize];
                 let fptr = match &decl.kind {
@@ -489,8 +489,8 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             // A loaded String is an independently-owned reg (+1).
             Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
         } else {
-            // A loaded value-struct aggregate is a borrowed view (FD-049 Phase
-            // 3b): its String sub-fields stay owned by the source slot; the
+            // A loaded value-struct aggregate is a borrowed view: its String
+            // sub-fields stay owned by the source slot; the
             // store that takes ownership (`store_slot`/param entry) retains them.
             Ok(v)
         }
@@ -501,13 +501,13 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         self.store_slot_value(slot, ty, self.regs[&value], owned)
     }
 
-    /// Store a computed value into `slot` with the FD-049 refcount discipline.
+    /// Store a computed value into `slot` with the refcount discipline.
     /// `String`: release the slot's old contents, move the reg's +1 in.
     /// `StructVal`: a struct slot OWNS +1 per String sub-field. A *borrowed* view
     /// (loaded from a slot) is retained into the slot (retain-before-release
     /// tolerates a self-store); an *owned* struct temp (a call/return result,
     /// `owned == true`) already owns +1, so it is moved in with no extra retain
-    /// (owned-model, FD-049 review F4). In both cases the slot's old String
+    /// (owned-model). In both cases the slot's old String
     /// fields are released. Non-ref: plain store.
     fn store_slot_value(
         &self,
@@ -543,7 +543,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
-    // ── Array helpers (FD-049 Phase 2) ──────────────────────────────────
+    // ── Array helpers ──────────────────────────────────
 
     /// The widest array index/dims list across every block — the size of the
     /// single reusable entry-block scratch buffer. `GetElementFlat`/`Len` pass
@@ -655,7 +655,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     /// whose slots default to the empty sentinel and follow the retain/release
     /// discipline; reference handles (`TypeRef`) and value structs are *not*
     /// ref-flagged (they default to null/zero, CB `Null`/zeroed). A value-struct
-    /// element is sized by its inline aggregate (FD-049 Phase 3b); its String
+    /// element is sized by its inline aggregate; its String
     /// sub-fields stay null in the array backing — no per-element sentinel init
     /// (a scoped limit, like value-struct globals; no fixture stores Strings in a
     /// struct array element).
@@ -683,16 +683,16 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
 
     /// Lower a `StorePlace`: walk the projection path from the root slot,
     /// maintaining `(current address, current IR type)`, then write the value at
-    /// the final address with the Phase-1 String discipline (release the old
+    /// the final address with the String discipline (release the old
     /// contents, move the value reg's +1 in); non-String targets plain-store.
     ///
-    /// Path steps (FD-049 Phase 2 + 3):
+    /// Path steps:
     ///   * `Index` (array): load the array handle at the current address, then
     ///     `cb_rt_array_elem_addr` → the element address (reference storage).
     ///   * `Field` on a `TypeRef`: load the node handle, `cb_rt_type_check`, then
     ///     GEP element `5 + field_index` (the inline field, shared storage).
     ///   * `Field` on a `StructVal`: GEP the field directly — the current address
-    ///     already points at the inline aggregate (Phase 3b).
+    ///     already points at the inline aggregate.
     fn lower_store_place(
         &self,
         root: &PlaceRoot,
@@ -756,7 +756,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                             .map_err(berr)?;
                         ty = fty;
                     }
-                    // A value-struct field is inline at `addr` (FD-049 Phase 3b)
+                    // A value-struct field is inline at `addr`
                     // — GEP directly, no load/check (struct values are stored in
                     // place). Composes with the array/TypeRef steps for mixed
                     // `arr[i].field = v` / `s.a.b = v` paths.
@@ -777,7 +777,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             }
         }
 
-        // Final store with the FD-049 refcount discipline.
+        // Final store with the refcount discipline.
         match &ty {
             // String target: release the slot's prior contents, then move +1 in.
             IrType::String => {
@@ -812,7 +812,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
-    // ── Type-instance helpers (FD-049 Phase 3a) ─────────────────────────
+    // ── Type-instance helpers ─────────────────────────
 
     /// Lower `New <Type>`: allocate a node (header + inline fields) via
     /// `cb_rt_type_new`, default-init each String field to the empty sentinel
@@ -839,8 +839,8 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                     self.cg.builder.build_store(fptr, empty).map_err(berr)?;
                 }
                 // A value-struct field's nested String sub-fields must also be
-                // the empty sentinel, not calloc-null (never-null invariant,
-                // FD-049 review F8) — mirroring the local-slot path in
+                // the empty sentinel, not calloc-null (never-null invariant)
+                // — mirroring the local-slot path in
                 // emit_entry.
                 IrType::StructVal(sub) => {
                     let fptr = self
@@ -859,7 +859,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     /// Lower `GetField`: read field `field` (declared type `field_type`) of the
     /// object reg. A `TypeRef` object is a node handle — `cb_rt_type_check` then
     /// GEP `5 + idx` and load (retain-if-String). A `StructVal` object is an
-    /// inline aggregate value — Phase 3b.
+    /// inline aggregate value.
     fn lower_get_field(
         &self,
         object: Reg,
@@ -952,10 +952,10 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .map_err(berr)
     }
 
-    // ── Value-struct String-field refcount helpers (FD-049 Phase 3b) ─────
+    // ── Value-struct String-field refcount helpers ─────
     //
     // A value struct is an inline aggregate copied by load/store. Its String
-    // sub-fields follow the Phase-1 String discipline per field: a struct SLOT
+    // sub-fields follow the String discipline per field: a struct SLOT
     // owns +1 per String sub-field; a struct VALUE in a reg is a borrowed view.
     // The store that takes ownership retains the incoming aggregate's String
     // fields and releases the slot's old ones; `Return` releases struct locals'
@@ -1128,7 +1128,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             return Ok(v);
         }
 
-        // Reference equality (FD-049 Phase 3a): `Eq`/`NotEq` on a pointer-class
+        // Reference equality: `Eq`/`NotEq` on a pointer-class
         // operand (`TypeRef`/`Null`/`FnPtr`/`Array`) compares by pointer
         // identity — `n <> Null`, `a = b` on type instances, etc. `regtypes`
         // already types the result `Int`. Sema never emits these opcodes on
@@ -1179,7 +1179,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .ok_or_else(|| format!("untyped binop rhs {rhs}"))?;
         // Shift width follows the LHS (the value being shifted) ONLY — sema does
         // not coerce shift operands, so the count's `Long`-ness must not widen
-        // the shift (FD-049 review F2). `ext_int` truncates a wider `Long` count
+        // the shift. `ext_int` truncates a wider `Long` count
         // to the LHS width below, then `mask_shift` masks `&31` (Int) / `&63`
         // (Long), matching the interpreter. Arithmetic / bitwise / comparison
         // ops keep the `lty||rty` max — sema coerces those to a common type, so
@@ -1351,12 +1351,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 }
                 other => Err(format!("convert from {other:?} to String unsupported")),
             },
-            // Reference/pointer conversions (FD-049 Phase 3): `Null` → a reference
+            // Reference/pointer conversions: `Null` → a reference
             // type (`TypeRef`/`Array`/`FnPtr`) is a value-level no-op — both are
             // the same opaque `ptr`, and a null pointer is CB `Null` for every
             // reference type (e.g. `n = Null`, `n <> Null`). Pass it through.
             IrType::TypeRef(_) | IrType::Array { .. } | IrType::FnPtr(_) => Ok(self.regs[&value]),
-            other => Err(format!("convert to {other:?} is out of Phase-1 scope")),
+            other => Err(format!("convert to {other:?} is out of scope for the LLVM backend")),
         }
     }
 
@@ -1394,7 +1394,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
-    /// Lower a `CallIndirect` through a fn-pointer reg (FD-049 Phase 3c). The
+    /// Lower a `CallIndirect` through a fn-pointer reg. The
     /// callee reg's IR type is `FnPtr(sig)`; rebuild the LLVM function type from
     /// `sig`, marshal the args, then **null-check** the pointer — a null fn-ptr
     /// call traps to a clean exit 1 (the interp's `NullFnPtr`) rather than
@@ -1434,7 +1434,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         let callee_ptr = self.pval(callee)?;
 
         // Null-check: branch to a trap block (clean exit 1) on a null fn-pointer,
-        // mirroring the Phase-1 `Trap` idiom, else continue to the call.
+        // mirroring the `Trap` idiom, else continue to the call.
         let is_null = self
             .cg
             .builder
@@ -1448,8 +1448,8 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .map_err(berr)?;
         self.cg.builder.position_at_end(trap_bb);
         // Raise the interpreter-matching "null function pointer call" trap
-        // message to stderr, then exit 1 (no bare silent exit — FD-049 review
-        // F18 / trap-message parity).
+        // message to stderr, then exit 1 (no bare silent exit — trap-message
+        // parity).
         self.call_void(self.cg.rt_trap_null_fnptr(), &[])?;
         self.cg.builder.build_unreachable().map_err(berr)?;
 
@@ -1489,7 +1489,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.ext_int(self.ival(arg)?, &aty, int_bits(pty))?.into()
             }
             // A value struct is passed by value (a borrowed view); the callee's
-            // entry retains its String fields (FD-049 Phase 3b). Structs never
+            // entry retains its String fields. Structs never
             // reach C runtime functions, so the LLVM ABI is self-consistent.
             IrType::StructVal(_) => self.regs[&arg].into(),
             other => return Err(format!("call argument of type {other:?} is out of scope")),
@@ -1535,7 +1535,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             }
             Some(Terminator::Return { value }) => {
                 // A returned value-struct must own +1 per String sub-field so it
-                // survives the callee frame (owned-model, FD-049 review F4). An
+                // survives the callee frame (owned-model). An
                 // owned struct temp (a call result) already owns +1 → hand off
                 // unchanged; a borrowed view (loaded from a slot) is retained
                 // BEFORE `release_string_locals` so the local release can't free
@@ -1564,7 +1564,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                         // `Return`, so this IS reachable. Materialize the return
                         // type's default — but a String / value-struct must carry
                         // the empty sentinel, never a null `CbString*` (the
-                        // never-null invariant, FD-049 review F5).
+                        // never-null invariant).
                         IrType::String => {
                             let empty = self.empty_string()?;
                             b.build_return(Some(&empty as &dyn BasicValue))
@@ -1601,7 +1601,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 b.build_unreachable().map_err(berr)?;
             }
             Some(Terminator::Trap(_)) => {
-                // Traps are out of Phase-1 scope; rather than miscompile to UB,
+                // Traps are out of scope; rather than miscompile to UB,
                 // exit non-zero. (Seed fixtures never reach a Trap.)
                 let one = self.cg.ctx.i32_type().const_int(1, false);
                 self.call_void(self.cg.rt_exit(), &[one.into()])?;
@@ -1643,7 +1643,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
 
     /// Release an owned temp at its last use: a String reg drops its +1; an owned
     /// value-struct temp (a call result) drops +1 per String sub-field
-    /// (owned-model, FD-049 review F4).
+    /// (owned-model).
     fn release_reg(&self, reg: Reg) -> Result<(), String> {
         let v = self.regs[&reg];
         match self.info.type_of(reg) {
@@ -1902,7 +1902,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             .ok_or_else(|| format!("unknown field {}", self.interner.resolve(field)))
     }
 
-    /// Resolve a value-`Struct` name to its `StructDefInfo` (FD-049 Phase 3b).
+    /// Resolve a value-`Struct` name to its `StructDefInfo`.
     pub(super) fn struct_def_by_name(&self, name: Symbol) -> Result<&'a StructDefInfo, String> {
         self.program
             .struct_defs

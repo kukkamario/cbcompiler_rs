@@ -1,4 +1,4 @@
-//! Lazy runtime-symbol declaration cache (FD-049).
+//! Lazy runtime-symbol declaration cache.
 //!
 //! The native backend calls two kinds of runtime functions:
 //!   * fixed support helpers with hardcoded signatures — the String primitives
@@ -145,7 +145,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         self.declare_rt("cb_rt_trap_null_fnptr", fty)
     }
 
-    // ── Array heap helpers (FD-049 Phase 2; cb_array.cpp) ────────────────
+    // ── Array heap helpers (cb_array.cpp) ────────────────
 
     /// `CbArray* cb_rt_array_new(int64_t rank, const int64_t* dims,
     ///                           int64_t elem_size, int32_t elem_is_ref)`.
@@ -192,7 +192,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         self.declare_rt("cb_rt_array_dim_len", fty)
     }
 
-    // ── Type-instance heap + list helpers (FD-049 Phase 3a; cb_type.cpp) ──
+    // ── Type-instance heap + list helpers (cb_type.cpp) ──
 
     /// `void* cb_rt_type_new(int64_t type_def, int64_t size)`.
     pub(super) fn rt_type_new(&self) -> FunctionValue<'ctx> {
@@ -256,7 +256,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
     // ── Catalog functions (Call to a Runtime callee) ────────────────────
 
     /// Declare a catalog runtime function from its IR signature, caching by
-    /// `symbol`. Errors if any param/return type is out of Phase-1 scope (e.g. a
+    /// `symbol`. Errors if any param/return type is out of scope (e.g. a
     /// runtime function taking an opaque handle), so such a call fails loudly.
     pub(super) fn rt_catalog(
         &self,

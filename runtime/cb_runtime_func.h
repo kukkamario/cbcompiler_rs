@@ -1,7 +1,7 @@
 #ifndef CB_RUNTIME_FUNC_H
 #define CB_RUNTIME_FUNC_H
 
-/* Runtime FUNCTIONALITY prototypes (FD-016).
+/* Runtime FUNCTIONALITY prototypes.
  *
  * The feature subsystems built ON TOP of the core ABI: a handful of System
  * builtins, the String library, System/Time, Math, Graphics, and Input. Only
@@ -21,42 +21,42 @@
    runtime-defined opaque type end to end. */
 typedef struct CbTestHandle CbTestHandle;
 
-/* Image handle — the CB-visible `Image` opaque type (FD-013 Batch 4). Wraps an
+/* Image handle — the CB-visible `Image` opaque type. Wraps an
    Allegro bitmap; defined in cb_gfx.cpp. Created by MakeImage/LoadImage, freed
    by DeleteImage. */
 typedef struct CbImage CbImage;
 
-/* Font handle — the CB-visible `Font` opaque type (FD-018). Wraps an Allegro
+/* Font handle — the CB-visible `Font` opaque type. Wraps an Allegro
    font; defined in cb_gfx.cpp. Created by LoadFont, freed by DeleteFont. */
 typedef struct CbFont CbFont;
 
-/* Map handle — the CB-visible `Map` opaque type (FD-036 Phase 3). The single
+/* Map handle — the CB-visible `Map` opaque type. The single
    active tilemap; defined in cb_map.cpp. Created by LoadMap/MakeMap. */
 typedef struct CbMap CbMap;
 
-/* Object handle — the CB-visible `Object` opaque type (FD-036 Phase 4, tag 13).
+/* Object handle — the CB-visible `Object` opaque type (tag 13).
    A 2D sprite; defined in cb_object.cpp. Created by LoadObject/LoadAnimObject/
    MakeObject/MakeObjectFloor/CloneObject, freed by DeleteObject. */
 typedef struct CbObject CbObject;
 
-/* Memblock handle — the CB-visible `Memblock` opaque type (FD-039, tag 15). A
+/* Memblock handle — the CB-visible `Memblock` opaque type (tag 15). A
    raw byte buffer; defined in cb_memblock.cpp. Created by MakeMEMBlock, freed by
    DeleteMEMBlock. Allegro-free (present in the SDK-free catalog). */
 typedef struct CbMemblock CbMemblock;
 
-/* File handle — the CB-visible `File` opaque type (FD-040, tag 16). An open file
+/* File handle — the CB-visible `File` opaque type (tag 16). An open file
    stream; defined in cb_file.cpp. Created by OpenToRead/OpenToWrite/OpenToEdit
    (Null on failure), freed by CloseFile. Allegro-free (present in the SDK-free
    catalog). */
 typedef struct CbFile CbFile;
 
-/* Sound sample — the CB-visible `Sound` opaque type (FD-041, tag 17). A loaded
+/* Sound sample — the CB-visible `Sound` opaque type (tag 17). A loaded
    ALLEGRO_SAMPLE; defined in cb_sound.cpp. Created by LoadSound (Null on failure),
    freed by DeleteSound. Allegro-dependent (allegro_audio) — absent from the
    SDK-free catalog. */
 typedef struct CbSound CbSound;
 
-/* Sound channel — the CB-visible `SoundChannel` opaque type (FD-041, tag 18). A
+/* Sound channel — the CB-visible `SoundChannel` opaque type (tag 18). A
    playing instance (sample-instance or audio-stream). Never defined: it is a
    packed generation-pool handle (cb_sound.h), not a real object. Produced by
    PlaySound, consumed by SetSound/StopSound/SoundPlaying; auto-reaped each frame
@@ -87,7 +87,7 @@ int32_t cb_rt_str_instr(const CbString* s, const CbString* find);
 int32_t cb_rt_str_instr_from(const CbString* s, const CbString* find, int32_t start);
 CbString* cb_rt_chr(int32_t code);
 CbString* cb_rt_hex(int32_t value);
-/* FD-017 completeness pass. Same codepoint/1-based/clamp conventions. */
+/* Completeness pass. Same codepoint/1-based/clamp conventions. */
 CbString* cb_rt_str_mid(const CbString* s, int32_t pos, int32_t len);
 CbString* cb_rt_str_replace(const CbString* s, const CbString* find, const CbString* repl);
 CbString* cb_rt_str_lset(const CbString* s, int32_t len);
@@ -108,7 +108,7 @@ CbString* cb_rt_get_word(const CbString* s, int32_t n, const CbString* sep);
 int32_t cb_rt_timer(void);
 void cb_rt_wait(int32_t ms);
 void cb_rt_make_error(const CbString* msg);
-/* FD-017. Date "D Mon YYYY"; Time "HH:MM:SS"; CommandLine/GetEXEName read the
+/* Date "D Mon YYYY"; Time "HH:MM:SS"; CommandLine/GetEXEName read the
    running process (for the interpreter, that is the `cb` executable). */
 CbString* cb_rt_date(void);
 CbString* cb_rt_time(void);
@@ -139,17 +139,17 @@ double cb_rt_rnd_range(double low, double high);
 int32_t cb_rt_rand_max(int32_t max);
 int32_t cb_rt_rand_range(int32_t low, int32_t high);
 void cb_rt_randomize(int32_t seed);
-/* FD-017. CurveValue/CurveAngle ease current->target; BoxOverlap is AABB. */
+/* CurveValue/CurveAngle ease current->target; BoxOverlap is AABB. */
 double cb_rt_curve_value(double target, double current, double smoothness);
 double cb_rt_curve_angle(double target, double current, double smoothness);
 int32_t cb_rt_box_overlap(double x1, double y1, double w1, double h1,
                           double x2, double y2, double w2, double h2);
 
-/* Memory blocks (cb_memblock.cpp, FD-039). `Memblock` is the opaque CbMemblock*
+/* Memory blocks (cb_memblock.cpp). `Memblock` is the opaque CbMemblock*
    handle (tag 15). Allegro-free, so these are in the SDK-free catalog. Multi-
    byte Peek/Poke are little-endian; PeekByte/PeekShort return unsigned, PeekInt
    signed; Float is 32-bit on the wire. Out-of-range offsets, null handles, and
-   negative sizes/lengths trap via the FD-015 channel (a divergence from classic
+   negative sizes/lengths trap via the host channel (a divergence from classic
    CB, which blind-casts → UB). */
 CbMemblock* cb_rt_make_memblock(int32_t size);
 void        cb_rt_delete_memblock(CbMemblock* m);
@@ -166,13 +166,13 @@ void        cb_rt_poke_short(CbMemblock* m, int32_t offset, int32_t value);
 void        cb_rt_poke_int(CbMemblock* m, int32_t offset, int32_t value);
 void        cb_rt_poke_float(CbMemblock* m, int32_t offset, double value);
 
-/* File I/O (cb_file.cpp, FD-040). `File` is the opaque CbFile* handle (tag 16);
+/* File I/O (cb_file.cpp). `File` is the opaque CbFile* handle (tag 16);
    OpenTo* return it (Null on failure), CloseFile frees it. Allegro-free, so
    these are in the SDK-free catalog. Binary numerics are little-endian on the
    wire; ReadByte/ReadShort return unsigned, ReadInt signed, ReadFloat is 32-bit
    on disk; ReadString is a 32-bit length prefix + bytes; ReadLine strips LF/CR/
    CRLF. Reads are lenient at end-of-data (return 0/""); a null handle or a
-   wrong-mode op traps via the FD-015 channel. On-disk string content is raw
+   wrong-mode op traps via the host channel. On-disk string content is raw
    UTF-8. CurrentDir has a trailing separator; CopyFile traps if dst exists;
    FindFile omits "."/".." and returns "" when done (single global cursor). */
 CbFile*   cb_rt_open_to_read(const CbString* path);
@@ -207,7 +207,7 @@ void      cb_rt_start_search(void);
 CbString* cb_rt_find_file(void);
 void      cb_rt_end_search(void);
 
-/* Graphics & images (cb_gfx.cpp, FD-013 Batch 4). CB `Float` args arrive as
+/* Graphics & images (cb_gfx.cpp). CB `Float` args arrive as
    `double`, `Int` as `int32_t`. `Image` is the opaque CbImage* handle. Many
    functions are overloaded by arity/type — sema resolves them; each maps to a
    distinct C symbol below sharing one CB name in catalog.cpp. */
@@ -217,7 +217,7 @@ void    cb_rt_screen_depth_mode(int32_t w, int32_t h, int32_t depth, int32_t mod
 int32_t cb_rt_screen_buffer_id(void);
 void    cb_rt_drawscreen(void);
 void    cb_rt_drawscreen_args(int32_t cls, int32_t vsync);
-/* Game loop (FD-036 Phase 5). UpdateGame runs the built-in object update tick;
+/* Game loop. UpdateGame runs the built-in object update tick;
    DrawGame updates-if-needed then draws the object pass. Dedup flags suppress the
    implicit DrawScreen pass for the frame. No user CB callbacks (out of scope). */
 void    cb_rt_update_game(void);
@@ -263,7 +263,7 @@ void    cb_rt_draw_to_image(CbImage* img);
 int32_t cb_rt_image_width(const CbImage* img);
 int32_t cb_rt_image_height(const CbImage* img);
 void    cb_rt_delete_image(CbImage* img);
-/* FD-017 image additions (single-frame; multi-frame deferred). */
+/* Image additions (single-frame; multi-frame deferred). */
 void     cb_rt_default_mask(int32_t enabled, int32_t r, int32_t g, int32_t b);
 CbImage* cb_rt_clone_image(const CbImage* img);
 void     cb_rt_resize_image(CbImage* img, int32_t w, int32_t h);
@@ -278,7 +278,7 @@ int32_t  cb_rt_images_overlap(const CbImage* a, double x1, double y1,
                               const CbImage* b, double x2, double y2);
 int32_t  cb_rt_images_collide(const CbImage* a, double x1, double y1, int32_t frame1,
                               const CbImage* b, double x2, double y2, int32_t frame2);
-/* FD-036 multi-frame sprite sheets. */
+/* Multi-frame sprite sheets. */
 CbImage* cb_rt_load_anim_image(const CbString* path, int32_t frame_w, int32_t frame_h,
                                int32_t start_frame, int32_t anim_length);
 CbImage* cb_rt_make_image_frames(int32_t w, int32_t h, int32_t frame_count);
@@ -298,7 +298,7 @@ int32_t cb_rt_screen_height(void);
 int32_t cb_rt_screen_depth(void);
 int32_t cb_rt_gfx_mode_exists(int32_t w, int32_t h, int32_t depth);
 
-/* Camera (cb_camera.cpp, FD-036 Phase 2). The world<->screen transform core.
+/* Camera (cb_camera.cpp). The world<->screen transform core.
    No new opaque type — camera state is process-global. RotateCamera/TurnCamera
    take two angle args (logical degrees, render degrees) that map to two
    independent fields (CoolBasic's desyncable logical/render angles). DrawToWorld
@@ -315,7 +315,7 @@ double  cb_rt_camera_angle(void);
 void    cb_rt_draw_to_world(int32_t draw_commands, int32_t draw_images, int32_t draw_text);
 double  cb_rt_mouse_wx(void);
 double  cb_rt_mouse_wy(void);
-/* Object-aware camera (FD-036 Phase 5; deferred from Phase 2 to break the
+/* Object-aware camera (split out to break the
    Camera<->Object cycle). PointCamera/CameraFollow/CloneCameraPosition/
    CloneCameraOrientation take an Object; CameraPick converts a screen point to
    world then picks (sets PickedObject). */
@@ -325,7 +325,7 @@ void    cb_rt_clone_camera_position(const CbObject* obj);
 void    cb_rt_clone_camera_orientation(const CbObject* obj);
 void    cb_rt_camera_pick(double sx, double sy);
 
-/* Tile maps (cb_map.cpp, FD-036 Phase 3). One active tilemap; `Map` is the
+/* Tile maps (cb_map.cpp). One active tilemap; `Map` is the
    opaque CbMap* handle (LoadMap/MakeMap return it, Null on failure). The query/
    mutate functions operate on the single active map and return 0 / no-op when
    none is loaded. GetMap2/EditMap take 1-based grid coordinates; GetMap takes
@@ -345,7 +345,7 @@ void    cb_rt_set_tile_slow(int32_t tile, int32_t anim_length, int32_t anim_slow
    The `map` handle is popped but ignored, like EditMap. */
 void    cb_rt_paint_object_map(CbMap* map, const CbImage* img);
 
-/* Objects / sprites (cb_object.cpp, FD-036 Phase 4). `Object` is the opaque
+/* Objects / sprites (cb_object.cpp). `Object` is the opaque
    CbObject* handle (tag 13); LoadObject/LoadAnimObject/MakeObject/MakeObjectFloor/
    CloneObject return it (Null on failure). Many funcs are overloaded by arity/
    type — sema resolves them; each maps to a distinct C symbol below sharing one
@@ -427,7 +427,7 @@ void      cb_rt_object_life_set(CbObject* o, int32_t frames);
 /* Enumeration (single shared cursor; NextObject returns Null at end) */
 void      cb_rt_init_object_list(void);
 CbObject* cb_rt_next_object(void);
-/* Collision (FD-036 Phase 5). SetupCollision registers a PERSISTENT check
+/* Collision. SetupCollision registers a PERSISTENT check
    (re-tested every update tick, not one-shot); the type-4 map overload takes a
    Map handle (ignored — single active map) only to disambiguate from the object-
    object form. ObjectRange's range2 is optional (its own arity overload).
@@ -447,7 +447,7 @@ double    cb_rt_collision_y(const CbObject* o, int32_t index);
 double    cb_rt_collision_angle(const CbObject* o, int32_t index);
 int32_t   cb_rt_objects_overlap(const CbObject* a, const CbObject* b);
 int32_t   cb_rt_objects_overlap3(const CbObject* a, const CbObject* b, int32_t type);
-/* Picking & line of sight (FD-036 Phase 5). ObjectPick raycasts from the picker
+/* Picking & line of sight. ObjectPick raycasts from the picker
    along its facing; PickedObject returns the nearest hit (Null if none),
    PickedX/Y/Angle its contact (PickedAngle in degrees from the picked point,
    fixing a stale-radians bug). PixelPick is a registered no-op stub
@@ -464,21 +464,21 @@ double    cb_rt_picked_angle(void);
 int32_t   cb_rt_object_sight(const CbObject* a, const CbObject* b);
 void      cb_rt_screen_position_object(CbObject* o, double sx, double sy);
 
-/* Particle emitters (cb_object.cpp, FD-038). A CoolBasic "Effects" emitter IS an
+/* Particle emitters (cb_object.cpp). A CoolBasic "Effects" emitter IS an
    Object: MakeEmitter returns the `Object` handle (tag 13), and the emitter is
    moved/rotated/deleted with the ordinary object commands above. The three
-   Particle* commands take an `Object` (the emitter) and trap (FD-015) if handed
+   Particle* commands take an `Object` (the emitter) and trap if handed
    a non-emitter object. MakeEmitter(image, lifeTime): lifeTime is the per-PARTICLE
    life in DrawScreen frames. ParticleMovement's acceleration arg is optional (own
    arity overload, default 1.0). Density/count/spread are integers (Help docs).
-   Particles never pick or collide (real CB; see FD-038). */
+   Particles never pick or collide (real CB). */
 CbObject* cb_rt_make_emitter(const CbImage* image, int32_t life_time);
 void      cb_rt_particle_movement(CbObject* o, double speed, double gravity);
 void      cb_rt_particle_movement_acc(CbObject* o, double speed, double gravity, double accel);
 void      cb_rt_particle_emission(CbObject* o, int32_t density, int32_t count, int32_t spread);
 void      cb_rt_particle_animation(CbObject* o, int32_t frames);
 
-/* Text & fonts (cb_gfx.cpp, FD-018). Text draws in the current draw color onto
+/* Text & fonts (cb_gfx.cpp). Text draws in the current draw color onto
    the active render target; `Font` is the opaque CbFont* handle. Locate/AddText/
    ClearText manage a persistent on-screen text queue re-rendered each DrawScreen.
    LoadFont resolves a system family name or a file path (name containing '.');
@@ -497,7 +497,7 @@ void     cb_rt_delete_font(CbFont* font);
 int32_t  cb_rt_text_width(const CbString* s);
 int32_t  cb_rt_text_height(const CbString* s);
 
-/* Input (cb_input.cpp, FD-013 Batch 5). Keyboard scancodes use the classic CB
+/* Input (cb_input.cpp). Keyboard scancodes use the classic CB
    DirectInput-style numbering (1=Esc, 16=Q, 30=A, 200=Up, …). Edge queries
    (KeyHit/KeyUp, MouseHit/MouseUp) and movement deltas are relative to the
    frame boundary, which DrawScreen advances; with no display open every query
@@ -517,7 +517,7 @@ int32_t cb_rt_mouse_z(void);
 int32_t cb_rt_mouse_move_x(void);
 int32_t cb_rt_mouse_move_y(void);
 int32_t cb_rt_mouse_move_z(void);
-/* FD-017 input additions. WaitKey/WaitMouse block on the window event queue;
+/* Input additions. WaitKey/WaitMouse block on the window event queue;
    with no window open they return 0 immediately (headless-safe). */
 int32_t cb_rt_get_key(void);
 int32_t cb_rt_left_key(void);
@@ -532,7 +532,7 @@ void    cb_rt_position_mouse(int32_t x, int32_t y);
 void    cb_rt_show_mouse(int32_t mode);
 void    cb_rt_clear_mouse(void);
 
-/* Sound (cb_sound.cpp, FD-041). Allegro-dependent (allegro_audio + acodec); the
+/* Sound (cb_sound.cpp). Allegro-dependent (allegro_audio + acodec); the
    `Sound` (CbSound*) and `SoundChannel` (CbChannel*) opaque types. `SoundChannel`
    is a packed generation-pool handle, not a real pointer. PlaySound/SetSound take
    the documented optional volume/balance/frequency via arity overloads (one entry
@@ -561,7 +561,7 @@ void    cb_rt_delete_sound(CbSound* sound);
 CbTestHandle* cb_rt_create_test_handle(void);
 int32_t cb_rt_use_test_handle(const CbTestHandle* handle);
 
-/* Trap-channel test functions (FD-015, test-only): ask the host to exit /
+/* Trap-channel test functions (test-only): ask the host to exit /
    raise an error via cb_host(), exercising the channel end to end. */
 void cb_rt_test_request_exit(int32_t code);
 void cb_rt_test_raise_error(const CbString* msg);

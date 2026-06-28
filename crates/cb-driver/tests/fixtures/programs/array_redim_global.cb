@@ -1,4 +1,4 @@
-' Redim of a Global array inside a function (FD-049 review F15) — lowers to the
+' Redim of a Global array inside a function — lowers to the
 ' otherwise-untested InstKind::RedimGlobal (store the fresh handle into the
 ' global slot). Redim does not preserve, so the result is zero-filled.
 Global g As Int[] = New Int[2]

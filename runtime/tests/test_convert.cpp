@@ -1,4 +1,4 @@
-// FD-046: unit tests for the string<->number conversion primitives
+// Unit tests for the string<->number conversion primitives
 // (cb_convert.cpp). These drive the bare extern "C" cb_rt_*_to_string /
 // cb_rt_string_to_* symbols directly. No display / Allegro / trap host is
 // touched. They are the source of truth for the format spec decoded from the

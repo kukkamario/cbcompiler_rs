@@ -1,4 +1,4 @@
-// FD-017 String completeness pass. Codepoint/1-based/clamp semantics.
+// String completeness pass. Codepoint/1-based/clamp semantics.
 
 // Mid — len chars from 1-based pos, clamping past the end; pos<=0 -> "".
 Print Mid("abcdef", 2, 3)
@@ -25,7 +25,7 @@ Print Str(Asc(""))
 Print Bin(5)
 Print Bin(0)
 
-// String — repeat; cbEnchanted quirk: count<1 still yields one copy.
+// String — repeat; quirk: count<1 still yields one copy.
 Print String("ab", 3)
 Print "[" + String("x", 0) + "]"
 

@@ -1,4 +1,4 @@
-// FD-036 Phase 2: camera transform core. Headless-safe — only the deterministic
+// Camera transform core. Headless-safe — only the deterministic
 // camera STATE is asserted here (CameraX/Y/Angle after each command). The
 // world<->screen affine math is unit-tested in runtime/tests/test_camera.cpp,
 // and DrawToWorld's visual effect needs a display (smoke-tested via examples/).
@@ -49,4 +49,4 @@ wx# = MouseWX()
 wy# = MouseWY()
 Print "mousew_ok"
 
-Print "fd036_camera_done"
+Print "camera_done"

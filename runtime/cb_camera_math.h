@@ -1,7 +1,7 @@
 #ifndef CB_CAMERA_MATH_H
 #define CB_CAMERA_MATH_H
 
-// Pure 2D affine transform helpers for the camera (FD-036 Phase 2). Header-only
+// Pure 2D affine transform helpers for the camera. Header-only
 // and Allegro-free so the world<->screen math can be unit-tested without a
 // display (mirrors cb_geom.h / test_geom.cpp). The arithmetic reproduces
 // Allegro's al_*_transform composition *exactly*, so cb_camera.cpp can build an

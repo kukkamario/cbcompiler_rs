@@ -1,7 +1,7 @@
 #ifndef CB_CAMERA_H
 #define CB_CAMERA_H
 
-// Internal camera glue (FD-036 Phase 2). NOT catalog ABI and NOT registered as
+// Internal camera glue. NOT catalog ABI and NOT registered as
 // CB-visible functions: these bridge cb_camera.cpp (owns the camera transform +
 // DrawToWorld flags) to the other Allegro-linked subsystems (gfx, object, map).
 // They traffic in ALLEGRO_TRANSFORM, so this header pulls in Allegro and is

@@ -1,4 +1,4 @@
-// FD-042: an implicit declaration infers its type from the assigned value,
+// An implicit declaration infers its type from the assigned value,
 // so String / Float / array / loop variables need no explicit `Dim` or sigil.
 // Under the old "default to Integer" rule the String line would not even
 // compile and the Float lines would be narrowed to integers.

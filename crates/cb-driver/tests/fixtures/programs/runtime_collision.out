@@ -11,4 +11,4 @@ colx_zero_ok
 setup_smoke_ok
 setup_map_smoke_ok
 reset_smoke_ok
-fd036_collision_done
+collision_done

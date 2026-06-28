@@ -1,4 +1,4 @@
-// FD-039: memory blocks. Byte-level buffers with little-endian Peek/Poke,
+// Memory blocks. Byte-level buffers with little-endian Peek/Poke,
 // unsigned Byte/Short reads, signed PeekInt, 32-bit Float, resize (preserve +
 // zero-fill), and MemCopy. Allegro-free, so this runs in the SDK-free build
 // (not graphics-gated). Bounds/handle errors trap — the out-of-range trap path
