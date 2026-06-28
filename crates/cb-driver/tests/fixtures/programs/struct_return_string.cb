@@ -1,0 +1,54 @@
+' Returning a value-struct that carries a String field (FD-049 review F4). The
+' owned-model makes the returned aggregate own +1 per String sub-field, so the
+' caller's binding stays valid after the callee frame is torn down (no UAF).
+
+Struct Person
+    Field name As String
+    Field age As Int
+EndStruct
+
+Struct Pair
+    Field a As Person
+    Field b As Person
+EndStruct
+
+' Build a struct from String args and return the local (a borrowed view that
+' must be retained before the local release at Return).
+Function MakeP(nm As String, ag As Int) As Person
+    Dim p As Person
+    p.name = nm
+    p.age = ag
+    Return p
+EndFunction
+
+' Return-of-call-result chain: the inner call's owned temp is handed off
+' directly, with no extra retain.
+Function MakeAlice() As Person
+    Return MakeP("Alice", 30)
+EndFunction
+
+' Nested-struct return: each field is itself a String-bearing struct, set from
+' an owned call temp moved into the field (StorePlace owned path).
+Function MakePair() As Pair
+    Dim pr As Pair
+    pr.a = MakeP("Left", 1)
+    pr.b = MakeP("Right", 2)
+    Return pr
+EndFunction
+
+Dim q As Person = MakeAlice()
+Print q.name
+Print Str(q.age)
+
+' Mutate the caller's binding — independent of the callee frame.
+q.name = "Bob"
+Print q.name
+
+Dim pr As Pair = MakePair()
+Print pr.a.name
+Print pr.b.name
+
+' Mutating one nested field must not disturb the other.
+pr.a.name = "Changed"
+Print pr.a.name
+Print pr.b.name

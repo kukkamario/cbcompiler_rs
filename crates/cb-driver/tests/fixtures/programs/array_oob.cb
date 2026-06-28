@@ -1,0 +1,5 @@
+Print "before"
+Dim arr As Int[] = New Int[3]
+Dim i As Int = 5
+Print Str(arr[i])
+Print "after"

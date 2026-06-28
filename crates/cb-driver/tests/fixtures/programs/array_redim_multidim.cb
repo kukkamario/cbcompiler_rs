@@ -1,0 +1,11 @@
+' Multi-dimensional Redim (FD-049 review F15): both dimensions change, and the
+' result is a fresh zero-filled array.
+Dim grid As Int[,] = New Int[2, 2]
+grid[0, 0] = 1
+grid[1, 1] = 4
+Print "before " + Str(Len(grid, 0)) + "x" + Str(Len(grid, 1))
+Redim grid As Int[3, 4]
+Print "after " + Str(Len(grid, 0)) + "x" + Str(Len(grid, 1))
+Print Str(grid[0, 0])       ' fresh → zero-filled, not 1
+grid[2, 3] = 99
+Print Str(grid[2, 3])

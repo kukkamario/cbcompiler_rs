@@ -27,7 +27,10 @@ fn strip_unc(path: PathBuf) -> PathBuf {
 const SDK_FREE_TUS: &[&str] = &[
     "cb_string.cpp",
     "cb_host.cpp",
+    "cb_standalone.cpp",
     "cb_convert.cpp",
+    "cb_array.cpp",
+    "cb_type.cpp",
     "cb_math.cpp",
     "cb_strfuncs.cpp",
     "cb_system.cpp",
@@ -41,6 +44,11 @@ const SDK_FREE_TUS: &[&str] = &[
 const RERUN_SOURCES: &[&str] = &[
     "catalog.cpp",
     "cb_host.cpp",
+    "cb_standalone.cpp",
+    "cb_array.cpp",
+    "cb_array.h",
+    "cb_type.cpp",
+    "cb_type.h",
     "cb_math.cpp",
     "cb_string.cpp",
     "cb_convert.cpp",

@@ -1,0 +1,11 @@
+' Empty array (FD-049 review F19): New Int[0] is a real zero-length array — Len
+' is 0 and For Each runs zero times — then indexing element 0 is out of bounds
+' and traps, exiting 1 in both backends.
+Dim arr As Int[] = New Int[0]
+Print "len: " + Str(Len(arr))
+For v = Each arr
+    Print "unreached: " + Str(v)
+Next v
+Print "before trap"
+Print Str(arr[0])
+Print "after trap"

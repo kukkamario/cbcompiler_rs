@@ -1,0 +1,6 @@
+Dim arr As Int[] = New Int[3]
+arr[0] = 10
+arr[2] = 30
+Print Str(arr[0])
+Print Str(arr[1])
+Print Str(arr[2])

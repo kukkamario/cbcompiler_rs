@@ -1,0 +1,12 @@
+Struct Cell
+    Field n As Int
+EndStruct
+
+' An array of value structs: each element is an inline aggregate. Writing
+' arr[i].n walks an Index step (element address) then a struct Field GEP.
+Dim arr As Cell[] = New Cell[3]
+arr[0].n = 10
+arr[1].n = 20
+arr[2].n = 30
+Print Str(arr[0].n)
+Print Str(arr[1].n + arr[2].n)

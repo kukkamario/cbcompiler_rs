@@ -326,7 +326,7 @@ To resize an array variable (replacing whatever it referenced), use `Redim`:
 Redim arr2 As Float[100]   // arr2 now references a fresh 100-element array
 ```
 
-`Redim` preserves previous contents.
+`Redim` replaces the variable with a **fresh, zero-initialised** array — it does **not** preserve the previous contents. (This matches the interpreter, the differential-test oracle; an earlier note here claimed Redim preserves, which was wrong.)
 
 Functions taking or returning arrays do not pin a length; the size is part of the runtime value:
 

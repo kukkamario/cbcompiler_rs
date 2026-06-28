@@ -1,0 +1,19 @@
+Struct Person
+    Field name As String
+    Field age As Int
+EndStruct
+
+Dim p As Person
+p.name = "Alice"
+p.age = 30
+
+' Full copy carries the String field; mutating the copy is independent.
+Dim q As Person = p
+q.name = "Bob"
+Print p.name
+Print q.name
+Print Str(p.age)
+
+' Reassign a String field (release old, retain new).
+p.name = "Carol"
+Print p.name

@@ -1,0 +1,15 @@
+' Pass a function pointer to a function and call it indirectly.
+Function Apply(f As Function(Integer) As Integer, x As Integer) As Integer
+    Return f(x)
+EndFunction
+
+Function Doubler(n As Integer) As Integer
+    Return n + n
+EndFunction
+
+Function Negate(n As Integer) As Integer
+    Return -n
+EndFunction
+
+Print Str(Apply(Doubler, 21))
+Print Str(Apply(Negate, 7))

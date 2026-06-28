@@ -1,0 +1,17 @@
+' Redim of a Global array inside a function (FD-049 review F15) — lowers to the
+' otherwise-untested InstKind::RedimGlobal (store the fresh handle into the
+' global slot). Redim does not preserve, so the result is zero-filled.
+Global g As Int[] = New Int[2]
+g[0] = 7
+g[1] = 8
+
+Function Resize()
+    Redim g As Int[4]
+EndFunction
+
+Print "before: " + Str(Len(g))
+Resize()
+Print "after: " + Str(Len(g))
+Print Str(g[0])             ' fresh global array → zero-filled, not 7
+g[3] = 42
+Print Str(g[3])

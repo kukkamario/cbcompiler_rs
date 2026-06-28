@@ -1,0 +1,12 @@
+Dim names As String[] = New String[3]
+Print "[" + names[0] + "]"
+names[0] = "Alice"
+names[0] = "Anna"
+names[1] = "Bob"
+Print names[0]
+Print names[1]
+Print "[" + names[2] + "]"
+names[2] = names[0] + " & " + names[1]
+Print names[2]
+Dim copy As String = names[2]
+Print copy

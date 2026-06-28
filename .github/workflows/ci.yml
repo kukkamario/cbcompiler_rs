@@ -39,18 +39,20 @@ jobs:
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  # Proves FD-047: the opt-in LLVM backend links against a real LLVM 18
-  # toolchain. This is the ONLY job that pulls in inkwell/llvm-sys — keep the
+  # Proves FD-047/FD-048: the opt-in LLVM backend links against a real LLVM 18
+  # toolchain. This is one of two jobs that pull in inkwell/llvm-sys — keep the
   # `linux-sdk-free` job above LLVM-free (never add --all-features there). We
   # run `cargo test` (not just build) so the LLVM link is actually exercised:
   # a plain `cargo build` of the rlib compiles against inkwell but never links
-  # LLVM, so it would not catch link breakage. cb-backend-llvm does not depend
-  # on cb-runtime-sys, so no CMake/Allegro/vcpkg is involved here.
+  # LLVM, so it would not catch link breakage. The `codegen` feature pulls in
+  # cb-runtime-sys, which builds the Allegro-free runtime slice via `cc` here (no
+  # CMake/Allegro/vcpkg present), and the emit→link→run smoke links it.
   linux-llvm-smoke:
     name: Linux LLVM backend smoke (codegen feature)
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_181_PREFIX: /usr/lib/llvm-18
+      CB_RUNTIME_FORCE_SDK_FREE: "1"
     steps:
       - uses: actions/checkout@v5
 
@@ -65,3 +67,31 @@ jobs:
 
       - name: Smoke test (llvm backend, codegen feature)
         run: cargo test -p cb-backend-llvm --features codegen --locked
+
+  # Proves FD-049: the full AOT pipeline (IR → LLVM → native exe) matches the
+  # interpreter. Builds the `cb` driver with the `llvm` feature and runs the
+  # `diff_llvm` suite, which compiles each seed fixture to a native exe and
+  # asserts its stdout + exit code equal `--backend interp` (the oracle). Uses
+  # the Allegro-free runtime (CB_RUNTIME_FORCE_SDK_FREE) so no CMake/Allegro is
+  # needed; the standalone exe links it through the platform `cc`. Keep the
+  # default `linux-sdk-free` job LLVM-free — never fold this into it.
+  linux-llvm-diff:
+    name: Linux LLVM AOT diff vs interp (SDK-free)
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_181_PREFIX: /usr/lib/llvm-18
+      CB_RUNTIME_FORCE_SDK_FREE: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM 18
+        run: sudo apt-get update && sudo apt-get install -y llvm-18-dev libpolly-18-dev
+
+      - name: Diff test (driver, llvm + interp backends)
+        run: cargo test -p cb-driver --features llvm --locked

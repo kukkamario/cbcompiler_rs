@@ -1,0 +1,14 @@
+Function Square(n As Integer) As Integer
+    Return n * n
+EndFunction
+
+Function Cube(n As Integer) As Integer
+    Return n * n * n
+EndFunction
+
+' Assign a function to a fn-pointer var, then call through it.
+Dim fn As Function(Integer) As Integer
+fn = Square
+Print Str(fn(5))
+fn = Cube
+Print Str(fn(3))

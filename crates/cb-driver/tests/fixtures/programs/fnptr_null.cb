@@ -1,0 +1,8 @@
+' A fault fixture: an unassigned function pointer is Null; calling it traps
+' (NullFnPtr in the interpreter) and exits 1 in both backends. Both print
+' "before" first, then the call aborts the program.
+Dim fn As Function() As Integer
+
+Print "before"
+Dim r As Integer = fn()
+Print "after"

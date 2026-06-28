@@ -7,7 +7,7 @@ use cb_diagnostics::{Interner, Span, Symbol};
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator, TrapKind};
 use cb_ir::types::IrType;
 use cb_ir::{BlockId, FuncId, FuncKind, Program, Reg, TypeDefInfo};
-use cb_runtime_sys::{CbHostApi, CbString, CbStringApi};
+use cb_runtime_sys::{CbHostApi, CbString, CbStringApi, cb_rt_string_compare};
 
 use crate::error::{InterpError, InterpErrorKind, StackEntry};
 use crate::heap::{ArrayObj, Slab, TypeInstanceObj, TypeList};
@@ -1122,6 +1122,20 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     span,
                 )),
             },
+            // An unassigned function pointer is null-like: `FnPtr(None)` equals
+            // `Null` (CB-correct, and self-consistent with CallIndirect and
+            // is_truthy, which already treat `FnPtr(None)` as null). Ordered
+            // before the generic `(_, Null)` arm so it is not shadowed. The LLVM
+            // backend compares fn-pointers by pointer identity, where a null
+            // fn-ptr already equals Null — this aligns the interpreter oracle.
+            (Value::FnPtr(None), Value::Null) | (Value::Null, Value::FnPtr(None)) => match op {
+                IrBinOp::Eq => Ok(Value::Int(1)),
+                IrBinOp::NotEq => Ok(Value::Int(0)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null values")),
+                    span,
+                )),
+            },
             (Value::Null, _) | (_, Value::Null) => match op {
                 IrBinOp::Eq => Ok(Value::Int(0)),
                 IrBinOp::NotEq => Ok(Value::Int(1)),
@@ -1264,6 +1278,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         }
     }
 
+    #[allow(unsafe_code)]
     fn string_binop(
         &self,
         op: IrBinOp,
@@ -1271,14 +1286,19 @@ impl<'a, O: Observer> Interpreter<'a, O> {
         b: &CbStringHandle,
         span: Span,
     ) -> Result<Value, InterpError> {
+        // Relations go through the shared `cb_rt_string_compare` ordering oracle
+        // (FD-049 decision C) so the interpreter and the native backend cannot
+        // diverge. It is a lexicographic byte compare — identical to the previous
+        // inline `a.as_bytes() <cmp> b.as_bytes()` (Rust slice `Ord` over UTF-8).
+        let cmp = || unsafe { cb_rt_string_compare(a.as_ptr(), b.as_ptr()) };
         match op {
             IrBinOp::StrConcat => Ok(Value::String(a.concat(b))),
-            IrBinOp::StrEq => Ok(Value::Int((a.as_bytes() == b.as_bytes()) as i32)),
-            IrBinOp::StrNotEq => Ok(Value::Int((a.as_bytes() != b.as_bytes()) as i32)),
-            IrBinOp::StrLt => Ok(Value::Int((a.as_bytes() < b.as_bytes()) as i32)),
-            IrBinOp::StrGt => Ok(Value::Int((a.as_bytes() > b.as_bytes()) as i32)),
-            IrBinOp::StrLtEq => Ok(Value::Int((a.as_bytes() <= b.as_bytes()) as i32)),
-            IrBinOp::StrGtEq => Ok(Value::Int((a.as_bytes() >= b.as_bytes()) as i32)),
+            IrBinOp::StrEq => Ok(Value::Int((cmp() == 0) as i32)),
+            IrBinOp::StrNotEq => Ok(Value::Int((cmp() != 0) as i32)),
+            IrBinOp::StrLt => Ok(Value::Int((cmp() < 0) as i32)),
+            IrBinOp::StrGt => Ok(Value::Int((cmp() > 0) as i32)),
+            IrBinOp::StrLtEq => Ok(Value::Int((cmp() <= 0) as i32)),
+            IrBinOp::StrGtEq => Ok(Value::Int((cmp() >= 0) as i32)),
             _ => Err(self.error_at(
                 InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on strings")),
                 span,

@@ -1,0 +1,20 @@
+' An unassigned function pointer equals Null (FD-049 review F3). Once assigned a
+' real function it no longer equals Null. Both backends must agree: the LLVM
+' backend compares fn-pointers by identity (null == null), and the interpreter
+' now treats FnPtr(None) as null in the Eq/NotEq-against-Null arms.
+
+Function Answer() As Integer
+    Return 42
+EndFunction
+
+Dim fn As Function() As Integer
+
+' Unassigned: `fn = Null` is true (1), `fn <> Null` is false (0).
+Print Str(fn = Null)
+Print Str(fn <> Null)
+
+' Assign a real function: now `fn = Null` is false (0), `fn <> Null` is true (1).
+fn = Answer
+Print Str(fn = Null)
+Print Str(fn <> Null)
+Print Str(fn())

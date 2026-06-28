@@ -1,0 +1,16 @@
+Struct Pair
+    Field a As Int
+    Field b As Int
+EndStruct
+
+Dim p As Pair
+p.a = 1
+p.b = 2
+
+' Full value copy: mutating q must not touch p.
+Dim q As Pair = p
+q.a = 99
+Print Str(p.a)
+Print Str(q.a)
+Print Str(p.b)
+Print Str(q.b)

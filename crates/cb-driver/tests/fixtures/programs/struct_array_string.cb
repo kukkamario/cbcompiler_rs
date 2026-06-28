@@ -1,0 +1,30 @@
+' Array of value structs with a String field (FD-049 review F17) — the combined
+' refcount path: per-element String assign (release-old/retain-new through an
+' Index+Field StorePlace), whole-element value copy (deep-copies the String),
+' and field reassignment, all exercised together.
+Struct Item
+    Field name As String
+    Field n As Int
+EndStruct
+
+Dim arr As Item[] = New Item[3]
+arr[0].name = "apple"
+arr[0].n = 1
+arr[1].name = "bread"
+arr[1].n = 2
+arr[2].name = "cheese"
+arr[2].n = 3
+
+Print arr[0].name + " " + Str(arr[0].n)
+Print arr[1].name + " " + Str(arr[1].n)
+Print arr[2].name + " " + Str(arr[2].n)
+
+' Whole-element value copy: arr[2] takes a deep, independent copy of arr[0].
+arr[2] = arr[0]
+Print arr[2].name + " " + Str(arr[2].n)
+
+' Reassign arr[0]'s String field (release old, retain new); the copy is
+' independent and keeps the old value.
+arr[0].name = "apricot"
+Print arr[0].name
+Print arr[2].name
