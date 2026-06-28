@@ -1122,6 +1122,22 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                     span,
                 )),
             },
+            // An unassigned function pointer is null-like: `FnPtr(None)` equals
+            // `Null` (CB-correct, and self-consistent with CallIndirect and
+            // is_truthy, which already treat `FnPtr(None)` as null). Ordered
+            // before the generic `(_, Null)` arm so it is not shadowed. The LLVM
+            // backend compares fn-pointers by pointer identity, where a null
+            // fn-ptr already equals Null — this aligns the interpreter oracle.
+            (Value::FnPtr(None), Value::Null) | (Value::Null, Value::FnPtr(None)) => match op {
+                IrBinOp::Eq => Ok(Value::Int(1)),
+                IrBinOp::NotEq => Ok(Value::Int(0)),
+                _ => Err(self.error_at(
+                    InterpErrorKind::RuntimeError(format!(
+                        "invalid binop: {op:?} on null values"
+                    )),
+                    span,
+                )),
+            },
             (Value::Null, _) | (_, Value::Null) => match op {
                 IrBinOp::Eq => Ok(Value::Int(0)),
                 IrBinOp::NotEq => Ok(Value::Int(1)),

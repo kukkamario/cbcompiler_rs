@@ -161,5 +161,6 @@ diff_tests! {
 diff_tests! {
     fnptr_call,
     fnptr_param,
+    fnptr_null_equality,
     fnptr_null,
 }
