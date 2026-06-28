@@ -1,0 +1,12 @@
+' Repeat … Until — post-test loop. The body always runs at least once, then
+' the loop continues while the condition is falsy and exits the moment it
+' becomes truthy. Also exercises Continue (jumps to the condition check) and
+' Break (jumps to the exit).
+Dim i As Int
+Repeat
+    i = i + 1
+    If i = 3 Then Continue   ' skips the Print, still checks the condition
+    Print i
+    If i = 6 Then Break      ' early exit before the Until condition is met
+Until i >= 10
+Print "done"

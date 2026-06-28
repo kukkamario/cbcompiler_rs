@@ -208,6 +208,10 @@ pub enum Stmt {
         body: Vec<NodeId>,
         cond: NodeId,
     },
+    RepeatUntil {
+        body: Vec<NodeId>,
+        cond: NodeId,
+    },
     For {
         var: NodeId,
         from: NodeId,

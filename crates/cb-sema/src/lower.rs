@@ -638,7 +638,8 @@ impl<'a> Lowerer<'a> {
                 }
                 Node::Stmt(Stmt::While { body, .. })
                 | Node::Stmt(Stmt::RepeatForever { body })
-                | Node::Stmt(Stmt::RepeatWhile { body, .. }) => {
+                | Node::Stmt(Stmt::RepeatWhile { body, .. })
+                | Node::Stmt(Stmt::RepeatUntil { body, .. }) => {
                     self.scan_body_for_locals(&body);
                 }
                 // `For`/`For Each` also bind a loop variable, which may be
@@ -727,6 +728,7 @@ impl<'a> Lowerer<'a> {
                 Node::Stmt(Stmt::While { body, .. })
                 | Node::Stmt(Stmt::RepeatForever { body })
                 | Node::Stmt(Stmt::RepeatWhile { body, .. })
+                | Node::Stmt(Stmt::RepeatUntil { body, .. })
                 | Node::Stmt(Stmt::For { body, .. })
                 | Node::Stmt(Stmt::ForEach { body, .. }) => {
                     self.scan_body_for_labels(&body);
@@ -1533,6 +1535,9 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::RepeatWhile { body, cond }) => {
                 self.lower_repeat_while(&body, cond, id);
             }
+            Node::Stmt(Stmt::RepeatUntil { body, cond }) => {
+                self.lower_repeat_until(&body, cond, id);
+            }
             Node::Stmt(Stmt::For {
                 var,
                 from,
@@ -1800,6 +1805,37 @@ impl<'a> Lowerer<'a> {
                 cond: cond_reg,
                 then_block: body_block,
                 else_block: exit_block,
+            },
+            span,
+        );
+
+        self.switch_to(exit_block);
+    }
+
+    /// `Repeat … Until cond` — the post-test dual of `lower_repeat_while`. The
+    /// body runs at least once, then the loop continues while `cond` is *falsy*
+    /// and exits the moment it becomes *truthy*. Structurally identical to
+    /// `lower_repeat_while` with the condition block's `BranchIf` arms swapped.
+    fn lower_repeat_until(&mut self, body: &[NodeId], cond: NodeId, stmt_id: NodeId) {
+        let span = self.arena.span_of(stmt_id);
+        let body_block = self.fresh_block();
+        let cond_block = self.fresh_block();
+        let exit_block = self.fresh_block();
+
+        self.terminate(Terminator::Goto(body_block), span);
+
+        // Body block.
+        self.switch_to(body_block);
+        self.lower_loop_body(body, cond_block, exit_block, span);
+
+        // Condition block.
+        self.switch_to(cond_block);
+        let cond_reg = self.lower_expr(cond);
+        self.terminate(
+            Terminator::BranchIf {
+                cond: cond_reg,
+                then_block: exit_block, // cond TRUE  -> exit
+                else_block: body_block, // cond FALSE -> loop again
             },
             span,
         );

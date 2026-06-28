@@ -148,6 +148,10 @@ fn children_of(node: &Node) -> Vec<NodeId> {
                 out.extend_from_slice(body);
                 out.push(*cond);
             }
+            Stmt::RepeatUntil { body, cond } => {
+                out.extend_from_slice(body);
+                out.push(*cond);
+            }
             Stmt::For {
                 var,
                 from,
@@ -271,6 +275,7 @@ fn stmt_variant_name(s: &Stmt) -> &'static str {
         Stmt::While { .. } => "While",
         Stmt::RepeatForever { .. } => "RepeatForever",
         Stmt::RepeatWhile { .. } => "RepeatWhile",
+        Stmt::RepeatUntil { .. } => "RepeatUntil",
         Stmt::For { .. } => "For",
         Stmt::ForEach { .. } => "ForEach",
         Stmt::Select { .. } => "Select",

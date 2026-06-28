@@ -158,6 +158,7 @@ diff_tests! {
     if_elseif_else,
     float_condition,
     nested_for_loops,
+    repeat_until,
     select_case,
     function_multi_param,
     recursion_factorial,

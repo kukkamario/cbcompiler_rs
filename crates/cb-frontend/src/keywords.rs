@@ -67,6 +67,7 @@ static KEYWORDS: phf::Map<&'static str, Kw> = phf_map! {
     "uint" => Kw::UInt,
     "uinteger" => Kw::UInteger,
     "ulong" => Kw::ULong,
+    "until" => Kw::Until,
     "wend" => Kw::Wend,
     "while" => Kw::While,
     "xor" => Kw::Xor,
