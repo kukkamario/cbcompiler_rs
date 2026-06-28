@@ -660,3 +660,77 @@ fn no_backend_compiled_in_exits_two() {
         .code(2)
         .stderr(contains("no backend compiled in"));
 }
+
+// ── Include resolution (cb_syntax.md §2.2) ──────────────────────────────────
+
+#[cfg(feature = "interp")]
+#[test]
+fn include_brings_in_definitions_and_runs() {
+    // A top-level `Include` makes the included file's functions/types visible
+    // and runs the merged program. `lib.cb` is resolved relative to `main.cb`.
+    let dir = tempdir().unwrap();
+    write_cb(
+        &dir,
+        "lib.cb",
+        "Function twice(n As Integer) As Integer\nReturn n * 2\nEndFunction\n",
+    );
+    let main = write_cb(&dir, "main.cb", "Include \"lib.cb\"\nPrint twice(21)\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&main)
+        .assert()
+        .success()
+        .stdout(contains("42"));
+}
+
+#[test]
+fn missing_include_exits_one_e0334() {
+    // An include whose file cannot be read is a compile error pointing at the
+    // include statement (it does not silently no-op).
+    let dir = tempdir().unwrap();
+    let main = write_cb(&dir, "main.cb", "Include \"does_not_exist.cb\"\nPrint 1\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&main)
+        .assert()
+        .code(1)
+        .stderr(contains("E0334"));
+}
+
+#[test]
+fn nested_include_exits_one_e0333() {
+    // `Include` is top-level only; one inside a function body is rejected.
+    let dir = tempdir().unwrap();
+    let main = write_cb(
+        &dir,
+        "main.cb",
+        "Function f()\nInclude \"lib.cb\"\nEndFunction\nf()\n",
+    );
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&main)
+        .assert()
+        .code(1)
+        .stderr(contains("E0333"));
+}
+
+#[test]
+fn error_in_included_file_renders_with_that_files_name() {
+    // A sema error inside an included file must render against *that* file's
+    // name/line (each file keeps its own `FileId` in the shared `SourceMap`),
+    // not the main file's — the point of resolving spans per-file.
+    let dir = tempdir().unwrap();
+    write_cb(
+        &dir,
+        "lib.cb",
+        "Function fromLib() As Integer\nReturn missingVar\nEndFunction\n",
+    );
+    let main = write_cb(&dir, "main.cb", "Include \"lib.cb\"\nPrint fromLib()\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&main)
+        .assert()
+        .code(1)
+        // The undefined `missingVar` lives in lib.cb, so the diagnostic names it.
+        .stderr(contains("E0300").and(contains("lib.cb")));
+}

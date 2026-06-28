@@ -3,7 +3,7 @@
 //! Each test parses CoolBasic source, runs sema, lowers to IR, and snapshots
 //! the printed IR output via `insta`.
 
-use cb_diagnostics::FileId;
+use cb_diagnostics::{FileId, SourceMap};
 use cb_frontend::lexer::{LexerOptions, tokenize};
 use cb_frontend::parser::parse;
 
@@ -15,13 +15,21 @@ fn empty_catalog() -> cb_sema::RuntimeCatalog {
     }
 }
 
+/// A single-file `SourceMap` holding `src` at `FileId(0)`, matching the spans.
+fn sources_of(src: &str) -> SourceMap {
+    let mut sources = SourceMap::new();
+    sources.add("<test>".to_string(), src.to_string());
+    sources
+}
+
 fn lower_src(src: &str) -> String {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
-    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog());
+    let sources = sources_of(src);
+    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, &sources, &empty_catalog());
     assert!(!sema.has_errors(), "sema errors: {:?}", sema.diagnostics);
-    let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, src, &mut sema);
+    let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, &sources, &mut sema);
     cb_ir::verify::verify(&ir);
     cb_ir::print::print_program(&ir, &sema.interner)
 }
@@ -30,7 +38,12 @@ fn sema_diags(src: &str) -> Vec<cb_diagnostics::Diagnostic> {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
-    let sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog());
+    let sema = cb_sema::analyze(
+        &parsed.arena,
+        &parsed.program,
+        &sources_of(src),
+        &empty_catalog(),
+    );
     sema.diagnostics
 }
 
@@ -191,9 +204,10 @@ fn lower_with_catalog(src: &str, catalog: &cb_sema::RuntimeCatalog) -> String {
     let file = FileId(0);
     let (tokens, _) = tokenize(src, file, LexerOptions::default());
     let parsed = parse(&tokens, src, file);
-    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, src, file, catalog);
+    let sources = sources_of(src);
+    let mut sema = cb_sema::analyze(&parsed.arena, &parsed.program, &sources, catalog);
     assert!(!sema.has_errors(), "sema errors: {:?}", sema.diagnostics);
-    let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, src, &mut sema);
+    let ir = cb_sema::lower::lower(&parsed.arena, &parsed.program, &sources, &mut sema);
     cb_ir::verify::verify(&ir);
     cb_ir::print::print_program(&ir, &sema.interner)
 }

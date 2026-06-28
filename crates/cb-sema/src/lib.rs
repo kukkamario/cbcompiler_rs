@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Diagnostic, FileId, Interner, Symbol};
+use cb_diagnostics::{Diagnostic, Interner, SourceMap, Symbol};
 use cb_frontend::{Arena, NodeId};
 
 mod check;
@@ -49,11 +49,10 @@ pub enum DeleteClass {
 pub fn analyze(
     arena: &Arena,
     program: &[NodeId],
-    source: &str,
-    _file_id: FileId,
+    sources: &SourceMap,
     runtime_catalog: &RuntimeCatalog,
 ) -> SemaResult {
-    check::Checker::run(arena, program, source, runtime_catalog)
+    check::Checker::run(arena, program, sources, runtime_catalog)
 }
 
 /// Result of semantic analysis.

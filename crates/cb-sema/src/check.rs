@@ -1,6 +1,8 @@
 //! Main analysis engine — declaration collection (pass 1) and type checking (pass 2).
 
-use cb_diagnostics::{Diagnostic, DiagnosticCode, FileId, Interner, Label, Span, Symbol};
+use cb_diagnostics::{
+    Diagnostic, DiagnosticCode, FileId, Interner, Label, SourceMap, Span, Symbol,
+};
 use cb_frontend::ast::{CaseArm, Expr, Node, Param, Stmt, TypeDeclKind};
 use cb_frontend::{Arena, BinOp, DimName, NodeId, Sigil, SpanExt, UnOp};
 
@@ -27,7 +29,10 @@ const INTRINSIC_PREVIOUS: &str = "previous";
 /// Drives semantic analysis over a parsed AST.
 pub(crate) struct Checker<'a> {
     arena: &'a Arena,
-    source: &'a str,
+    /// All source files, keyed by `FileId`. A span's text is sliced from the
+    /// file it belongs to (`span.file`) — multiple files coexist after
+    /// `Include` resolution.
+    sources: &'a SourceMap,
     interner: Interner,
     symbols: SymbolTable,
     types: TypeTable,
@@ -59,7 +64,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn run(
         arena: &'a Arena,
         program: &[NodeId],
-        source: &'a str,
+        sources: &'a SourceMap,
         runtime_catalog: &RuntimeCatalog,
     ) -> SemaResult {
         let mut symbols = SymbolTable::new();
@@ -67,7 +72,7 @@ impl<'a> Checker<'a> {
 
         let mut checker = Checker {
             arena,
-            source,
+            sources,
             interner: Interner::new(),
             symbols,
             types: TypeTable::new(),
@@ -100,8 +105,19 @@ impl<'a> Checker<'a> {
 
     // ── helpers ──────────────────────────────────────────────────────────
 
+    /// The full text of `file`, or `""` for an unknown/synthetic `FileId`.
+    fn file_text(&self, file: FileId) -> &'a str {
+        let sources: &'a SourceMap = self.sources;
+        sources.get(file).map_or("", |s| s.text.as_str())
+    }
+
+    /// The source text a span covers, sliced from the file it belongs to.
+    fn span_text(&self, span: Span) -> &'a str {
+        span.slice(self.file_text(span.file))
+    }
+
     fn intern_span(&mut self, span: Span) -> Symbol {
-        let text = span.slice(self.source);
+        let text = self.span_text(span);
         self.interner.intern(text)
     }
 
@@ -159,7 +175,8 @@ impl<'a> Checker<'a> {
         // trailing sigil byte via `bare_name_span`. The sigil is *not* part of
         // the variable's identity (cb_syntax.md §1.3–§1.4), so `x`, `x%`, and a
         // later bare `x` all intern to the same symbol.
-        self.interner.intern(name_span.slice(self.source))
+        let text = self.span_text(name_span);
+        self.interner.intern(text)
     }
 
     fn resolve_type_expr(&mut self, id: NodeId) -> Type {
@@ -179,7 +196,8 @@ impl<'a> Checker<'a> {
             ));
             return Type::Error;
         }
-        let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, self.source);
+        let src = self.file_text(self.arena.span_of(id).file);
+        let ty = types::resolve_type_expr(self.arena, id, &mut self.interner, src);
         self.refine_type(ty)
     }
 
@@ -1771,11 +1789,20 @@ impl<'a> Checker<'a> {
                     Label::new(self.arena.span_of(id)),
                 ));
             }
+            // A top-level `Include` is spliced away by the driver's include
+            // resolver before sema runs, so any `Include` reaching here is
+            // nested inside a function or block — which §2.2 forbids.
+            Node::Stmt(Stmt::Include { .. }) => {
+                self.diagnostics.push(Diagnostic::error(
+                    E_MISPLACED_INCLUDE,
+                    "`Include` must appear at the top level, not inside a function or block",
+                    Label::new(self.arena.span_of(id)),
+                ));
+            }
             // Statements that are already handled or require no type checking:
             Node::Stmt(Stmt::TypeDecl { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })
             | Node::Stmt(Stmt::End)
-            | Node::Stmt(Stmt::Include { .. })
             | Node::Stmt(Stmt::Error) => {}
             _ => {}
         }
@@ -2568,7 +2595,7 @@ fn sigil_char(s: Sigil) -> char {
 
 #[cfg(test)]
 mod tests {
-    use cb_diagnostics::FileId;
+    use cb_diagnostics::{FileId, SourceMap};
     use cb_frontend::{BinOp, LexerOptions, parse, tokenize};
     use cb_ir::types::IrType;
 
@@ -2584,11 +2611,24 @@ mod tests {
         }
     }
 
+    /// A single-file `SourceMap` holding `src` at `FileId(0)`, matching the
+    /// `FileId(0)` the test lexer/parser stamp on every span.
+    fn sources_of(src: &str) -> SourceMap {
+        let mut sources = SourceMap::new();
+        sources.add("<test>".to_string(), src.to_string());
+        sources
+    }
+
     fn analyze_src(src: &str) -> crate::SemaResult {
         let file = FileId(0);
         let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
         let parsed = parse(&tokens, src, file);
-        analyze(&parsed.arena, &parsed.program, src, file, &empty_catalog())
+        analyze(
+            &parsed.arena,
+            &parsed.program,
+            &sources_of(src),
+            &empty_catalog(),
+        )
     }
 
     fn error_codes(result: &crate::SemaResult) -> Vec<&str> {
@@ -2664,6 +2704,18 @@ mod tests {
              Dim a As Vec2\nDim b As Vec2\nb = makeit(a)\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn nested_include_is_misplaced_e0333() {
+        // Top-level includes are spliced away by the driver before sema, so an
+        // `Include` reaching sema is nested inside a function/block — E0333.
+        let result = analyze_src("Function f()\nInclude \"x.cb\"\nEndFunction\n");
+        assert!(
+            error_codes(&result).contains(&"E0333"),
+            "expected E0333, got {:?}",
+            error_codes(&result)
+        );
     }
 
     #[test]
@@ -3576,7 +3628,7 @@ mod tests {
         let file = FileId(0);
         let (tokens, _lex_diags) = tokenize(src, file, LexerOptions::default());
         let parsed = parse(&tokens, src, file);
-        analyze(&parsed.arena, &parsed.program, src, file, catalog)
+        analyze(&parsed.arena, &parsed.program, &sources_of(src), catalog)
     }
 
     fn catalog_of(functions: Vec<crate::FuncDesc>) -> crate::RuntimeCatalog {
@@ -4398,7 +4450,7 @@ mod tests {
             functions: Vec::new(),
             constants: Vec::new(),
         };
-        let result = analyze(&parsed.arena, &parsed.program, src, file, &catalog);
+        let result = analyze(&parsed.arena, &parsed.program, &sources_of(src), &catalog);
         let msg = message_for(&result, "E0301")
             .unwrap_or_else(|| panic!("expected E0301, got {:?}", error_codes(&result)));
         assert!(msg.contains("Image"), "message should name the type: {msg}");

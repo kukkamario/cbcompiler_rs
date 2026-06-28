@@ -53,3 +53,8 @@ pub const E_CANNOT_INFER_TYPE: DiagnosticCode = DiagnosticCode::new("E0331");
 /// receive it: `Break` requires an enclosing loop, and `Continue` an enclosing
 /// loop or `Select` (cb_syntax.md §6.2/§6.3).
 pub const E_MISPLACED_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E0332");
+/// An `Include` appears somewhere other than the top level — inside a function
+/// or block (cb_syntax.md §2.2). Top-level includes are spliced away by the
+/// driver's include resolver before sema, so any `Include` still present here is
+/// misplaced. (`E0334`, the unreadable-include error, is emitted by the driver.)
+pub const E_MISPLACED_INCLUDE: DiagnosticCode = DiagnosticCode::new("E0333");
