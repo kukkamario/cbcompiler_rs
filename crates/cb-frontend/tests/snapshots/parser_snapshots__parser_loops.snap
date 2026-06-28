@@ -1,9 +1,9 @@
 ---
 source: crates/cb-frontend/tests/parser_snapshots.rs
-assertion_line: 471
+assertion_line: 483
 expression: "snapshot_parser_fixture(\"parser_loops\")"
 ---
-Program (7 top-level statements)
+Program (8 top-level statements)
   Stmt::While @ 27..56
     Expr::Ident(sigil=None) @ 33..40
     Stmt::ExprStmt @ 45..51
@@ -29,37 +29,43 @@ Program (7 top-level statements)
         Expr::Ident(sigil=None) @ 254..258
     Expr::Call(args=0) @ 267..277
       Expr::Ident(sigil=None) @ 267..275
-  Stmt::For(has_step=true, has_next_name=true) @ 325..364
-    Expr::Ident(sigil=None) @ 329..330
-    Expr::IntLit(0) @ 333..334
-    Expr::IntLit(10) @ 338..340
-    Expr::IntLit(2) @ 346..347
-    Stmt::ExprStmt @ 352..359
-      Expr::Call(args=1) @ 352..359
-        Expr::Ident(sigil=None) @ 352..357
-        Expr::Ident(sigil=None) @ 358..359
-  Stmt::For(has_step=true, has_next_name=false) @ 423..463
-    Expr::Ident(sigil=None) @ 427..428
-    Expr::IntLit(10) @ 431..433
-    Expr::IntLit(0) @ 437..438
-    Expr::UnOp(Neg) @ 444..446
-      Expr::IntLit(1) @ 445..446
-    Stmt::ExprStmt @ 451..458
-      Expr::Call(args=1) @ 451..458
-        Expr::Ident(sigil=None) @ 451..456
-        Expr::Ident(sigil=None) @ 457..458
-  Stmt::ForEach(has_next_name=true) @ 492..532
-    Expr::Ident(sigil=None) @ 496..499
-    Expr::Ident(sigil=None) @ 507..513
-    Stmt::ExprStmt @ 518..527
-      Expr::Call(args=1) @ 518..527
-        Expr::Ident(sigil=None) @ 518..523
-        Expr::Ident(sigil=None) @ 524..527
-  Stmt::ForEach(has_next_name=true) @ 575..624
-    Expr::Ident(sigil=None) @ 579..583
-    Expr::Ident(sigil=None) @ 591..597
-    Stmt::ExprStmt @ 602..619
-      Expr::Call(args=1) @ 602..619
-        Expr::Ident(sigil=None) @ 602..607
-        Expr::Field @ 608..619
-          Expr::Ident(sigil=None) @ 608..612
+  Stmt::RepeatUntil @ 342..372
+    Stmt::ExprStmt @ 353..359
+      Expr::Call(args=0) @ 353..359
+        Expr::Ident(sigil=None) @ 353..357
+    Expr::Call(args=0) @ 366..372
+      Expr::Ident(sigil=None) @ 366..370
+  Stmt::For(has_step=true, has_next_name=true) @ 420..459
+    Expr::Ident(sigil=None) @ 424..425
+    Expr::IntLit(0) @ 428..429
+    Expr::IntLit(10) @ 433..435
+    Expr::IntLit(2) @ 441..442
+    Stmt::ExprStmt @ 447..454
+      Expr::Call(args=1) @ 447..454
+        Expr::Ident(sigil=None) @ 447..452
+        Expr::Ident(sigil=None) @ 453..454
+  Stmt::For(has_step=true, has_next_name=false) @ 518..558
+    Expr::Ident(sigil=None) @ 522..523
+    Expr::IntLit(10) @ 526..528
+    Expr::IntLit(0) @ 532..533
+    Expr::UnOp(Neg) @ 539..541
+      Expr::IntLit(1) @ 540..541
+    Stmt::ExprStmt @ 546..553
+      Expr::Call(args=1) @ 546..553
+        Expr::Ident(sigil=None) @ 546..551
+        Expr::Ident(sigil=None) @ 552..553
+  Stmt::ForEach(has_next_name=true) @ 587..627
+    Expr::Ident(sigil=None) @ 591..594
+    Expr::Ident(sigil=None) @ 602..608
+    Stmt::ExprStmt @ 613..622
+      Expr::Call(args=1) @ 613..622
+        Expr::Ident(sigil=None) @ 613..618
+        Expr::Ident(sigil=None) @ 619..622
+  Stmt::ForEach(has_next_name=true) @ 670..719
+    Expr::Ident(sigil=None) @ 674..678
+    Expr::Ident(sigil=None) @ 686..692
+    Stmt::ExprStmt @ 697..714
+      Expr::Call(args=1) @ 697..714
+        Expr::Ident(sigil=None) @ 697..702
+        Expr::Field @ 703..714
+          Expr::Ident(sigil=None) @ 703..707

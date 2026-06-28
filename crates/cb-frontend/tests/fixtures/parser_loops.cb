@@ -15,6 +15,11 @@ Repeat
     tick()
 While moreToDo()
 
+// Repeat / Until — loop until the condition becomes truthy.
+Repeat
+    tick()
+Until done()
+
 // Iterative For with explicit positive Step.
 For i = 0 To 10 Step 2
     Print i

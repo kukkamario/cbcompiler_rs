@@ -169,6 +169,7 @@ fn format_stmt(s: &Stmt) -> String {
         Stmt::While { .. } => "While".to_string(),
         Stmt::RepeatForever { .. } => "RepeatForever".to_string(),
         Stmt::RepeatWhile { .. } => "RepeatWhile".to_string(),
+        Stmt::RepeatUntil { .. } => "RepeatUntil".to_string(),
         Stmt::For {
             step, next_name, ..
         } => format!(
@@ -385,6 +386,10 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             }
             Stmt::RepeatForever { body } => out.extend_from_slice(body),
             Stmt::RepeatWhile { body, cond } => {
+                out.extend_from_slice(body);
+                out.push(*cond);
+            }
+            Stmt::RepeatUntil { body, cond } => {
                 out.extend_from_slice(body);
                 out.push(*cond);
             }

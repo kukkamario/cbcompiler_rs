@@ -110,6 +110,7 @@ fn node_header(node: &Node) -> &'static str {
             Stmt::While { .. } => "Stmt::While",
             Stmt::RepeatForever { .. } => "Stmt::RepeatForever",
             Stmt::RepeatWhile { .. } => "Stmt::RepeatWhile",
+            Stmt::RepeatUntil { .. } => "Stmt::RepeatUntil",
             Stmt::For { .. } => "Stmt::For",
             Stmt::ForEach { .. } => "Stmt::ForEach",
             Stmt::Select { .. } => "Stmt::Select",
@@ -230,6 +231,10 @@ fn children_of(node: &Node) -> Vec<NodeId> {
             }
             Stmt::RepeatForever { body } => out.extend_from_slice(body),
             Stmt::RepeatWhile { body, cond } => {
+                out.extend_from_slice(body);
+                out.push(*cond);
+            }
+            Stmt::RepeatUntil { body, cond } => {
                 out.extend_from_slice(body);
                 out.push(*cond);
             }

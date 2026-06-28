@@ -99,7 +99,7 @@ Or
 Redim, REM, Repeat, Return
 Sar, Select, Shl, Short, Shr, Step, String, Struct
 Then, To, True, Type
-UInt, UInteger, ULong
+UInt, UInteger, ULong, Until
 Wend, While
 Xor
 ```
@@ -891,6 +891,16 @@ While moreToDo()              // condition checked here; Continue jumps to this 
 ```
 
 The body always runs at least once. `Continue` jumps to the condition check.
+
+#### Repeat-Until (condition at the end, inverted)
+
+```cb
+Repeat
+    work()
+Until done()                 // condition checked here; Continue jumps to this check
+```
+
+The post-test dual of `Repeat … While`: the body always runs at least once, then the loop continues *while the condition is falsy* and exits the moment it becomes truthy. `Continue` jumps to the condition check. There is no pre-test `Until` form — use `While … Wend` for that.
 
 #### While-Wend (condition at the start)
 

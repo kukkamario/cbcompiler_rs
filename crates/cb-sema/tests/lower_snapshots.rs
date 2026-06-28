@@ -264,8 +264,8 @@ fn bare_overloaded_command_lowers_to_call() {
 }
 
 // FD-030: loops, Break and Continue. Continue's target differs per loop kind
-// (Forever → body, Repeat-While/While → condition, For → step block), so each
-// kind gets its own snapshot.
+// (Forever → body, Repeat-While/Repeat-Until/While → condition, For → step
+// block), so each kind gets its own snapshot.
 
 #[test]
 fn repeat_forever_break_continue() {
@@ -279,6 +279,14 @@ fn repeat_forever_break_continue() {
 fn repeat_while_break_continue() {
     let ir = lower_src(
         "Dim i As Int\nRepeat\n  i = i + 1\n  If i = 3 Then Continue\n  If i = 9 Then Break\nWhile i < 10\n",
+    );
+    insta::assert_snapshot!(ir);
+}
+
+#[test]
+fn repeat_until_break_continue() {
+    let ir = lower_src(
+        "Dim i As Int\nRepeat\n  i = i + 1\n  If i = 3 Then Continue\n  If i = 9 Then Break\nUntil i >= 10\n",
     );
     insta::assert_snapshot!(ir);
 }

@@ -1878,7 +1878,7 @@ impl<'t> Parser<'t> {
     fn parse_repeat(&mut self) -> Result<NodeId, ParseError> {
         let opener = self.cursor.bump().span; // `Repeat`
         self.cursor.eat_newlines();
-        let body = self.parse_block_until(&[Kw::Forever, Kw::While], opener, "Repeat");
+        let body = self.parse_block_until(&[Kw::Forever, Kw::While, Kw::Until], opener, "Repeat");
         match self.cursor.peek() {
             TokenKind::Keyword(Kw::Forever) => {
                 let close_span = self.cursor.bump().span;
@@ -1892,6 +1892,13 @@ impl<'t> Parser<'t> {
                 let span = opener.merge(self.arena.span_of(cond));
                 let _ = self.consume_stmt_sep_or_terminator();
                 Ok(self.alloc(Node::Stmt(Stmt::RepeatWhile { body, cond }), span))
+            }
+            TokenKind::Keyword(Kw::Until) => {
+                self.cursor.bump();
+                let cond = self.parse_expr_bp(0)?;
+                let span = opener.merge(self.arena.span_of(cond));
+                let _ = self.consume_stmt_sep_or_terminator();
+                Ok(self.alloc(Node::Stmt(Stmt::RepeatUntil { body, cond }), span))
             }
             _ => {
                 // Wrong closer (or EOF). At EOF, `parse_block_until` already
@@ -2772,6 +2779,7 @@ fn kw_close_str(kw: Kw) -> &'static str {
         Kw::Wend => "Wend",
         Kw::Next => "Next",
         Kw::Forever => "Forever",
+        Kw::Until => "Until",
         other => other.as_str(),
     }
 }
@@ -2822,6 +2830,10 @@ fn is_block_end_marker(kw: Kw) -> bool {
             // parent-decide list (which lists Wend|Forever|Next|Else|ElseIf but
             // deliberately omits While).
             | Kw::While
+            // `Until` is the closer of a `Repeat … Until` block; same reasoning
+            // as `While` above (only ever a Repeat closer, so omitted from the
+            // parent-decide list).
+            | Kw::Until
     )
 }
 
@@ -4301,6 +4313,21 @@ mod block_tests {
                 assert_ident(&r.arena, *cond, src, "c");
             }
             other => panic!("expected RepeatWhile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repeat_until() {
+        let src = "Repeat\n  a\nUntil c\n";
+        let r = parse_src(src);
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        assert_eq!(r.program.len(), 1);
+        match stmt_of(&r.arena, r.program[0]) {
+            Stmt::RepeatUntil { body, cond } => {
+                assert_eq!(body.len(), 1);
+                assert_ident(&r.arena, *cond, src, "c");
+            }
+            other => panic!("expected RepeatUntil, got {other:?}"),
         }
     }
 

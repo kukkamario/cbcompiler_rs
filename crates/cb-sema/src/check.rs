@@ -511,6 +511,7 @@ impl<'a> Checker<'a> {
             Node::Stmt(Stmt::While { body, .. })
             | Node::Stmt(Stmt::RepeatForever { body })
             | Node::Stmt(Stmt::RepeatWhile { body, .. })
+            | Node::Stmt(Stmt::RepeatUntil { body, .. })
             | Node::Stmt(Stmt::For { body, .. })
             | Node::Stmt(Stmt::ForEach { body, .. }) => {
                 for &s in &body {
@@ -577,7 +578,8 @@ impl<'a> Checker<'a> {
             }
             Node::Stmt(Stmt::While { body, .. })
             | Node::Stmt(Stmt::RepeatForever { body })
-            | Node::Stmt(Stmt::RepeatWhile { body, .. }) => {
+            | Node::Stmt(Stmt::RepeatWhile { body, .. })
+            | Node::Stmt(Stmt::RepeatUntil { body, .. }) => {
                 for &s in &body {
                     self.collect_labels_recursive(s, scope, for_stack);
                 }
@@ -1659,7 +1661,8 @@ impl<'a> Checker<'a> {
                 }
                 self.control_stack.pop();
             }
-            Node::Stmt(Stmt::RepeatWhile { body, cond }) => {
+            Node::Stmt(Stmt::RepeatUntil { body, cond })
+            | Node::Stmt(Stmt::RepeatWhile { body, cond }) => {
                 self.control_stack.push(ControlKind::Loop);
                 for &s in &body {
                     self.check_stmt(s);
