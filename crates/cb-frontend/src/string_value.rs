@@ -41,8 +41,9 @@ fn slice(src: &str, span: Span) -> &str {
     }
 }
 
-/// `Plain`: source has the form `"...body..."` with no `\` characters in the
-/// body. Strip the outer quotes and return the body verbatim.
+/// `Plain`: source has the form `"...body..."` and is verbatim (FD-051) — the
+/// body may contain `\`, which carries no special meaning. Strip the outer
+/// quotes and return the body unchanged.
 fn decode_plain(raw: &str) -> (String, Vec<Diagnostic>) {
     let body = strip_single_quotes(raw);
     (body.to_string(), Vec::new())
