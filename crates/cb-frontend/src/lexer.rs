@@ -180,7 +180,21 @@ impl<'src> Lexer<'src> {
                 }
             }
             b'$' => {
-                self.scan_radix_number(start, b'$', |b| b.is_ascii_hexdigit(), 16, "hexadecimal")
+                if self.peek_byte_at(1) == Some(b'"') {
+                    // `$"` opens an escape-aware string literal (FD-051). `"` is
+                    // not a hex digit, so no valid hex token is shadowed, and a
+                    // token-start `$` is never a String sigil (sigils are only
+                    // consumed as a trailing byte inside `scan_ident`).
+                    self.scan_dollar_string(start);
+                } else {
+                    self.scan_radix_number(
+                        start,
+                        b'$',
+                        |b| b.is_ascii_hexdigit(),
+                        16,
+                        "hexadecimal",
+                    )
+                }
             }
             b'%' => self.scan_radix_number(start, b'%', |b| matches!(b, b'0' | b'1'), 2, "binary"),
             b'0'..=b'9' => self.scan_number_decimal_or_float(start),
@@ -386,17 +400,64 @@ impl<'src> Lexer<'src> {
 
     // ---------- strings ----------
 
+    /// Verbatim `"…"` literal (FD-051). `\` is an ordinary character and the
+    /// first unescaped `"` always closes the literal — there is no escape
+    /// processing here. The escape-aware form is `$"…"` (see
+    /// [`scan_dollar_string`]).
     fn scan_string(&mut self, start: u32) {
         debug_assert_eq!(self.peek_byte(), Some(b'"'));
         self.bump_byte(); // opening quote
-        let mut saw_backslash = false;
+        loop {
+            match self.peek_byte() {
+                Some(b'"') => {
+                    self.bump_byte();
+                    let span = self.current_span(start);
+                    self.push_token(TokenKind::StrLit(StrLitKind::Plain), span);
+                    return;
+                }
+                Some(b'\n') | Some(b'\r') => {
+                    // Newline inside single-line string: error, do NOT consume the newline.
+                    let span = self.current_span(start);
+                    self.diagnostics.push(Diagnostic::error(
+                        E_NEWLINE_IN_STRING,
+                        "newline in string literal — use a triple-quoted `\"\"\"...\"\"\"` raw string, or `$\"\\n\"` for an escaped newline",
+                        Label::new(span),
+                    ));
+                    self.push_token(TokenKind::Error(LexErrorKind::NewlineInString), span);
+                    return;
+                }
+                Some(_) => {
+                    self.bump_char();
+                }
+                None => {
+                    let span = self.current_span(start);
+                    self.diagnostics.push(Diagnostic::error(
+                        E_UNTERMINATED_STRING,
+                        "unterminated string literal",
+                        Label::new(span),
+                    ));
+                    self.push_token(TokenKind::Error(LexErrorKind::UnterminatedString), span);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Escape-aware `$"…"` literal (FD-051). The `$` is a mode marker only, not
+    /// interpolation. Inside the quotes, `\` escapes the next character (so
+    /// `\"` does not terminate the literal); the actual escape set is validated
+    /// later by the decoder. The classification here only sets `Escaped`.
+    fn scan_dollar_string(&mut self, start: u32) {
+        debug_assert_eq!(self.peek_byte(), Some(b'$'));
+        debug_assert_eq!(self.peek_byte_at(1), Some(b'"'));
+        self.bump_byte(); // `$`
+        self.bump_byte(); // opening quote
         loop {
             match self.peek_byte() {
                 Some(b'\\') => {
-                    saw_backslash = true;
                     self.bump_byte();
                     // Consume the next char of the escape (any char), if any.
-                    // Don't validate; that's the parser's job. But stop before
+                    // Don't validate; that's the decoder's job. But stop before
                     // newline so a stray `\` doesn't swallow it.
                     match self.peek_byte() {
                         Some(b'\n') | Some(b'\r') => {
@@ -414,12 +475,7 @@ impl<'src> Lexer<'src> {
                 Some(b'"') => {
                     self.bump_byte();
                     let span = self.current_span(start);
-                    let kind = if saw_backslash {
-                        StrLitKind::Escaped
-                    } else {
-                        StrLitKind::Plain
-                    };
-                    self.push_token(TokenKind::StrLit(kind), span);
+                    self.push_token(TokenKind::StrLit(StrLitKind::Escaped), span);
                     return;
                 }
                 Some(b'\n') | Some(b'\r') => {

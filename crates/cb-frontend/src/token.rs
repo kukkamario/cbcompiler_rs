@@ -295,13 +295,15 @@ pub enum Punct {
     Dot,
 }
 
-/// String-literal flavour. Drives the unescape / value-extraction step
-/// downstream of the lexer.
+/// String-literal flavour, chosen by **delimiter form** (FD-051). Drives the
+/// unescape / value-extraction step downstream of the lexer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StrLitKind {
-    /// Single-line `"..."`, no `\` seen — the value is the body verbatim.
+    /// Single-line `"..."` — verbatim. `\` is an ordinary character and the
+    /// value is the body between the quotes exactly as written.
     Plain,
-    /// Single-line `"..."`, contains at least one `\` — needs an unescape pass.
+    /// Single-line `$"..."` — escape-aware. The `$` is a mode marker (not
+    /// interpolation); the body needs a C-style unescape pass.
     Escaped,
     /// Triple-quoted `"""…"""`, raw multi-line — no escapes, indent stripping
     /// deferred to the parser/sema.

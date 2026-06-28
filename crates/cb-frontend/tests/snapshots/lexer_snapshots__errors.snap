@@ -14,6 +14,6 @@ Error(UnterminatedBlockComment) @ 30..42  "/* unclosed⏎"
 Eof @ 42..42  ""
 
 --- DIAGNOSTICS ---
-Error Some("E0101") newline in string literal — use `\n` or a triple-quoted `"""..."""` raw string
+Error Some("E0101") newline in string literal — use a triple-quoted `"""..."""` raw string, or `$"\n"` for an escaped newline
 Error Some("E0105") digit separators cannot be doubled
 Error Some("E0103") unterminated block comment

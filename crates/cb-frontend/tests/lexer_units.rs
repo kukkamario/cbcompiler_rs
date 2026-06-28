@@ -554,7 +554,7 @@ mod numbers {
 
 mod strings {
     use super::*;
-    use cb_frontend::StrLitKind;
+    use cb_frontend::{Sigil, StrLitKind};
 
     #[test]
     fn plain_string() {
@@ -567,10 +567,60 @@ mod strings {
 
     #[test]
     fn escaped_string_has_backslash() {
-        // The lexer just classifies; it doesn't unescape. `\n` flips the kind
-        // to Escaped.
-        let toks = lex("\"a\\nb\"");
+        // FD-051: the escape-aware kind is selected by the `$"` opener, not by
+        // content. The lexer just classifies; it doesn't unescape.
+        let toks = lex("$\"a\\nb\"");
         assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Escaped));
+    }
+
+    #[test]
+    fn plain_string_with_backslash_is_verbatim() {
+        // FD-051: a backslash inside `"..."` is an ordinary character — the
+        // literal stays `Plain`.
+        let toks = lex("\"a\\nb\"");
+        assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Plain));
+    }
+
+    #[test]
+    fn plain_string_with_windows_path_is_verbatim() {
+        // FD-051 motivating case: `"C:\new"` must not turn `\n` into a newline;
+        // it lexes as a single verbatim `Plain` literal.
+        let toks = lex("\"C:\\new\"");
+        assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Plain));
+        // Span covers the whole literal including both quotes.
+        assert_eq!(toks[0].span.start, 0);
+        assert_eq!(toks[0].span.end, 8);
+    }
+
+    #[test]
+    fn dollar_quote_starts_escaped_string() {
+        // FD-051 disambiguation: only `$"` starts an escaped string. The leading
+        // `$` is consumed as part of the literal, not as a hex prefix.
+        let toks = lex("$\"hi\"");
+        assert_eq!(toks[0].kind, TokenKind::StrLit(StrLitKind::Escaped));
+        assert_eq!(toks[0].span.start, 0);
+        assert_eq!(toks[0].span.end, 5);
+    }
+
+    #[test]
+    fn dollar_digit_still_lexes_hex() {
+        // FD-051 disambiguation: `$ff` is still a hexadecimal literal — only a
+        // `$` immediately followed by `"` opens an escaped string.
+        let toks = lex("$ff");
+        assert_eq!(toks[0].kind, TokenKind::IntLit(0xff));
+    }
+
+    #[test]
+    fn trailing_dollar_sigil_is_still_an_ident() {
+        // FD-051 disambiguation: a `$` consumed as a trailing sigil keeps the
+        // identifier intact — `name$` is an ident with the String sigil.
+        let toks = lex("name$");
+        assert_eq!(
+            toks[0].kind,
+            TokenKind::Ident {
+                sigil: Some(Sigil::String)
+            }
+        );
     }
 
     #[test]
@@ -1199,11 +1249,13 @@ mod errors {
 
     #[test]
     fn distinct_messages_for_newline_in_string_variants() {
-        // Plain newline inside `"..."` and `\` immediately before newline
-        // should produce different diagnostic messages, even though both
-        // use code E0101 / NewlineInString.
+        // Plain newline inside `"..."` and `\` immediately before newline inside
+        // `$"..."` should produce different diagnostic messages, even though
+        // both use code E0101 / NewlineInString. FD-051: the backslash-before-
+        // newline path only exists in the escape-aware `$"..."` form (in a
+        // verbatim `"..."` the `\` is an ordinary character).
         let (_, diags_plain) = lex_with_diags("\"hello\nworld\"");
-        let (_, diags_escaped) = lex_with_diags("\"hello\\\nworld\"");
+        let (_, diags_escaped) = lex_with_diags("$\"hello\\\nworld\"");
         let plain_msg = diags_plain
             .iter()
             .find(|d| d.code_is("E0101"))
