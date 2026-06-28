@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
+| [FD-052](FD-052_REPEAT_UNTIL_LOOP.md) | `Repeat … Until` Loop — Loop Until Condition Is Truthy | Open | Medium | Medium |
 
 ## Deferred / Closed
 
