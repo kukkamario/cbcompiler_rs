@@ -29,7 +29,20 @@ fn normalise(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace("\r\n", "\n")
 }
 
-fn run_diff(name: &str) {
+/// Captured outputs from running a fixture through both backends.
+struct Outcome {
+    want_stdout: String,
+    want_code: Option<i32>,
+    got_stdout: String,
+    got_code: Option<i32>,
+    /// The produced native exe's raw stderr (for trap-message assertions).
+    got_stderr: Vec<u8>,
+}
+
+/// Run a fixture through both backends: the interpreter (oracle) and the
+/// llvm-compiled native exe. Returns their stdout/exit-code/stderr for the
+/// caller to assert on.
+fn run_both(name: &str) -> Outcome {
     let src = fixtures_dir().join(format!("{name}.cb"));
 
     // Oracle: the interpreter's stdout + exit code.
@@ -37,8 +50,6 @@ fn run_diff(name: &str) {
         .arg(&src)
         .output()
         .unwrap_or_else(|e| panic!("run interp on {name}: {e}"));
-    let want_stdout = normalise(&oracle.stdout);
-    let want_code = oracle.status.code();
 
     // Compile via the llvm backend to a throwaway native exe.
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -58,20 +69,57 @@ fn run_diff(name: &str) {
         String::from_utf8_lossy(&compile.stderr)
     );
 
-    // Run the produced exe and compare.
+    // Run the produced exe.
     let run = Command::new(&exe)
         .output()
         .unwrap_or_else(|e| panic!("run produced exe for {name}: {e}"));
-    let got_stdout = normalise(&run.stdout);
-    let got_code = run.status.code();
 
+    Outcome {
+        want_stdout: normalise(&oracle.stdout),
+        want_code: oracle.status.code(),
+        got_stdout: normalise(&run.stdout),
+        got_code: run.status.code(),
+        got_stderr: run.stderr,
+    }
+}
+
+/// Assert stdout + exit code agree between the two backends. Both exit codes
+/// must be `Some`: on Unix a signal-killed process yields `None`, so a
+/// `SIGSEGV`/`SIGABRT` could otherwise compare equal-by-absence (F18).
+fn assert_agree(name: &str, o: &Outcome) {
     assert_eq!(
-        want_stdout, got_stdout,
+        o.want_stdout, o.got_stdout,
         "stdout mismatch for {name}: interp vs llvm"
     );
+    assert!(
+        o.want_code.is_some(),
+        "{name}: interp produced no exit code (signal-killed?)"
+    );
+    assert!(
+        o.got_code.is_some(),
+        "{name}: produced exe produced no exit code (signal-killed?)"
+    );
     assert_eq!(
-        want_code, got_code,
+        o.want_code, o.got_code,
         "exit-code mismatch for {name}: interp vs llvm"
+    );
+}
+
+fn run_diff(name: &str) {
+    let o = run_both(name);
+    assert_agree(name, &o);
+}
+
+/// A fault fixture: in addition to stdout/exit-code parity, the produced exe
+/// must have written a (non-empty) trap message to stderr — guarding against a
+/// silent or signal-kill divergence on the LLVM side (F18). The exact text is
+/// not compared (it differs between the Rust interp and the C runtime).
+fn run_diff_trap(name: &str) {
+    let o = run_both(name);
+    assert_agree(name, &o);
+    assert!(
+        !o.got_stderr.is_empty(),
+        "trap fixture {name}: produced exe wrote no stderr trap message"
     );
 }
 
@@ -81,6 +129,18 @@ macro_rules! diff_tests {
             #[test]
             fn $name() {
                 run_diff(stringify!($name));
+            }
+        )+
+    };
+}
+
+/// Like `diff_tests!` but for fault fixtures, routed through `run_diff_trap`.
+macro_rules! diff_trap_tests {
+    ($($name:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                run_diff_trap(stringify!($name));
             }
         )+
     };
@@ -116,8 +176,8 @@ diff_tests! {
 }
 
 // Arrays (FD-049 Phase 2): Dim/New/index/Redim/Len/For Each over native heap
-// arrays. `array_oob` is a fault fixture — both backends print `before`, then
-// the out-of-bounds index traps and exits 1.
+// arrays. Fault fixtures (out-of-bounds / empty / negative-index traps) live in
+// the `diff_trap_tests!` block below.
 diff_tests! {
     array_1d,
     array_multidim,
@@ -130,7 +190,6 @@ diff_tests! {
     array_foreach,
     array_string,
     array_param,
-    array_oob,
 }
 
 // User Types (FD-049 Phase 3a): New/field access, the type-instance linked list
@@ -163,11 +222,22 @@ diff_tests! {
 }
 
 // Function pointers (FD-049 Phase 3c): FuncAddr (bare-name address-of) and
-// CallIndirect through a `Function(...)` value. `fnptr_null` is a fault fixture
-// — both backends print `before`, then the null fn-ptr call exits 1.
+// CallIndirect through a `Function(...)` value. The null-call fault fixture
+// lives in the `diff_trap_tests!` block below.
 diff_tests! {
     fnptr_call,
     fnptr_param,
     fnptr_null_equality,
+}
+
+// Fault fixtures: programs that trap at runtime (out-of-bounds / empty /
+// negative array index, null fn-ptr call). Beyond stdout + exit-code parity,
+// these assert the produced exe wrote a non-empty stderr trap message and that
+// neither side was signal-killed (F18). Both backends print their pre-trap
+// output, then trap and exit 1.
+diff_trap_tests! {
+    array_oob,
+    array_empty,
+    array_negative_index,
     fnptr_null,
 }

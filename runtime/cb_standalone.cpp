@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -60,6 +61,22 @@ static void default_raise_error(const CbString* msg) {
         }
     }
     std::fputc('\n', stderr);
+    cb_rt_exit(1);
+}
+
+extern "C" void cb_rt_trap_null_fnptr(void) {
+    // Raise the same FD-015 error the interpreter's NullFnPtr trap reports, so a
+    // null fn-ptr call in the native exe writes a stderr trap message (not a
+    // silent exit). The default host's raise_error writes stderr + exits; the
+    // trailing cb_rt_exit(1) covers a host whose raise_error returns.
+    const CbHostApi* h = cb_host();
+    if (h && h->raise_error) {
+        const char msg[] = "null function pointer call";
+        CbString* s = cb_rt_string_from_literal(
+            reinterpret_cast<const uint8_t*>(msg), std::strlen(msg));
+        h->raise_error(s);
+        cb_rt_string_release(s);
+    }
     cb_rt_exit(1);
 }
 

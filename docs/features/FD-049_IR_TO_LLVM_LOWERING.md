@@ -75,9 +75,18 @@ Verified by 3 new `diff_llvm` fixtures — `fnptr_call` (assign + call through a
 
 With Phase 3 complete, the only remaining IR surface is the sema-emitted hard-fault `Terminator::Trap(kind)` (Phase 4); every `InstKind` and every other terminator now lowers to native code matching the interpreter.
 
+### Review-fix pass (post-Phase-3)
+
+A two-phase multi-agent review of the Phase 1–3 lowering (`docs/llvm_backend_review.md`, 2026-06-28) produced 13 confirmed findings; all were addressed in a dedicated fix pass (the interpreter remaining the oracle):
+
+- **Correctness/safety:** F4 (critical — struct-return use-after-free → full owned-model, leak-free), F10 (high — `Float` `BranchIf` panic), F2 (medium — shift width must follow the LHS only), F8/F5 (never-null `CbString*` invariant in `build_new_type` and the fall-through return), F3 (interpreter fixed so an unassigned fn-ptr equals `Null`), F12 (Windows AOT stdout switched to binary mode).
+- **Coverage/quality:** new differential fixtures `struct_return_string`, `float_condition`, `shift_mixed_width`, `fnptr_null_equality`, `byte_short_overflow`, `array_redim_{grow,shrink,multidim,global}`, `struct_array_string`, `type_previous`, `array_empty`, `array_negative_index`; harness hardened (`run_diff_trap` asserts a non-empty stderr trap message and that neither side was signal-killed). F18's stderr check surfaced that the null-fn-ptr trap exited silently — now routed through `cb_rt_trap_null_fnptr`, which raises the interpreter-matching message.
+
 ### Phase 4 — Traps
 
 `Terminator::Trap(kind)` and the runtime checks that reach it (null deref, deleted access, division by zero, index out of bounds, null/double-delete), lowered to match the interpreter's trap messages and exit codes. These are sema-emitted *hard* faults in the IR's control flow — distinct from the runtime's cooperative `request_exit`/`raise_error`, which Phase 1 already handles via the no-return host callbacks.
+
+**Carried over from the review (F1/F13):** integer `Div`/`Mod` still emit raw `sdiv`/`srem` (UB on `/0` and `INT_MIN/-1`) — guard them with a zero/`INT_MIN`-`-1` compare branching to the trap path, and add the `div_by_zero.cb` differential fixture, as part of this phase.
 
 ## Crates & Areas Touched
 

@@ -138,6 +138,13 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         self.declare_rt("cb_rt_standalone_run", fty)
     }
 
+    /// `void cb_rt_trap_null_fnptr(void)` — no-return null-fn-ptr-call trap that
+    /// raises the interpreter-matching stderr message, then exits 1.
+    pub(super) fn rt_trap_null_fnptr(&self) -> FunctionValue<'ctx> {
+        let fty = self.ctx.void_type().fn_type(&[], false);
+        self.declare_rt("cb_rt_trap_null_fnptr", fty)
+    }
+
     // ── Array heap helpers (FD-049 Phase 2; cb_array.cpp) ────────────────
 
     /// `CbArray* cb_rt_array_new(int64_t rank, const int64_t* dims,

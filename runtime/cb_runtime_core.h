@@ -225,6 +225,13 @@ void cb_rt_exit(int32_t code);
    cb_rt_exit(0). Returns 0 only formally (it never returns). */
 int32_t cb_rt_standalone_run(void (*user_main)(void));
 
+/* No-return trap for a null function-pointer call (FD-049): raise the FD-015
+   error "null function pointer call" (matching the interpreter's NullFnPtr
+   trap message) through the host channel, then exit 1. The LLVM backend's
+   CallIndirect null-check branches here instead of a bare cb_rt_exit(1), so the
+   native exe writes the same stderr trap message as the interpreter. */
+void cb_rt_trap_null_fnptr(void);
+
 /* Runtime Trap Channel handshake (FD-015). The host passes its API by const
    pointer; the runtime stashes it in a file-static and returns the hook table
    it wants connected (null hooks = not connected). Kept separate from

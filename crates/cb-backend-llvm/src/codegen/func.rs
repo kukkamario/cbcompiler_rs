@@ -1441,8 +1441,10 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             .build_conditional_branch(is_null, trap_bb, cont_bb)
             .map_err(berr)?;
         self.cg.builder.position_at_end(trap_bb);
-        let one = self.cg.ctx.i32_type().const_int(1, false);
-        self.call_void(self.cg.rt_exit(), &[one.into()])?;
+        // Raise the interpreter-matching "null function pointer call" trap
+        // message to stderr, then exit 1 (no bare silent exit — FD-049 review
+        // F18 / trap-message parity).
+        self.call_void(self.cg.rt_trap_null_fnptr(), &[])?;
         self.cg.builder.build_unreachable().map_err(berr)?;
 
         self.cg.builder.position_at_end(cont_bb);
