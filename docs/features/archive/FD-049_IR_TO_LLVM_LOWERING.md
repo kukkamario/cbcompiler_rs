@@ -1,6 +1,7 @@
 # FD-049: IR → LLVM Lowering
 
-**Status:** In Progress (Phase 3 complete)
+**Status:** Complete
+**Completed:** 2026-06-28
 **Priority:** High
 **Effort:** High (> 4 hours — multi-phase roadmap; each phase is planned in detail in place, then implemented as its own commit(s))
 **Impact:** Makes the LLVM/AOT backend actually *compile programs*. Today it emits a fixed empty `main` (FD-048); this FD walks `cb_ir::Program` and generates real native code, so `cb --backend llvm prog.cb` produces an exe that behaves like `--backend interp`.
@@ -41,7 +42,7 @@ Stands up the whole skeleton and produces programs with **observable stdout** so
 - **Decision B — string-refcount discipline.** Producers own +1; a String `LoadLocal`/`LoadGlobal` retains; stores release-old-then-move-in; call args borrow; String params are retained into their slot and every String local slot is released at each `Return`. An owned String temp that is neither consumed (stored/returned) nor escapes its defining block is released right after its last in-block use (scheduled by the `regtypes` pass). Temps that escape a block or are dead are conservatively leaked — safe for Phase 1.
 - **Decision C — one ordering oracle.** A new bare `cb_rt_string_compare` (lexicographic unsigned-byte compare, null = empty, normalized −1/0/1) in `cb_string.cpp` backs both the native `Str{Eq,NotEq,Lt,Gt,LtEq,GtEq}` lowering and the interpreter's string relations (repointed off the old inline `as_bytes()` compares), so the two backends cannot diverge on ordering. `cb_rt_string_char_len` likewise backs `StrLen` (codepoint count, not byte length).
 
-Two scoped simplifications: String globals are null-initialized rather than given an empty `CbString` (every string primitive null-checks, and top-level `Dim` lowers to `@main` locals, so real String globals are rare); and `Trap` — a Phase-4 concern — lowers to a clean non-zero exit rather than UB.
+Two scoped simplifications: String globals are null-initialized rather than given an empty `CbString` (every string primitive null-checks, and top-level `Dim` lowers to `@main` locals, so real String globals are rare); and `Trap` — trap *policy* is [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) — lowers to a clean non-zero exit rather than UB.
 
 ### Phase 2 — Arrays
 
@@ -73,7 +74,7 @@ Verified by 6 new `diff_llvm` fixtures modeled on the sema snapshots — `struct
 
 Verified by 3 new `diff_llvm` fixtures — `fnptr_call` (assign + call through a `Function(Integer) As Integer` var), `fnptr_param` (pass a fn-ptr to a function and call it), `fnptr_null` (a fault: a null fn-ptr call prints `before` then exits 1 on both backends) — all matching the interpreter; plus the flipped `aggregate_types_error` (`FnPtr` → an opaque pointer; only `RuntimeType` now rejected). No new C runtime (gtest N/A). `docs/cb_syntax.md` already documents value-`Struct`, fn-pointer (§7.4: types, bare-name address-of, indirect call, null-call trap), and `Delete` semantics (§3.3, incl. the LLVM-backend "may exhibit any behaviour" disclaimer covering the 3a `Delete x; Delete x` divergence), so no clarification was needed.
 
-With Phase 3 complete, the only remaining IR surface is the sema-emitted hard-fault `Terminator::Trap(kind)` (Phase 4); every `InstKind` and every other terminator now lowers to native code matching the interpreter.
+With Phase 3 complete, every `InstKind` and every terminator lowers to native code matching the interpreter. The one remaining behavioral gap — integer `Div`/`Mod` by zero (raw `sdiv`/`srem`, UB on `/0` and `INT_MIN/-1`) — and trap *policy* in general (the `Terminator::Trap(kind)` lowering, exact trap-message parity, and a checked/unchecked codegen switch) are **descoped to [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md)** — see below.
 
 ### Review-fix pass (post-Phase-3)
 
@@ -82,11 +83,13 @@ A two-phase multi-agent review of the Phase 1–3 lowering (`docs/llvm_backend_r
 - **Correctness/safety:** F4 (critical — struct-return use-after-free → full owned-model, leak-free), F10 (high — `Float` `BranchIf` panic), F2 (medium — shift width must follow the LHS only), F8/F5 (never-null `CbString*` invariant in `build_new_type` and the fall-through return), F3 (interpreter fixed so an unassigned fn-ptr equals `Null`), F12 (Windows AOT stdout switched to binary mode).
 - **Coverage/quality:** new differential fixtures `struct_return_string`, `float_condition`, `shift_mixed_width`, `fnptr_null_equality`, `byte_short_overflow`, `array_redim_{grow,shrink,multidim,global}`, `struct_array_string`, `type_previous`, `array_empty`, `array_negative_index`; harness hardened (`run_diff_trap` asserts a non-empty stderr trap message and that neither side was signal-killed). F18's stderr check surfaced that the null-fn-ptr trap exited silently — now routed through `cb_rt_trap_null_fnptr`, which raises the interpreter-matching message.
 
-### Phase 4 — Traps
+### Traps — descoped to FD-050
 
-`Terminator::Trap(kind)` and the runtime checks that reach it (null deref, deleted access, division by zero, index out of bounds, null/double-delete), lowered to match the interpreter's trap messages and exit codes. These are sema-emitted *hard* faults in the IR's control flow — distinct from the runtime's cooperative `request_exit`/`raise_error`, which Phase 1 already handles via the no-return host callbacks.
+Trap *policy* is **no longer part of this FD**. Runtime safety checks are a codegen choice that should be toggleable — debuggable traps (matching the interpreter) vs. max-performance UB — which is a cross-cutting concern in its own right, split into **[FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md)**.
 
-**Carried over from the review (F1/F13):** integer `Div`/`Mod` still emit raw `sdiv`/`srem` (UB on `/0` and `INT_MIN/-1`) — guard them with a zero/`INT_MIN`-`-1` compare branching to the trap path, and add the `div_by_zero.cb` differential fixture, as part of this phase.
+What FD-049 *does* deliver re. traps: the always-on runtime checks implemented in Phases 2–3 — array bounds via `cb_array.cpp`, type null/deleted/double-delete via `cb_type.cpp`, and the null-fn-ptr call via `cb_rt_trap_null_fnptr` — all trap to `exit(1)`, matching the interpreter's exit code (the differential harness gates exit-code + non-empty-stderr parity, not exact message text). The `Terminator::Trap(kind)` terminator lowers to a safe non-zero exit (it is not currently emitted by sema).
+
+Moved to FD-050: the one un-implemented check — integer `Div`/`Mod` by zero (still raw `sdiv`/`srem`, UB on `/0` and `INT_MIN/-1`; review findings F1/F13, with the `div_by_zero.cb` fixture) — plus kind-specific `Terminator::Trap` lowering, exact trap-message parity, and the checked/unchecked codegen switch.
 
 ## Crates & Areas Touched
 
@@ -118,6 +121,7 @@ High-level only — the precise module/file breakdown is part of each phase's de
 
 ## Related
 
+- [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) — the follow-up: trap *policy* descoped from here (checked vs. unchecked codegen, the integer div/mod-by-zero guard F1/F13, `Terminator::Trap` lowering, trap-message parity).
 - [FD-048](archive/FD-048_BASIC_LLVM_CODEGEN_AND_TOOLING_DRIVER.md) — the object-emit + link back-half this builds on (and the `emit_empty_main` it replaces).
 - [FD-047](archive/FD-047_LLVM_DEPENDENCY_SETUP.md) — `inkwell`/LLVM 18 dependency + `codegen` feature gate.
 - [FD-044](archive/FD-044_BACKEND_TRAIT_SEAM.md) — the `Backend` trait this dispatches through.
