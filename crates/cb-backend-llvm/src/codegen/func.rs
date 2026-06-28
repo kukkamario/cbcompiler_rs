@@ -831,14 +831,29 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
 
         let info = &self.cg.program.type_defs[type_def.0 as usize];
         for (i, (_, fty)) in info.fields.iter().enumerate() {
-            if matches!(fty, IrType::String) {
-                let fptr = self
-                    .cg
-                    .builder
-                    .build_struct_gep(node_ty, node, 5 + i as u32, "")
-                    .map_err(berr)?;
-                let empty = self.empty_string()?;
-                self.cg.builder.build_store(fptr, empty).map_err(berr)?;
+            match fty {
+                IrType::String => {
+                    let fptr = self
+                        .cg
+                        .builder
+                        .build_struct_gep(node_ty, node, 5 + i as u32, "")
+                        .map_err(berr)?;
+                    let empty = self.empty_string()?;
+                    self.cg.builder.build_store(fptr, empty).map_err(berr)?;
+                }
+                // A value-struct field's nested String sub-fields must also be
+                // the empty sentinel, not calloc-null (never-null invariant,
+                // FD-049 review F8) — mirroring the local-slot path in
+                // emit_entry.
+                IrType::StructVal(sub) => {
+                    let fptr = self
+                        .cg
+                        .builder
+                        .build_struct_gep(node_ty, node, 5 + i as u32, "")
+                        .map_err(berr)?;
+                    self.init_struct_strings(fptr, *sub)?;
+                }
+                _ => {}
             }
         }
         Ok(node.into())
@@ -1531,18 +1546,48 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                         let v = self.regs[r];
                         b.build_return(Some(&v as &dyn BasicValue)).map_err(berr)?;
                     }
-                    None => {
-                        if matches!(self.func.return_type, IrType::Void) {
+                    None => match &self.func.return_type {
+                        IrType::Void => {
                             b.build_return(None).map_err(berr)?;
-                        } else {
-                            // An implicit fall-through return in a value-returning
-                            // function — an unreachable synthetic block. Return a
-                            // deterministic zero of the return type.
-                            let zero = self.default_value(&self.func.return_type)?;
+                        }
+                        // An implicit fall-through return in a value-returning
+                        // function. Sema synthesizes this `Return { None }` for a
+                        // value function whose body has no `Return` on some path
+                        // (lower.rs); E0315 fires only on an *explicit* valueless
+                        // `Return`, so this IS reachable. Materialize the return
+                        // type's default — but a String / value-struct must carry
+                        // the empty sentinel, never a null `CbString*` (the
+                        // never-null invariant, FD-049 review F5).
+                        IrType::String => {
+                            let empty = self.empty_string()?;
+                            b.build_return(Some(&empty as &dyn BasicValue))
+                                .map_err(berr)?;
+                        }
+                        ret @ IrType::StructVal(name) => {
+                            // default_value gives a const-zero aggregate (null
+                            // sub-strings); fix its String sub-fields to the
+                            // sentinel via a scratch slot, then load it back.
+                            let lty =
+                                basic_type(self.cg.ctx, &self.cg.program.struct_defs, ret)?;
+                            let scratch = self
+                                .cg
+                                .builder
+                                .build_alloca(lty, "ret_default")
+                                .map_err(berr)?;
+                            let zero = self.default_value(ret)?;
+                            self.cg.builder.build_store(scratch, zero).map_err(berr)?;
+                            self.init_struct_strings(scratch, *name)?;
+                            let agg =
+                                self.cg.builder.build_load(lty, scratch, "").map_err(berr)?;
+                            b.build_return(Some(&agg as &dyn BasicValue))
+                                .map_err(berr)?;
+                        }
+                        ret => {
+                            let zero = self.default_value(ret)?;
                             b.build_return(Some(&zero as &dyn BasicValue))
                                 .map_err(berr)?;
                         }
-                    }
+                    },
                 }
             }
             Some(Terminator::Halt { code }) => {
