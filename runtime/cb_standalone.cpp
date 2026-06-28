@@ -19,6 +19,11 @@
 #include <cstdio>
 #include <cstdlib>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 // Hooks returned by cb_runtime_init, stashed by cb_rt_standalone_run so
 // cb_rt_exit can fire about_to_exit. Single-threaded by the same contract as
 // the trap channel; no synchronization needed.
@@ -59,6 +64,13 @@ static void default_raise_error(const CbString* msg) {
 }
 
 extern "C" int32_t cb_rt_standalone_run(void (*user_main)(void)) {
+#ifdef _WIN32
+    // Put stdout in binary mode so cb_rt_print's '\n' is not translated to
+    // CRLF (FD-049 review F12). The interpreter writes raw bytes through Rust's
+    // stdout, so this makes the native exe byte-identical — an embedded CR+LF
+    // (Chr$(13)+Chr$(10)) no longer becomes "\r\r\n". No-op on Unix.
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     // The host outlives every runtime call (whole program), so make it static.
     static const CbHostApi host = {
         /* size         */ static_cast<uint32_t>(sizeof(CbHostApi)),
