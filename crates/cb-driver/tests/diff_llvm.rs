@@ -150,6 +150,7 @@ diff_tests! {
     struct_array_elem,
     struct_string_field,
     struct_param_value,
+    struct_return_string,
 }
 
 // Function pointers (FD-049 Phase 3c): FuncAddr (bare-name address-of) and

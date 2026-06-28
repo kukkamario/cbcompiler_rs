@@ -180,9 +180,10 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                         .map_err(berr)?;
                 }
                 IrType::StructVal(_) => {
-                    // store_slot_value retains the param's String fields into the
-                    // slot and releases the just-init'd sentinels (no-op).
-                    self.store_slot_value(self.locals[i], &local.ty, param)?;
+                    // A param is a borrowed view: store_slot_value retains the
+                    // param's String fields into the slot and releases the
+                    // just-init'd sentinels (no-op).
+                    self.store_slot_value(self.locals[i], &local.ty, param, false)?;
                 }
                 _ => {
                     self.cg
@@ -497,19 +498,24 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     }
 
     fn store_slot(&self, slot: PointerValue<'ctx>, ty: &IrType, value: Reg) -> Result<(), String> {
-        self.store_slot_value(slot, ty, self.regs[&value])
+        let owned = self.info.is_owned_struct_temp(value);
+        self.store_slot_value(slot, ty, self.regs[&value], owned)
     }
 
     /// Store a computed value into `slot` with the FD-049 refcount discipline.
     /// `String`: release the slot's old contents, move the reg's +1 in.
-    /// `StructVal`: a struct slot OWNS +1 per String sub-field, so retain the
-    /// incoming aggregate's String fields and release the slot's old ones
-    /// (retain-before-release tolerates a self-store). Non-ref: plain store.
+    /// `StructVal`: a struct slot OWNS +1 per String sub-field. A *borrowed* view
+    /// (loaded from a slot) is retained into the slot (retain-before-release
+    /// tolerates a self-store); an *owned* struct temp (a call/return result,
+    /// `owned == true`) already owns +1, so it is moved in with no extra retain
+    /// (owned-model, FD-049 review F4). In both cases the slot's old String
+    /// fields are released. Non-ref: plain store.
     fn store_slot_value(
         &self,
         slot: PointerValue<'ctx>,
         ty: &IrType,
         val: BasicValueEnum<'ctx>,
+        owned: bool,
     ) -> Result<(), String> {
         match ty {
             IrType::String => {
@@ -522,9 +528,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             }
             IrType::StructVal(name) => {
                 let def = self.cg.struct_def_by_name(*name)?;
-                // Retain the incoming aggregate's String fields (slot takes +1).
-                self.retain_struct_strings(val.into_struct_value(), def)?;
-                // Release the slot's old String fields.
+                if !owned {
+                    // Borrowed view: the slot takes its own +1 per String field.
+                    self.retain_struct_strings(val.into_struct_value(), def)?;
+                }
+                // Release the slot's old String fields (disjoint from an owned
+                // temp's fresh aggregate).
                 let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, ty)?;
                 let old = self.cg.builder.build_load(lty, slot, "").map_err(berr)?;
                 self.release_struct_strings(old.into_struct_value(), def)?;
@@ -781,10 +790,14 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.call_void(self.cg.rt_string_release(), &[old.into()])?;
             }
             // Whole-struct target (`s.inner = otherInner`, `arr[i] = aStruct`):
-            // retain the incoming aggregate's String fields, release the old.
+            // a borrowed view is retained into the slot, an owned struct temp
+            // (a call result) is moved in with no retain (owned-model, F4); the
+            // old String fields are released either way.
             IrType::StructVal(name) => {
                 let def = self.cg.struct_def_by_name(*name)?;
-                self.retain_struct_strings(self.pval_struct(value)?, def)?;
+                if !self.info.is_owned_struct_temp(value) {
+                    self.retain_struct_strings(self.pval_struct(value)?, def)?;
+                }
                 let struct_ty = self.cg.struct_llvm_type(*name)?;
                 let old = self
                     .cg
@@ -1478,6 +1491,20 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 .map_err(berr)?;
             }
             Some(Terminator::Return { value }) => {
+                // A returned value-struct must own +1 per String sub-field so it
+                // survives the callee frame (owned-model, FD-049 review F4). An
+                // owned struct temp (a call result) already owns +1 → hand off
+                // unchanged; a borrowed view (loaded from a slot) is retained
+                // BEFORE `release_string_locals` so the local release can't free
+                // the strings it carries.
+                if let Some(r) = value {
+                    if let Some(IrType::StructVal(name)) = self.info.type_of(*r) {
+                        if !self.info.is_owned_struct_temp(*r) {
+                            let def = self.cg.struct_def_by_name(*name)?;
+                            self.retain_struct_strings(self.pval_struct(*r)?, def)?;
+                        }
+                    }
+                }
                 self.release_string_locals()?;
                 match value {
                     Some(r) => {
@@ -1545,10 +1572,18 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
-    /// Release a String reg (its owned +1) at its last use.
+    /// Release an owned temp at its last use: a String reg drops its +1; an owned
+    /// value-struct temp (a call result) drops +1 per String sub-field
+    /// (owned-model, FD-049 review F4).
     fn release_reg(&self, reg: Reg) -> Result<(), String> {
         let v = self.regs[&reg];
-        self.call_void(self.cg.rt_string_release(), &[v.into()])
+        match self.info.type_of(reg) {
+            Some(IrType::StructVal(name)) => {
+                let def = self.cg.struct_def_by_name(*name)?;
+                self.release_struct_strings(v.into_struct_value(), def)
+            }
+            _ => self.call_void(self.cg.rt_string_release(), &[v.into()]),
+        }
     }
 
     // ── Small helpers ───────────────────────────────────────────────────

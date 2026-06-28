@@ -27,9 +27,16 @@ use cb_ir::{BlockId, Function, IrType, Program, Reg};
 pub struct RegInfo {
     /// Statically derived type of every result register.
     types: HashMap<Reg, IrType>,
-    /// Owned String temps to release immediately after the instruction at
-    /// `(block, inst_index)`. Keyed so the lowerer can drain it as it walks.
+    /// Owned String/value-struct temps to release immediately after the
+    /// instruction at `(block, inst_index)`. Keyed so the lowerer can drain it
+    /// as it walks.
     pub releases: HashMap<(BlockId, usize), Vec<Reg>>,
+    /// `Call`/`CallIndirect` results whose type is a value `Struct` — under the
+    /// owned-model (FD-049 review F4) these own +1 per `String` sub-field, so a
+    /// store/return moves them in (no extra retain) and an unconsumed one is
+    /// released after its last use. A struct *loaded from a slot* is a borrowed
+    /// view and is **not** in this set.
+    owned_struct_temps: HashSet<Reg>,
 }
 
 impl RegInfo {
@@ -37,13 +44,46 @@ impl RegInfo {
     pub fn type_of(&self, reg: Reg) -> Option<&IrType> {
         self.types.get(&reg)
     }
+
+    /// Whether `reg` is an owned value-struct temp (a `Call`/`CallIndirect`
+    /// result of `StructVal` type) — see `owned_struct_temps`.
+    pub fn is_owned_struct_temp(&self, reg: Reg) -> bool {
+        self.owned_struct_temps.contains(&reg)
+    }
 }
 
-/// Analyze one function: derive reg types and compute String-temp releases.
+/// Analyze one function: derive reg types and compute String/struct-temp releases.
 pub fn analyze(func: &Function, program: &Program) -> RegInfo {
     let types = derive_types(func, program);
-    let releases = compute_releases(func, &types);
-    RegInfo { types, releases }
+    let owned_struct_temps = owned_struct_temps(func, &types);
+    let releases = compute_releases(func, &types, &owned_struct_temps);
+    RegInfo {
+        types,
+        releases,
+        owned_struct_temps,
+    }
+}
+
+/// Collect the `Call`/`CallIndirect` results that produce a value `Struct` — the
+/// owned struct temps of the owned-model (FD-049 review F4). A struct returned
+/// from a call owns +1 per `String` sub-field (the callee retained it before
+/// dropping its locals, or handed off its own owned temp); a struct loaded from
+/// a slot stays a borrowed view and is deliberately excluded.
+fn owned_struct_temps(func: &Function, types: &HashMap<Reg, IrType>) -> HashSet<Reg> {
+    let mut owned = HashSet::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let Some(r) = inst.result else { continue };
+            if matches!(
+                inst.kind,
+                InstKind::Call { .. } | InstKind::CallIndirect { .. }
+            ) && matches!(types.get(&r), Some(IrType::StructVal(_)))
+            {
+                owned.insert(r);
+            }
+        }
+    }
+    owned
 }
 
 /// Monotone fixpoint deriving every result reg's type.
@@ -169,15 +209,19 @@ fn unop_result(op: IrUnOp, operand: &IrType) -> IrType {
     }
 }
 
-/// Compute, for each owned String temp, the in-block instruction after which it
-/// should be released (FD-049 decision B). A String reg is *consumed* if it is
-/// moved into a Store or returned; consumed regs are never auto-released. An
-/// unconsumed String reg whose every use is in its defining block is released
-/// right after its last use there. A reg that escapes its block (or is dead) is
-/// conservatively leaked — safe, and acceptable for Phase 1.
+/// Compute, for each owned String (or owned value-struct) temp, the in-block
+/// instruction after which it should be released (FD-049 decision B + review
+/// F4). A reg is *consumed* if it is moved into a Store or returned; consumed
+/// regs are never auto-released (their +1 moves into the slot / out the return).
+/// An unconsumed reg whose every use is in its defining block is released right
+/// after its last use there. A reg that escapes its block is conservatively
+/// leaked — safe. A String temp that is *dead* (zero uses) is also leaked (Phase
+/// 1); an owned struct temp that is dead is released after its def so the
+/// owned-model stays leak-free.
 fn compute_releases(
     func: &Function,
     types: &HashMap<Reg, IrType>,
+    owned_struct_temps: &HashSet<Reg>,
 ) -> HashMap<(BlockId, usize), Vec<Reg>> {
     // Consumed = moved into a slot (Store*) or returned.
     let mut consumed: HashSet<Reg> = HashSet::new();
@@ -197,22 +241,27 @@ fn compute_releases(
         }
     }
 
-    // Definition site of each result reg.
-    let mut def_site: HashMap<Reg, BlockId> = HashMap::new();
+    // Definition site (block + in-block index) of each result reg.
+    let mut def_site: HashMap<Reg, (BlockId, usize)> = HashMap::new();
     for block in &func.blocks {
-        for inst in &block.insts {
+        for (i, inst) in block.insts.iter().enumerate() {
             if let Some(r) = inst.result {
-                def_site.insert(r, block.id);
+                def_site.insert(r, (block.id, i));
             }
         }
     }
 
-    // For each String reg, gather (block, inst_index) operand uses.
+    // For each String / owned-struct reg, gather (block, inst_index) operand
+    // uses. Recording struct uses needs `GetField`'s object operand too (added
+    // to `operand_regs`), so a `MakeP().field` read keeps the temp alive.
+    let releasable = |reg: &Reg| {
+        matches!(types.get(reg), Some(IrType::String)) || owned_struct_temps.contains(reg)
+    };
     let mut uses: HashMap<Reg, Vec<(BlockId, usize)>> = HashMap::new();
     for block in &func.blocks {
         for (i, inst) in block.insts.iter().enumerate() {
             for operand in operand_regs(&inst.kind) {
-                if matches!(types.get(&operand), Some(IrType::String)) {
+                if releasable(&operand) {
                     uses.entry(operand).or_default().push((block.id, i));
                 }
             }
@@ -224,7 +273,7 @@ fn compute_releases(
         if consumed.contains(&reg) {
             continue;
         }
-        let Some(&def_block) = def_site.get(&reg) else {
+        let Some(&(def_block, _)) = def_site.get(&reg) else {
             continue;
         };
         // Release only when every use is intra-block; otherwise leak (safe).
@@ -233,6 +282,17 @@ fn compute_releases(
         }
         let last = locs.iter().map(|(_, i)| *i).max().unwrap();
         releases.entry((def_block, last)).or_default().push(reg);
+    }
+    // A dead owned struct temp (a discarded struct-returning call, zero uses,
+    // not consumed) is released right after its def so the owned-model leaks
+    // nothing — String temps with zero uses stay leaked (Phase 1).
+    for &reg in owned_struct_temps {
+        if consumed.contains(&reg) || uses.contains_key(&reg) {
+            continue;
+        }
+        if let Some(&(def_block, def_idx)) = def_site.get(&reg) {
+            releases.entry((def_block, def_idx)).or_default().push(reg);
+        }
     }
     releases
 }
@@ -247,6 +307,11 @@ fn operand_regs(kind: &InstKind) -> Vec<Reg> {
         InstKind::StoreLocal { value, .. } | InstKind::StoreGlobal { value, .. } => vec![*value],
         InstKind::Convert { value, .. } | InstKind::ConvertExplicit { value, .. } => vec![*value],
         InstKind::StrLen { s } => vec![*s],
+        // `GetField`'s object is read — for an owned value-struct temp
+        // (`MakeP().field`) this records the use so the temp's release is
+        // ordered after the field read (objects are never String, so this is
+        // inert for String-temp scheduling).
+        InstKind::GetField { object, .. } => vec![*object],
         InstKind::Call { args, .. } => args.clone(),
         InstKind::CallIndirect { callee, args } => {
             let mut v = args.clone();
