@@ -1,0 +1,26 @@
+Type Node
+    Field v As Int
+EndType
+
+Dim a As Node = New Node
+a.v = 10
+Dim b As Node = New Node
+b.v = 20
+
+' Reference identity: an alias compares equal; distinct instances do not.
+Dim c As Node = a
+If a = c Then Print "a=c"
+If a <> b Then Print "a<>b"
+If a = b Then Print "unreachable"
+
+' Null comparison: an un-New'd reference is Null.
+Dim n As Node
+If n = Null Then Print "n is null"
+If a <> Null Then Print "a not null"
+
+' While n <> Null walks the list to completion (Next(Null) = Null).
+Dim it As Node = First(Node)
+While it <> Null
+    Print Str(it.v)
+    it = Next(it)
+Wend

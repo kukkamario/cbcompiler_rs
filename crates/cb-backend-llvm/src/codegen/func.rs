@@ -21,8 +21,9 @@ use inkwell::values::{
 };
 use inkwell::{FloatPredicate, IntPredicate};
 
+use cb_diagnostics::Symbol;
 use cb_ir::inst::{InstKind, IrBinOp, IrUnOp, PlaceRoot, Projection, Terminator};
-use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg};
+use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg, TypeDefId};
 
 use super::Codegen;
 use super::regtypes::{self, RegInfo};
@@ -192,9 +193,10 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             IrType::Int => self.cg.ctx.i32_type().const_zero().into(),
             IrType::Long => self.cg.ctx.i64_type().const_zero().into(),
             IrType::Float => self.cg.ctx.f64_type().const_zero().into(),
-            // String/Null and an array handle (`CbArray*`) default to a null
-            // pointer (an un-`New`'d array is Null, matching the interpreter).
-            IrType::String | IrType::Null | IrType::Array { .. } => {
+            // String/Null, an array handle (`CbArray*`), and a type-instance
+            // reference (`CbTypeHeader*`) default to a null pointer (an
+            // un-`New`'d array/instance is Null, matching the interpreter).
+            IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
                 self.cg.ptr_t().const_null().into()
             }
             other => {
@@ -372,6 +374,54 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.lower_store_place(root, path, *value)?;
             }
 
+            // ── User Types (FD-049 Phase 3a) ───────────────────────────
+            InstKind::NewType { type_def } => {
+                let node = self.build_new_type(*type_def)?;
+                self.bind(inst, node);
+            }
+            InstKind::GetField {
+                object,
+                field,
+                field_type,
+            } => {
+                let val = self.lower_get_field(*object, *field, field_type)?;
+                self.bind(inst, val);
+            }
+            InstKind::First { type_def } => {
+                let td = self.cg.ctx.i64_type().const_int(type_def.0 as u64, false);
+                let n = self.call_value(self.cg.rt_type_first(), &[td.into()])?;
+                self.bind(inst, n);
+            }
+            InstKind::Last { type_def } => {
+                let td = self.cg.ctx.i64_type().const_int(type_def.0 as u64, false);
+                let n = self.call_value(self.cg.rt_type_last(), &[td.into()])?;
+                self.bind(inst, n);
+            }
+            InstKind::Next { object } => {
+                let n =
+                    self.call_value(self.cg.rt_type_next(), &[self.pval(*object)?.into()])?;
+                self.bind(inst, n);
+            }
+            InstKind::Previous { object } => {
+                let n = self
+                    .call_value(self.cg.rt_type_previous(), &[self.pval(*object)?.into()])?;
+                self.bind(inst, n);
+            }
+            InstKind::DeleteRvalue { value } => {
+                self.call_void(
+                    self.cg.rt_type_delete_rvalue(),
+                    &[self.pval(*value)?.into()],
+                )?;
+            }
+            InstKind::DeleteLvalue { local } => {
+                let slot = self.locals[local.0 as usize];
+                self.lower_delete_lvalue(slot)?;
+            }
+            InstKind::DeleteLvalueGlobal { global } => {
+                let slot = self.cg.globals[global.0 as usize].as_pointer_value();
+                self.lower_delete_lvalue(slot)?;
+            }
+
             other => {
                 return Err(format!(
                     "instruction {other:?} is out of scope for the Phase-1 LLVM backend"
@@ -525,33 +575,26 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         )
     }
 
-    /// Lower a `StorePlace` (Phase 2 = a single `Index` projection into an
-    /// array element). Resolve the root slot, load the handle, address the
-    /// element, then the Phase-1 String discipline (release the old element,
-    /// move the value reg's +1 in); non-String elements plain-store.
+    /// Lower a `StorePlace`: walk the projection path from the root slot,
+    /// maintaining `(current address, current IR type)`, then write the value at
+    /// the final address with the Phase-1 String discipline (release the old
+    /// contents, move the value reg's +1 in); non-String targets plain-store.
+    ///
+    /// Path steps (FD-049 Phase 2 + 3):
+    ///   * `Index` (array): load the array handle at the current address, then
+    ///     `cb_rt_array_elem_addr` → the element address (reference storage).
+    ///   * `Field` on a `TypeRef`: load the node handle, `cb_rt_type_check`, then
+    ///     GEP element `5 + field_index` (the inline field, shared storage).
+    ///   * `Field` on a `StructVal`: GEP the field directly — the current address
+    ///     already points at the inline aggregate (Phase 3b).
     fn lower_store_place(
         &self,
         root: &PlaceRoot,
         path: &[Projection],
         value: Reg,
     ) -> Result<(), String> {
-        // Phase 2 only handles `arr[idxs] = v` — exactly one Index step. A
-        // field projection (struct/Type fields) is Phase 3.
-        let idxs = match path {
-            [Projection::Index(idxs)] => idxs.as_slice(),
-            [Projection::Field(_)] => {
-                return Err("StorePlace field projection is out of Phase-2 scope".into());
-            }
-            _ => {
-                return Err(format!(
-                    "StorePlace with a {}-step path is out of Phase-2 scope",
-                    path.len()
-                ));
-            }
-        };
-
-        // Resolve the root variable's slot and its (array) IR type.
-        let (slot, root_ty) = match root {
+        // Resolve the root variable's slot and its IR type.
+        let (mut addr, mut ty) = match root {
             PlaceRoot::Local(id) => (
                 self.locals[id.0 as usize],
                 self.func.locals[id.0 as usize].ty.clone(),
@@ -561,39 +604,188 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.cg.program.globals[id.0 as usize].ty.clone(),
             ),
         };
-        let elem = match &root_ty {
-            IrType::Array { elem, .. } => (**elem).clone(),
-            other => return Err(format!("StorePlace root is not an array: {other:?}")),
-        };
 
-        // Load the array handle and address the element.
-        let handle = self
-            .cg
-            .builder
-            .build_load(self.cg.ptr_t(), slot, "")
-            .map_err(berr)?;
-        let buf = self.i64_buf(idxs)?;
-        let rank = self.cg.ctx.i64_type().const_int(idxs.len() as u64, false);
-        let elem_ptr = self
-            .call_value(
-                self.cg.rt_array_elem_addr(),
-                &[handle.into(), buf.into(), rank.into()],
-            )?
-            .into_pointer_value();
+        for proj in path {
+            match proj {
+                Projection::Index(idxs) => {
+                    let elem = match &ty {
+                        IrType::Array { elem, .. } => (**elem).clone(),
+                        other => {
+                            return Err(format!("StorePlace Index on a non-array: {other:?}"));
+                        }
+                    };
+                    let handle = self
+                        .cg
+                        .builder
+                        .build_load(self.cg.ptr_t(), addr, "")
+                        .map_err(berr)?;
+                    let buf = self.i64_buf(idxs)?;
+                    let rank = self.cg.ctx.i64_type().const_int(idxs.len() as u64, false);
+                    addr = self
+                        .call_value(
+                            self.cg.rt_array_elem_addr(),
+                            &[handle.into(), buf.into(), rank.into()],
+                        )?
+                        .into_pointer_value();
+                    ty = elem;
+                }
+                Projection::Field(field) => match &ty {
+                    IrType::TypeRef(name) => {
+                        let td = self.cg.type_def_by_name(*name)?;
+                        let node_ty = self.cg.node_struct_type(td)?;
+                        let idx = self.cg.field_gep_index(td, *field)?;
+                        let fty = self.cg.field_type(td, *field)?;
+                        let handle = self
+                            .cg
+                            .builder
+                            .build_load(self.cg.ptr_t(), addr, "")
+                            .map_err(berr)?;
+                        let checked = self
+                            .call_value(self.cg.rt_type_check(), &[handle.into()])?
+                            .into_pointer_value();
+                        addr = self
+                            .cg
+                            .builder
+                            .build_struct_gep(node_ty, checked, idx, "")
+                            .map_err(berr)?;
+                        ty = fty;
+                    }
+                    IrType::StructVal(_) => {
+                        return Err(
+                            "StorePlace field on a value struct is out of Phase-3a scope".into(),
+                        );
+                    }
+                    other => {
+                        return Err(format!("StorePlace Field on a non-object: {other:?}"));
+                    }
+                },
+            }
+        }
 
-        // String element: release the slot's prior contents, then move the
-        // reg's +1 in. Non-String: plain store.
-        if matches!(elem, IrType::String) {
+        // String target: release the slot's prior contents, then move the reg's
+        // +1 in. Non-String: plain store.
+        if matches!(ty, IrType::String) {
             let old = self
                 .cg
                 .builder
-                .build_load(self.cg.ptr_t(), elem_ptr, "")
+                .build_load(self.cg.ptr_t(), addr, "")
                 .map_err(berr)?;
             self.call_void(self.cg.rt_string_release(), &[old.into()])?;
         }
         let val = self.regs[&value];
-        self.cg.builder.build_store(elem_ptr, val).map_err(berr)?;
+        self.cg.builder.build_store(addr, val).map_err(berr)?;
         Ok(())
+    }
+
+    // ── Type-instance helpers (FD-049 Phase 3a) ─────────────────────────
+
+    /// Lower `New <Type>`: allocate a node (header + inline fields) via
+    /// `cb_rt_type_new`, default-init each String field to the empty sentinel
+    /// (calloc gives null; the runtime invariant forbids a null `CbString*`),
+    /// and return the node handle. Non-String fields default to 0/null (calloc).
+    fn build_new_type(&self, type_def: TypeDefId) -> Result<BasicValueEnum<'ctx>, String> {
+        let node_ty = self.cg.node_struct_type(type_def)?;
+        let size = node_ty
+            .size_of()
+            .ok_or("node struct type is unsized")?;
+        let td = self.cg.ctx.i64_type().const_int(type_def.0 as u64, false);
+        let node = self
+            .call_value(self.cg.rt_type_new(), &[td.into(), size.into()])?
+            .into_pointer_value();
+
+        let info = &self.cg.program.type_defs[type_def.0 as usize];
+        for (i, (_, fty)) in info.fields.iter().enumerate() {
+            if matches!(fty, IrType::String) {
+                let fptr = self
+                    .cg
+                    .builder
+                    .build_struct_gep(node_ty, node, 5 + i as u32, "")
+                    .map_err(berr)?;
+                let empty = self.empty_string()?;
+                self.cg.builder.build_store(fptr, empty).map_err(berr)?;
+            }
+        }
+        Ok(node.into())
+    }
+
+    /// Lower `GetField`: read field `field` (declared type `field_type`) of the
+    /// object reg. A `TypeRef` object is a node handle — `cb_rt_type_check` then
+    /// GEP `5 + idx` and load (retain-if-String). A `StructVal` object is an
+    /// inline aggregate value — Phase 3b.
+    fn lower_get_field(
+        &self,
+        object: Reg,
+        field: Symbol,
+        field_type: &IrType,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let obj_ty = self
+            .info
+            .type_of(object)
+            .cloned()
+            .ok_or_else(|| format!("untyped GetField object {object}"))?;
+        match obj_ty {
+            IrType::TypeRef(name) => {
+                let td = self.cg.type_def_by_name(name)?;
+                let node_ty = self.cg.node_struct_type(td)?;
+                let idx = self.cg.field_gep_index(td, field)?;
+                let checked = self
+                    .call_value(self.cg.rt_type_check(), &[self.pval(object)?.into()])?
+                    .into_pointer_value();
+                let fptr = self
+                    .cg
+                    .builder
+                    .build_struct_gep(node_ty, checked, idx, "")
+                    .map_err(berr)?;
+                self.load_elem(fptr, field_type)
+            }
+            IrType::StructVal(_) => {
+                Err("GetField on a value struct is out of Phase-3a scope".into())
+            }
+            other => Err(format!("GetField on a non-object: {other:?}")),
+        }
+    }
+
+    /// Lower an lvalue `Delete v`: `cb_rt_type_delete_lvalue` unlinks+flags the
+    /// node and returns its predecessor (the head sentinel if it was first); the
+    /// backend stores that back into the variable's slot — the rewind that keeps
+    /// an in-flight `For Each` walking (cb_syntax.md §3.3).
+    fn lower_delete_lvalue(&self, slot: PointerValue<'ctx>) -> Result<(), String> {
+        let cur = self
+            .cg
+            .builder
+            .build_load(self.cg.ptr_t(), slot, "")
+            .map_err(berr)?;
+        let prev = self.call_value(self.cg.rt_type_delete_lvalue(), &[cur.into()])?;
+        self.cg.builder.build_store(slot, prev).map_err(berr)?;
+        Ok(())
+    }
+
+    /// The immortal empty-string sentinel (`cb_runtime_string_api.empty`), used
+    /// to default-init String fields/slots so they are never a null `CbString*`
+    /// (the runtime-core invariant), matching the interpreter and the array
+    /// runtime. The api table is `{7 × ptr}`; `empty` is element 6.
+    fn empty_string(&self) -> Result<BasicValueEnum<'ctx>, String> {
+        let api_ty = self.cg.ctx.struct_type(&[self.cg.ptr_t().into(); 7], false);
+        let g = match self.cg.module.get_global("cb_runtime_string_api") {
+            Some(g) => g,
+            None => {
+                let g = self
+                    .cg
+                    .module
+                    .add_global(api_ty, None, "cb_runtime_string_api");
+                g.set_linkage(inkwell::module::Linkage::External);
+                g
+            }
+        };
+        let empty_field = self
+            .cg
+            .builder
+            .build_struct_gep(api_ty, g.as_pointer_value(), 6, "")
+            .map_err(berr)?;
+        self.cg
+            .builder
+            .build_load(self.cg.ptr_t(), empty_field, "")
+            .map_err(berr)
     }
 
     fn lower_binop(
@@ -667,6 +859,46 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 _ => return Err(format!("unsupported float binop {op:?}")),
             };
             return Ok(v);
+        }
+
+        // Reference equality (FD-049 Phase 3a): `Eq`/`NotEq` on a pointer-class
+        // operand (`TypeRef`/`Null`/`FnPtr`/`Array`) compares by pointer
+        // identity — `n <> Null`, `a = b` on type instances, etc. `regtypes`
+        // already types the result `Int`. Sema never emits these opcodes on
+        // String operands (those use the `Str*` opcodes), so a pointer operand
+        // here is always reference-typed.
+        if matches!(op, Eq | NotEq) {
+            let is_ref = |t: &IrType| {
+                matches!(
+                    t,
+                    IrType::TypeRef(_) | IrType::Null | IrType::FnPtr(_) | IrType::Array { .. }
+                )
+            };
+            let rty = self.info.type_of(rhs).cloned();
+            if is_ref(&lty) || rty.as_ref().is_some_and(is_ref) {
+                let i64t = self.cg.ctx.i64_type();
+                let l = self
+                    .cg
+                    .builder
+                    .build_ptr_to_int(self.pval(lhs)?, i64t, "")
+                    .map_err(berr)?;
+                let r = self
+                    .cg
+                    .builder
+                    .build_ptr_to_int(self.pval(rhs)?, i64t, "")
+                    .map_err(berr)?;
+                let pred = if op == Eq {
+                    IntPredicate::EQ
+                } else {
+                    IntPredicate::NE
+                };
+                let i1 = self
+                    .cg
+                    .builder
+                    .build_int_compare(pred, l, r, "")
+                    .map_err(berr)?;
+                return Ok(self.zext_i32(i1)?.into());
+            }
         }
 
         // Integer arithmetic / bitwise / shift / comparison. Operands widen to
@@ -843,6 +1075,11 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 }
                 other => Err(format!("convert from {other:?} to String unsupported")),
             },
+            // Reference/pointer conversions (FD-049 Phase 3): `Null` → a reference
+            // type (`TypeRef`/`Array`/`FnPtr`) is a value-level no-op — both are
+            // the same opaque `ptr`, and a null pointer is CB `Null` for every
+            // reference type (e.g. `n = Null`, `n <> Null`). Pass it through.
+            IrType::TypeRef(_) | IrType::Array { .. } | IrType::FnPtr(_) => Ok(self.regs[&value]),
             other => Err(format!("convert to {other:?} is out of Phase-1 scope")),
         }
     }
@@ -885,9 +1122,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     /// borrowed (the callee retains into its own slot); numbers are width-cast.
     fn marshal_arg(&self, arg: Reg, pty: &IrType) -> Result<BasicMetadataValueEnum<'ctx>, String> {
         Ok(match pty {
-            // String, a null reference, and an array handle are all borrowed
-            // pointers (the callee retains/copies as it needs).
-            IrType::String | IrType::Null | IrType::Array { .. } => self.pval(arg)?.into(),
+            // String, a null reference, an array handle, and a type-instance
+            // reference are all borrowed pointers (the callee retains/copies as
+            // it needs; a type-instance is a shared `CbTypeHeader*`).
+            IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
+                self.pval(arg)?.into()
+            }
             IrType::Float => self.fval(arg)?.into(),
             IrType::Byte | IrType::Short | IrType::Int | IrType::Long => {
                 let aty = self
@@ -1160,6 +1400,70 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             &[self.cg.ctx.i64_type().into(), self.cg.ctx.f64_type().into()],
         )?;
         Ok(self.call_value(f, &[x.into()])?.into_int_value())
+    }
+}
+
+impl<'a, 'ctx> Codegen<'a, 'ctx> {
+    /// Resolve a `Type` name (an IR `TypeRef` carries the type's `Symbol`) to its
+    /// `TypeDefId` (index into `program.type_defs`). Field identity uses `Symbol`
+    /// equality throughout — never the display string (no case-folding).
+    pub(super) fn type_def_by_name(&self, name: Symbol) -> Result<TypeDefId, String> {
+        self.program
+            .type_defs
+            .iter()
+            .position(|t| t.name == name)
+            .map(|i| TypeDefId(i as u32))
+            .ok_or_else(|| format!("unknown user Type {}", self.interner.resolve(name)))
+    }
+
+    /// The LLVM node struct type for a `Type`: the 32-byte `CbTypeHeader` prefix
+    /// (`{ptr, ptr, ptr, i32, i32}`) followed by each field's `basic_type`,
+    /// cached per `TypeDefId`. Used for `size_of` (allocation) and
+    /// `build_struct_gep` (field addressing).
+    pub(super) fn node_struct_type(
+        &self,
+        type_def: TypeDefId,
+    ) -> Result<inkwell::types::StructType<'ctx>, String> {
+        if let Some(t) = self.node_types.borrow().get(&type_def.0) {
+            return Ok(*t);
+        }
+        let info = &self.program.type_defs[type_def.0 as usize];
+        let p = self.ptr_t();
+        let i32t = self.ctx.i32_type();
+        let mut elems: Vec<inkwell::types::BasicTypeEnum<'ctx>> =
+            vec![p.into(), p.into(), p.into(), i32t.into(), i32t.into()];
+        for (_, fty) in &info.fields {
+            elems.push(basic_type(self.ctx, fty)?);
+        }
+        let t = self.ctx.struct_type(&elems, false);
+        self.node_types.borrow_mut().insert(type_def.0, t);
+        Ok(t)
+    }
+
+    /// LLVM struct GEP index of a `Type` field: the field's declaration position
+    /// (source order) offset past the 5-element header.
+    pub(super) fn field_gep_index(
+        &self,
+        type_def: TypeDefId,
+        field: Symbol,
+    ) -> Result<u32, String> {
+        let info = &self.program.type_defs[type_def.0 as usize];
+        info.fields
+            .iter()
+            .position(|(f, _)| *f == field)
+            .map(|i| 5 + i as u32)
+            .ok_or_else(|| format!("unknown field {}", self.interner.resolve(field)))
+    }
+
+    /// The IR type of a `Type` field (for the final-store String discipline in a
+    /// field-projection `StorePlace`).
+    pub(super) fn field_type(&self, type_def: TypeDefId, field: Symbol) -> Result<IrType, String> {
+        let info = &self.program.type_defs[type_def.0 as usize];
+        info.fields
+            .iter()
+            .find(|(f, _)| *f == field)
+            .map(|(_, t)| t.clone())
+            .ok_or_else(|| format!("unknown field {}", self.interner.resolve(field)))
     }
 }
 

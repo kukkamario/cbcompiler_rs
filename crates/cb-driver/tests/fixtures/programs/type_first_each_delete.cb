@@ -1,0 +1,31 @@
+Type Obj
+    Field v As Int
+EndType
+
+Dim a As Obj = New Obj
+a.v = 1
+Dim b As Obj = New Obj
+b.v = 2
+Dim c As Obj = New Obj
+c.v = 3
+
+' Mid-loop Delete: the lvalue-rewind rule keeps the For Each walking past the
+' removed node (cb_syntax.md §3.3). Deleting the middle element here exercises
+' the returned-prev rewind through cb_rt_type_delete_lvalue.
+For n = Each Obj
+    If n.v = 2 Then
+        Delete n
+    EndIf
+Next n
+
+' Walk the survivors via First/Next directly.
+Dim total As Int = 0
+Dim it As Obj = First(Obj)
+While it <> Null
+    total = total + it.v
+    it = Next(it)
+Wend
+Print "total: " + Str(total)
+
+' Last(Obj) is the tail survivor.
+Print "last: " + Str(Last(Obj).v)

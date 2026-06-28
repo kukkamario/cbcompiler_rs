@@ -26,10 +26,13 @@ pub fn basic_type<'ctx>(ctx: &'ctx Context, ty: &IrType) -> Result<BasicTypeEnum
         IrType::String | IrType::Null => ctx.ptr_type(AddressSpace::default()).into(),
         // An array handle is an opaque `CbArray*` (FD-049 Phase 2), like String.
         IrType::Array { .. } => ctx.ptr_type(AddressSpace::default()).into(),
+        // A user-`Type` instance is an opaque `CbTypeHeader*` (FD-049 Phase 3a);
+        // its inline fields are GEP'd through a per-type node struct in func.rs.
+        IrType::TypeRef(_) => ctx.ptr_type(AddressSpace::default()).into(),
         other => {
             return Err(format!(
                 "IR type {other:?} is out of scope for the Phase-1 LLVM backend \
-                 (arrays, user Types/structs, fn-pointers, and runtime handles \
+                 (value structs, fn-pointers, and runtime handles \
                  are not lowered yet)"
             ));
         }
@@ -110,8 +113,24 @@ mod tests {
             .unwrap()
             .is_pointer_type()
         );
-        // ...while the remaining reference IR types are still rejected.
-        assert!(basic_type(&ctx, &IrType::TypeRef(cb_diagnostics::Symbol::DUMMY)).is_err());
+        // ...as does a user-`Type` instance handle (FD-049 Phase 3a)...
+        assert!(
+            basic_type(&ctx, &IrType::TypeRef(cb_diagnostics::Symbol::DUMMY))
+                .unwrap()
+                .is_pointer_type()
+        );
+        // ...while value structs and fn-pointers are still rejected (Phase 3b/3c).
+        assert!(basic_type(&ctx, &IrType::StructVal(cb_diagnostics::Symbol::DUMMY)).is_err());
+        assert!(
+            basic_type(
+                &ctx,
+                &IrType::FnPtr(Box::new(cb_ir::FnSig {
+                    params: vec![],
+                    ret: Box::new(IrType::Void),
+                }))
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -125,3 +125,17 @@ diff_tests! {
     array_param,
     array_oob,
 }
+
+// User Types (FD-049 Phase 3a): New/field access, the type-instance linked list
+// (First/Last/Next/Previous + For Each), Delete (lvalue rewind + rvalue),
+// field-projection StorePlace, and reference equality. These link the new
+// cb_type.cpp heap helpers.
+diff_tests! {
+    type_list_sum,
+    type_multi_field,
+    type_modify_in_function,
+    type_pass_to_function,
+    type_inference_fd042,
+    type_first_each_delete,
+    type_ref_equality,
+}

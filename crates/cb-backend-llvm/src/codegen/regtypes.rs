@@ -107,6 +107,17 @@ fn result_type(
                 _ => return None,
             }
         }
+        // ── User Types (FD-049 Phase 3a) ───────────────────────────────
+        // `New`/`First`/`Last` yield a `TypeRef` to the named type; `GetField`
+        // carries its result type in the IR; `Next`/`Previous` propagate the
+        // operand's `TypeRef` (fixpoint-resolved like `GetElement`).
+        InstKind::NewType { type_def }
+        | InstKind::First { type_def }
+        | InstKind::Last { type_def } => {
+            IrType::TypeRef(program.type_defs[type_def.0 as usize].name)
+        }
+        InstKind::GetField { field_type, .. } => field_type.clone(),
+        InstKind::Next { object } | InstKind::Previous { object } => types.get(object)?.clone(),
         // Out-of-scope producers carry no derivable scalar type here; the
         // lowerer rejects them when it actually encounters one.
         _ => return None,

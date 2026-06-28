@@ -185,6 +185,64 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         self.declare_rt("cb_rt_array_dim_len", fty)
     }
 
+    // ── Type-instance heap + list helpers (FD-049 Phase 3a; cb_type.cpp) ──
+
+    /// `void* cb_rt_type_new(int64_t type_def, int64_t size)`.
+    pub(super) fn rt_type_new(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let i64 = self.ctx.i64_type();
+        self.declare_rt("cb_rt_type_new", p.fn_type(&[i64.into(), i64.into()], false))
+    }
+
+    /// `void* cb_rt_type_check(void* node)`.
+    pub(super) fn rt_type_check(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt("cb_rt_type_check", p.fn_type(&[p.into()], false))
+    }
+
+    /// `void* cb_rt_type_first(int64_t type_def)`.
+    pub(super) fn rt_type_first(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt(
+            "cb_rt_type_first",
+            p.fn_type(&[self.ctx.i64_type().into()], false),
+        )
+    }
+
+    /// `void* cb_rt_type_last(int64_t type_def)`.
+    pub(super) fn rt_type_last(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt(
+            "cb_rt_type_last",
+            p.fn_type(&[self.ctx.i64_type().into()], false),
+        )
+    }
+
+    /// `void* cb_rt_type_next(void* node)`.
+    pub(super) fn rt_type_next(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt("cb_rt_type_next", p.fn_type(&[p.into()], false))
+    }
+
+    /// `void* cb_rt_type_previous(void* node)`.
+    pub(super) fn rt_type_previous(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt("cb_rt_type_previous", p.fn_type(&[p.into()], false))
+    }
+
+    /// `void cb_rt_type_delete_rvalue(void* node)`.
+    pub(super) fn rt_type_delete_rvalue(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        let fty = self.ctx.void_type().fn_type(&[p.into()], false);
+        self.declare_rt("cb_rt_type_delete_rvalue", fty)
+    }
+
+    /// `void* cb_rt_type_delete_lvalue(void* node)`.
+    pub(super) fn rt_type_delete_lvalue(&self) -> FunctionValue<'ctx> {
+        let p = self.ptr_t();
+        self.declare_rt("cb_rt_type_delete_lvalue", p.fn_type(&[p.into()], false))
+    }
+
     // ── Catalog functions (Call to a Runtime callee) ────────────────────
 
     /// Declare a catalog runtime function from its IR signature, caching by

@@ -46,6 +46,10 @@ pub(crate) struct Codegen<'a, 'ctx> {
     runtime: RefCell<HashMap<String, FunctionValue<'ctx>>>,
     /// Counter for unique private string-literal global names.
     str_counter: Cell<u32>,
+    /// Lazy `TypeDefId.0 → node struct type` cache (FD-049 Phase 3a). The node
+    /// LLVM type is `{ptr, ptr, ptr, i32, i32, <field basic_types…>}` — the
+    /// 32-byte `CbTypeHeader` prefix plus the type's inline fields.
+    node_types: RefCell<HashMap<u32, inkwell::types::StructType<'ctx>>>,
 }
 
 impl<'a, 'ctx> Codegen<'a, 'ctx> {
@@ -60,6 +64,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             globals: Vec::new(),
             runtime: RefCell::new(HashMap::new()),
             str_counter: Cell::new(0),
+            node_types: RefCell::new(HashMap::new()),
         }
     }
 
@@ -109,7 +114,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 IrType::Int => gv.set_initializer(&self.ctx.i32_type().const_zero()),
                 IrType::Long => gv.set_initializer(&self.ctx.i64_type().const_zero()),
                 IrType::Float => gv.set_initializer(&self.ctx.f64_type().const_zero()),
-                IrType::String | IrType::Null | IrType::Array { .. } => {
+                IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
                     gv.set_initializer(&self.ptr_t().const_null())
                 }
                 other => {
