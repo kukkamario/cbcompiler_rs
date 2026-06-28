@@ -1,0 +1,42 @@
+' A bare Float condition (FD-049 review F10). CoolBasic accepts any numeric
+' expression as a condition with no coercion, so a Float reg flows straight
+' into BranchIf. The LLVM backend computes truthiness as `f# <> 0.0` (UNE),
+' matching the interpreter's `is_truthy` (`*v != 0.0`).
+
+Dim f# = 1.5
+If f# Then Print "pos truthy"
+
+Dim z# = 0.0
+If z# Then
+    Print "zero truthy"
+Else
+    Print "zero falsy"
+EndIf
+
+' Negative zero is falsy: UNE(-0.0, 0.0) is false, like the interpreter.
+Dim nz# = -0.0
+If nz# Then
+    Print "negzero truthy"
+Else
+    Print "negzero falsy"
+EndIf
+
+' A tiny non-zero float is truthy.
+Dim tiny# = 0.0001
+If tiny# Then Print "tiny truthy"
+
+' While over a Float counter, decremented until it reaches 0.0 (falsy).
+Dim n# = 3.0
+While n#
+    Print "n=" + Str(n#)
+    n# = n# - 1.0
+Wend
+Print "done"
+
+' Repeat ... While with a bare Float condition (checked at the end), counting
+' down until it reaches 0.0 (falsy) and the loop exits.
+Dim m# = 3.0
+Repeat
+    Print "m=" + Str(m#)
+    m# = m# - 1.0
+While m#

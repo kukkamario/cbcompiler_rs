@@ -94,6 +94,7 @@ diff_tests! {
     mixed_arithmetic,
     string_ops,
     if_elseif_else,
+    float_condition,
     nested_for_loops,
     select_case,
     function_multi_param,

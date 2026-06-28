@@ -1478,11 +1478,22 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 then_block,
                 else_block,
             }) => {
-                let c = self.ival(*cond)?;
-                let zero = c.get_type().const_zero();
-                let truthy = b
-                    .build_int_compare(IntPredicate::NE, c, zero, "")
-                    .map_err(berr)?;
+                // CoolBasic allows any numeric condition (`If f#`, `While f#`,
+                // `Repeat … Until f#`) with no coercion — a bare Float reg can
+                // flow in. Compute truthiness mirroring the interp's `is_truthy`:
+                // a Float is true iff `!= 0.0` (UNE, so NaN is truthy); every
+                // other condition is an integer compared `!= 0`.
+                let truthy = if matches!(self.info.type_of(*cond), Some(IrType::Float)) {
+                    let f = self.fval(*cond)?;
+                    let zero = self.cg.ctx.f64_type().const_zero();
+                    b.build_float_compare(FloatPredicate::UNE, f, zero, "")
+                        .map_err(berr)?
+                } else {
+                    let c = self.ival(*cond)?;
+                    let zero = c.get_type().const_zero();
+                    b.build_int_compare(IntPredicate::NE, c, zero, "")
+                        .map_err(berr)?
+                };
                 b.build_conditional_branch(
                     truthy,
                     self.blocks[then_block],
