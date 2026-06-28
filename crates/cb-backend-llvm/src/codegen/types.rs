@@ -90,7 +90,11 @@ mod tests {
         assert!(basic_type(&ctx, &[], &IrType::Long).unwrap().is_int_type());
         assert!(basic_type(&ctx, &[], &IrType::Byte).unwrap().is_int_type());
         assert!(basic_type(&ctx, &[], &IrType::Short).unwrap().is_int_type());
-        assert!(basic_type(&ctx, &[], &IrType::Float).unwrap().is_float_type());
+        assert!(
+            basic_type(&ctx, &[], &IrType::Float)
+                .unwrap()
+                .is_float_type()
+        );
         assert!(
             basic_type(&ctx, &[], &IrType::String)
                 .unwrap()
@@ -157,8 +161,12 @@ mod tests {
             name: Symbol::DUMMY,
             fields: vec![(Symbol::DUMMY, IrType::Int), (Symbol::DUMMY, IrType::Float)],
         };
-        let st = basic_type(&ctx, std::slice::from_ref(&def), &IrType::StructVal(Symbol::DUMMY))
-            .unwrap();
+        let st = basic_type(
+            &ctx,
+            std::slice::from_ref(&def),
+            &IrType::StructVal(Symbol::DUMMY),
+        )
+        .unwrap();
         assert!(st.is_struct_type());
         assert_eq!(st.into_struct_type().count_fields(), 2);
         // ...and a function pointer lowers to an opaque pointer (FD-049 Phase 3c);

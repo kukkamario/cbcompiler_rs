@@ -132,10 +132,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         let max_rank = self.max_index_rank();
         if max_rank > 0 {
             let i64t = self.cg.ctx.i64_type();
-            let buf_ty = self
-                .cg
-                .ctx
-                .struct_type(&vec![i64t.into(); max_rank], false);
+            let buf_ty = self.cg.ctx.struct_type(&vec![i64t.into(); max_rank], false);
             let buf = self
                 .cg
                 .builder
@@ -172,8 +169,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             p += 1;
             match &local.ty {
                 IrType::String => {
-                    let retained =
-                        self.call_value(self.cg.rt_string_retain(), &[param.into()])?;
+                    let retained = self.call_value(self.cg.rt_string_retain(), &[param.into()])?;
                     self.cg
                         .builder
                         .build_store(self.locals[i], retained)
@@ -324,7 +320,11 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 let elem = self.array_elem_type(*array)?;
                 let handle = self.pval(*array)?;
                 let buf = self.i64_buf(indices)?;
-                let rank = self.cg.ctx.i64_type().const_int(indices.len() as u64, false);
+                let rank = self
+                    .cg
+                    .ctx
+                    .i64_type()
+                    .const_int(indices.len() as u64, false);
                 let elem_ptr = self
                     .call_value(
                         self.cg.rt_array_elem_addr(),
@@ -425,13 +425,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.bind(inst, n);
             }
             InstKind::Next { object } => {
-                let n =
-                    self.call_value(self.cg.rt_type_next(), &[self.pval(*object)?.into()])?;
+                let n = self.call_value(self.cg.rt_type_next(), &[self.pval(*object)?.into()])?;
                 self.bind(inst, n);
             }
             InstKind::Previous { object } => {
-                let n = self
-                    .call_value(self.cg.rt_type_previous(), &[self.pval(*object)?.into()])?;
+                let n =
+                    self.call_value(self.cg.rt_type_previous(), &[self.pval(*object)?.into()])?;
                 self.bind(inst, n);
             }
             InstKind::DeleteRvalue { value } => {
@@ -621,7 +620,11 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         elem: &IrType,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, elem)?;
-        let v = self.cg.builder.build_load(lty, elem_ptr, "").map_err(berr)?;
+        let v = self
+            .cg
+            .builder
+            .build_load(lty, elem_ptr, "")
+            .map_err(berr)?;
         if matches!(elem, IrType::String) {
             Ok(self.call_value(self.cg.rt_string_retain(), &[v.into()])?)
         } else {
@@ -639,11 +642,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         let (esize, elem_is_ref) = self.elem_layout(elem_type)?;
         let buf = self.i64_buf(dims)?;
         let rank = self.cg.ctx.i64_type().const_int(dims.len() as u64, false);
-        let eref = self
-            .cg
-            .ctx
-            .i32_type()
-            .const_int(elem_is_ref as u64, false);
+        let eref = self.cg.ctx.i32_type().const_int(elem_is_ref as u64, false);
         self.call_value(
             self.cg.rt_array_new(),
             &[rank.into(), buf.into(), esize.into(), eref.into()],
@@ -821,9 +820,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
     /// and return the node handle. Non-String fields default to 0/null (calloc).
     fn build_new_type(&self, type_def: TypeDefId) -> Result<BasicValueEnum<'ctx>, String> {
         let node_ty = self.cg.node_struct_type(type_def)?;
-        let size = node_ty
-            .size_of()
-            .ok_or("node struct type is unsized")?;
+        let size = node_ty.size_of().ok_or("node struct type is unsized")?;
         let td = self.cg.ctx.i64_type().const_int(type_def.0 as u64, false);
         let node = self
             .call_value(self.cg.rt_type_new(), &[td.into(), size.into()])?
@@ -1424,7 +1421,12 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 sig.params.len()
             ));
         }
-        let fty = fn_type(self.cg.ctx, &self.cg.program.struct_defs, &sig.params, &sig.ret)?;
+        let fty = fn_type(
+            self.cg.ctx,
+            &self.cg.program.struct_defs,
+            &sig.params,
+            &sig.ret,
+        )?;
         let mut margs: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(args.len());
         for (arg, pty) in args.iter().zip(&sig.params) {
             margs.push(self.marshal_arg(*arg, pty)?);
@@ -1433,7 +1435,11 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
 
         // Null-check: branch to a trap block (clean exit 1) on a null fn-pointer,
         // mirroring the Phase-1 `Trap` idiom, else continue to the call.
-        let is_null = self.cg.builder.build_is_null(callee_ptr, "").map_err(berr)?;
+        let is_null = self
+            .cg
+            .builder
+            .build_is_null(callee_ptr, "")
+            .map_err(berr)?;
         let trap_bb = self.cg.ctx.append_basic_block(self.llvm_func, "fnptr_null");
         let cont_bb = self.cg.ctx.append_basic_block(self.llvm_func, "fnptr_call");
         self.cg
@@ -1568,8 +1574,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                             // default_value gives a const-zero aggregate (null
                             // sub-strings); fix its String sub-fields to the
                             // sentinel via a scratch slot, then load it back.
-                            let lty =
-                                basic_type(self.cg.ctx, &self.cg.program.struct_defs, ret)?;
+                            let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, ret)?;
                             let scratch = self
                                 .cg
                                 .builder
@@ -1578,8 +1583,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                             let zero = self.default_value(ret)?;
                             self.cg.builder.build_store(scratch, zero).map_err(berr)?;
                             self.init_struct_strings(scratch, *name)?;
-                            let agg =
-                                self.cg.builder.build_load(lty, scratch, "").map_err(berr)?;
+                            let agg = self.cg.builder.build_load(lty, scratch, "").map_err(berr)?;
                             b.build_return(Some(&agg as &dyn BasicValue))
                                 .map_err(berr)?;
                         }
@@ -1623,8 +1627,7 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 }
                 IrType::StructVal(name) => {
                     let def = self.cg.struct_def_by_name(*name)?;
-                    let lty =
-                        basic_type(self.cg.ctx, &self.cg.program.struct_defs, &local.ty)?;
+                    let lty = basic_type(self.cg.ctx, &self.cg.program.struct_defs, &local.ty)?;
                     let agg = self
                         .cg
                         .builder
@@ -1913,15 +1916,21 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         &self,
         name: Symbol,
     ) -> Result<inkwell::types::StructType<'ctx>, String> {
-        Ok(
-            basic_type(self.ctx, &self.program.struct_defs, &IrType::StructVal(name))?
-                .into_struct_type(),
-        )
+        Ok(basic_type(
+            self.ctx,
+            &self.program.struct_defs,
+            &IrType::StructVal(name),
+        )?
+        .into_struct_type())
     }
 
     /// A value-struct field's `(element index, IR type)` — its declaration
     /// position (no header offset, unlike a `Type` node) and type.
-    pub(super) fn struct_field(&self, name: Symbol, field: Symbol) -> Result<(u32, IrType), String> {
+    pub(super) fn struct_field(
+        &self,
+        name: Symbol,
+        field: Symbol,
+    ) -> Result<(u32, IrType), String> {
         let def = self.struct_def_by_name(name)?;
         def.fields
             .iter()

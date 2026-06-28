@@ -130,9 +130,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 // string primitive null-checks (the same scoped simplification
                 // Phase 1 made for String globals; top-level `Dim` lowers to
                 // `@main` locals, where the sentinel IS set, so this is rare).
-                IrType::StructVal(_) => {
-                    gv.set_initializer(&ty.into_struct_type().const_zero())
-                }
+                IrType::StructVal(_) => gv.set_initializer(&ty.into_struct_type().const_zero()),
                 other => {
                     return Err(format!(
                         "global of type {other:?} is out of scope for the Phase-1 LLVM backend"

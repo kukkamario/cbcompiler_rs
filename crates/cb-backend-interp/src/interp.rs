@@ -1132,9 +1132,7 @@ impl<'a, O: Observer> Interpreter<'a, O> {
                 IrBinOp::Eq => Ok(Value::Int(1)),
                 IrBinOp::NotEq => Ok(Value::Int(0)),
                 _ => Err(self.error_at(
-                    InterpErrorKind::RuntimeError(format!(
-                        "invalid binop: {op:?} on null values"
-                    )),
+                    InterpErrorKind::RuntimeError(format!("invalid binop: {op:?} on null values")),
                     span,
                 )),
             },

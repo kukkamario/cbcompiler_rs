@@ -198,7 +198,10 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
     pub(super) fn rt_type_new(&self) -> FunctionValue<'ctx> {
         let p = self.ptr_t();
         let i64 = self.ctx.i64_type();
-        self.declare_rt("cb_rt_type_new", p.fn_type(&[i64.into(), i64.into()], false))
+        self.declare_rt(
+            "cb_rt_type_new",
+            p.fn_type(&[i64.into(), i64.into()], false),
+        )
     }
 
     /// `void* cb_rt_type_check(void* node)`.
@@ -263,9 +266,10 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         if let Some(f) = self.runtime.borrow().get(symbol) {
             return Ok(*f);
         }
-        let fty = fn_type(self.ctx, &self.program.struct_defs, &sig.params, &sig.ret).map_err(|e| {
-            format!("runtime function {symbol:?} has an unsupported signature: {e}")
-        })?;
+        let fty =
+            fn_type(self.ctx, &self.program.struct_defs, &sig.params, &sig.ret).map_err(|e| {
+                format!("runtime function {symbol:?} has an unsupported signature: {e}")
+            })?;
         let f = self
             .module
             .add_function(symbol, fty, Some(Linkage::External));
