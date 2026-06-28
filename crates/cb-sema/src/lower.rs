@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{FileId, Interner, Span, Symbol};
+use cb_diagnostics::{FileId, Interner, SourceMap, Span, Symbol};
 use cb_frontend::ast::{CaseArm, Expr, Node, Stmt};
 use cb_frontend::{Arena, BinOp, NewKind, NodeId, SpanExt, UnOp};
 
@@ -25,7 +25,12 @@ use crate::{DeleteClass, ResolvedCall, SemaResult, TypeTable};
 ///
 /// The `sema` result is taken mutably because the lowerer may intern new
 /// symbols (e.g. the synthetic `@main` function name).
-pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaResult) -> Program {
+pub fn lower(
+    arena: &Arena,
+    program: &[NodeId],
+    sources: &SourceMap,
+    sema: &mut SemaResult,
+) -> Program {
     let SemaResult {
         types,
         symbols,
@@ -38,7 +43,7 @@ pub fn lower(arena: &Arena, program: &[NodeId], source: &str, sema: &mut SemaRes
 
     let mut lowerer = Lowerer {
         arena,
-        source,
+        sources,
         interner,
         types,
         symbols,
@@ -95,7 +100,9 @@ enum VarRef {
 
 struct Lowerer<'a> {
     arena: &'a Arena,
-    source: &'a str,
+    /// All source files, keyed by `FileId`; a span's text is sliced from its
+    /// own file (multiple files coexist after `Include` resolution).
+    sources: &'a SourceMap,
     interner: &'a mut Interner,
     types: &'a TypeTable,
     symbols: &'a SymbolTable,
@@ -230,8 +237,14 @@ impl<'a> Lowerer<'a> {
         self.alloc_local(name, ty, false)
     }
 
+    /// The full text of `file`, or `""` for an unknown/synthetic `FileId`.
+    fn file_text(&self, file: FileId) -> &'a str {
+        let sources: &'a SourceMap = self.sources;
+        sources.get(file).map_or("", |s| s.text.as_str())
+    }
+
     fn intern_span(&mut self, span: Span) -> Symbol {
-        let text = span.slice(self.source);
+        let text = span.slice(self.file_text(span.file));
         self.interner.intern(text)
     }
 
@@ -239,7 +252,8 @@ impl<'a> Lowerer<'a> {
         // `name_span` is the bare-name span (parser strips the sigil byte). The
         // sigil never participates in variable identity, so lowering must key
         // locals by the bare name — matching the checker (cb_syntax.md §1.3–§1.4).
-        self.interner.intern(name_span.slice(self.source))
+        let text = name_span.slice(self.file_text(name_span.file));
+        self.interner.intern(text)
     }
 
     fn sema_type_to_ir(&self, ty: &Type) -> IrType {
@@ -1557,7 +1571,10 @@ impl<'a> Lowerer<'a> {
                 self.lower_select(scrutinee, &arms, id);
             }
 
-            // These are handled at the program level, not inline.
+            // Handled at the program level, not inline. (`Include` is spliced
+            // away by the driver's resolver; a nested one is rejected in sema,
+            // so lowering only runs for include-free programs — this arm is just
+            // defensive.)
             Node::Stmt(Stmt::Function { .. })
             | Node::Stmt(Stmt::TypeDecl { .. })
             | Node::Stmt(Stmt::FieldDecl { .. })

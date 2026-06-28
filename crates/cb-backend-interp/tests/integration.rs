@@ -34,8 +34,7 @@ fn run(src: &str) -> String {
     let mut sema = cb_sema::analyze(
         &parse_result.arena,
         &parse_result.program,
-        src,
-        file,
+        &sources,
         &runtime_catalog,
     );
 
@@ -46,7 +45,12 @@ fn run(src: &str) -> String {
         .collect();
     assert!(sema_errors.is_empty(), "sema errors: {sema_errors:?}");
 
-    let ir = cb_sema::lower::lower(&parse_result.arena, &parse_result.program, src, &mut sema);
+    let ir = cb_sema::lower::lower(
+        &parse_result.arena,
+        &parse_result.program,
+        &sources,
+        &mut sema,
+    );
 
     #[cfg(debug_assertions)]
     cb_ir::verify::verify(&ir);
@@ -482,8 +486,7 @@ fn compile_program(src: &str) -> (cb_ir::Program, cb_diagnostics::Interner) {
     let mut sema = cb_sema::analyze(
         &parse_result.arena,
         &parse_result.program,
-        src,
-        file,
+        &sources,
         &runtime_catalog,
     );
 
@@ -494,7 +497,12 @@ fn compile_program(src: &str) -> (cb_ir::Program, cb_diagnostics::Interner) {
         .collect();
     assert!(sema_errors.is_empty(), "sema errors: {sema_errors:?}");
 
-    let ir = cb_sema::lower::lower(&parse_result.arena, &parse_result.program, src, &mut sema);
+    let ir = cb_sema::lower::lower(
+        &parse_result.arena,
+        &parse_result.program,
+        &sources,
+        &mut sema,
+    );
 
     #[cfg(debug_assertions)]
     cb_ir::verify::verify(&ir);

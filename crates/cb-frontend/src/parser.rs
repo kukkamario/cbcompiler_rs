@@ -357,9 +357,9 @@ pub(crate) enum LastTerm {
 /// is building into, and the diagnostic accumulator. Statement / expression
 /// parsers are methods on `Parser` so they don't have to thread these three
 /// pieces of state around as arguments.
-pub(crate) struct Parser<'t> {
+pub(crate) struct Parser<'t, 'a> {
     cursor: Cursor<'t>,
-    arena: Arena,
+    arena: &'a mut Arena,
     diagnostics: Vec<Diagnostic>,
     last_term: LastTerm,
     /// Cursor position + diagnostic span at which the most recent
@@ -384,11 +384,16 @@ pub(crate) struct Parser<'t> {
     recursion_depth: u32,
 }
 
-impl<'t> Parser<'t> {
-    pub(crate) fn new(tokens: &'t [Token], src: &'t str, file: FileId) -> Self {
+impl<'t, 'a> Parser<'t, 'a> {
+    pub(crate) fn new(
+        tokens: &'t [Token],
+        src: &'t str,
+        file: FileId,
+        arena: &'a mut Arena,
+    ) -> Self {
         Self {
             cursor: Cursor::new(tokens, src, file),
-            arena: Arena::new(),
+            arena,
             diagnostics: Vec::new(),
             last_term: LastTerm::None,
             last_error: None,
@@ -396,16 +401,12 @@ impl<'t> Parser<'t> {
         }
     }
 
-    /// Consume the parser and return the final [`ParseResult`]. The program
-    /// statement list is empty by default; the [`parse`] driver pushes
-    /// successfully-parsed top-level statements (and `Stmt::Error` nodes
-    /// for recovered failures) into it.
-    pub(crate) fn finish(self) -> ParseResult {
-        ParseResult {
-            arena: self.arena,
-            program: Vec::new(),
-            diagnostics: self.diagnostics,
-        }
+    /// Consume the parser and return the accumulated diagnostics. The parsed
+    /// nodes already live in the borrowed arena; the [`parse_into`] driver
+    /// collects the top-level statement ids (and `Stmt::Error` nodes for
+    /// recovered failures) as it goes.
+    pub(crate) fn finish(self) -> Vec<Diagnostic> {
+        self.diagnostics
     }
 
     fn alloc(&mut self, node: Node, span: Span) -> NodeId {
@@ -3021,14 +3022,36 @@ enum PostfixKind {
 /// `parse_stmt` either returns a statement node (possibly `Stmt::Error` after
 /// recovery) or `None` at EOF.
 pub fn parse(tokens: &[Token], src: &str, file: FileId) -> ParseResult {
-    let mut parser = Parser::new(tokens, src, file);
+    let mut arena = Arena::new();
+    let (program, diagnostics) = parse_into(&mut arena, tokens, src, file);
+    ParseResult {
+        arena,
+        program,
+        diagnostics,
+    }
+}
+
+/// Parse a token stream into an *existing* arena, returning the file's
+/// top-level statement ids and any diagnostics.
+///
+/// Unlike [`parse`], this does not allocate a fresh arena, so several source
+/// files can be parsed into one shared arena — the basis for `Include`
+/// resolution, where every file's nodes must share an id space. Each call's
+/// returned `program` references only the nodes it just allocated (at the tail
+/// of the arena); `NodeId`s remain valid because the arena only grows.
+pub fn parse_into(
+    arena: &mut Arena,
+    tokens: &[Token],
+    src: &str,
+    file: FileId,
+) -> (Vec<NodeId>, Vec<Diagnostic>) {
+    let mut parser = Parser::new(tokens, src, file, arena);
     let mut program = Vec::new();
     while let Some(id) = parser.parse_stmt() {
         program.push(id);
     }
-    let mut result = parser.finish();
-    result.program = program;
-    result
+    let diagnostics = parser.finish();
+    (program, diagnostics)
 }
 
 #[cfg(test)]
@@ -3086,10 +3109,11 @@ mod expr_tests {
     fn parse_expr(src: &str) -> (Arena, NodeId, Vec<Diagnostic>) {
         let (tokens, lex_diags) = tokenize(src, FileId(0), LexerOptions::default());
         assert!(lex_diags.is_empty(), "lex diags: {lex_diags:?}");
-        let mut parser = Parser::new(&tokens, src, FileId(0));
+        let mut arena = Arena::new();
+        let mut parser = Parser::new(&tokens, src, FileId(0), &mut arena);
         let id = parser.parse_expr_bp(0).expect("expression parse failed");
-        let result = parser.finish();
-        (result.arena, id, result.diagnostics)
+        let diagnostics = parser.finish();
+        (arena, id, diagnostics)
     }
 
     fn expr_of(arena: &Arena, id: NodeId) -> &Expr {
@@ -4639,10 +4663,11 @@ mod type_expr_tests {
     fn parse_type(src: &str) -> (Arena, NodeId, Vec<Diagnostic>) {
         let (tokens, lex_diags) = tokenize(src, FileId(0), LexerOptions::default());
         assert!(lex_diags.is_empty(), "lex diags: {lex_diags:?}");
-        let mut parser = Parser::new(&tokens, src, FileId(0));
+        let mut arena = Arena::new();
+        let mut parser = Parser::new(&tokens, src, FileId(0), &mut arena);
         let id = parser.parse_type_expr().expect("type parse failed");
-        let result = parser.finish();
-        (result.arena, id, result.diagnostics)
+        let diagnostics = parser.finish();
+        (arena, id, diagnostics)
     }
 
     fn ty_of(arena: &Arena, id: NodeId) -> &TypeExpr {

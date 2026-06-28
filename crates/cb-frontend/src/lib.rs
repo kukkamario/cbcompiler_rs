@@ -18,7 +18,7 @@ pub use ast::{
 };
 pub use ast_print::debug_print;
 pub use lexer::{LexerOptions, tokenize};
-pub use parser::{ParseResult, parse};
+pub use parser::{ParseResult, parse, parse_into};
 pub use span::{FileId, Span, SpanExt};
 pub use token::{
     CommentKind, FloatBits, Kw, LexErrorKind, Op, Punct, Sigil, StrLitKind, Token, TokenKind,

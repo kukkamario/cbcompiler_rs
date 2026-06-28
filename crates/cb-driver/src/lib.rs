@@ -15,10 +15,10 @@ use std::path::Path;
 
 use cb_diagnostics::{CliRenderer, Diagnostic, Interner, Renderer, Severity, SourceMap};
 use cb_frontend::ast_print;
-use cb_frontend::parser::ParseResult;
-use cb_frontend::{LexerOptions, parse, tokenize};
 use cb_ir::Program;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+
+mod include;
 
 /// Process exit codes the driver returns. Centralised so the contract is
 /// explicit and testable:
@@ -97,15 +97,16 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
         }
     };
 
-    let mut sources = SourceMap::new();
-    let file = sources.add(path.display().to_string(), text.clone());
-
-    let (tokens, lex_diags) = tokenize(&text, file, LexerOptions::default());
-    let ParseResult {
+    // Resolve `Include`s: parse the main file and every (transitively) included
+    // file into one shared arena + source map, splicing each top-level
+    // `Include` into the merged program (cb_syntax.md §2.2). `front_diags`
+    // carries the combined lex, parse, and include-resolution diagnostics.
+    let include::Resolved {
         arena,
         program,
-        diagnostics: parse_diags,
-    } = parse(&tokens, &text, file);
+        sources,
+        diagnostics: front_diags,
+    } = include::resolve(path, text);
 
     let mut stderr = CliRenderer::new(StandardStream::stderr(ColorChoice::Auto));
     let mut had_error = false;
@@ -127,12 +128,7 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
     // Lex and parse diagnostics never depend on the runtime catalog; emit them
     // before attempting the catalog load so they survive a catalog failure on
     // the dump-only path below.
-    if let Err(code) = emit_diagnostics(
-        &mut stderr,
-        &sources,
-        &mut had_error,
-        lex_diags.iter().chain(parse_diags.iter()),
-    ) {
+    if let Err(code) = emit_diagnostics(&mut stderr, &sources, &mut had_error, front_diags.iter()) {
         return Compilation::Finished { exit_code: code };
     }
 
@@ -156,7 +152,7 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
     };
 
     // Run semantic analysis.
-    let mut sema_result = cb_sema::analyze(&arena, &program, &text, file, &runtime_catalog);
+    let mut sema_result = cb_sema::analyze(&arena, &program, &sources, &runtime_catalog);
     if let Err(code) = emit_diagnostics(
         &mut stderr,
         &sources,
@@ -168,7 +164,7 @@ pub fn compile(path: &Path, opts: &PipelineOptions) -> Compilation {
 
     // Lower to IR (only if no errors).
     if !had_error {
-        let ir_program = cb_sema::lower::lower(&arena, &program, &text, &mut sema_result);
+        let ir_program = cb_sema::lower::lower(&arena, &program, &sources, &mut sema_result);
 
         #[cfg(debug_assertions)]
         cb_ir::verify::verify(&ir_program);

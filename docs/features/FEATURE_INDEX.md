@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
+| [FD-053](FD-053_INCLUDE_PROCESSING.md) | Include Processing — Driver-Level Include-Resolution Pass | Pending Verification | High | Medium |
 
 ## Deferred / Closed
 
