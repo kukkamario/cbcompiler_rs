@@ -27,7 +27,7 @@ use cb_ir::{BlockId, FuncKind, Function, Inst, IrType, Reg, StructDefInfo, TypeD
 
 use super::Codegen;
 use super::regtypes::{self, RegInfo};
-use super::types::basic_type;
+use super::types::{basic_type, fn_type};
 
 /// Format a builder error as a String (BuilderError isn't `Display`-friendly).
 fn berr<E: std::fmt::Debug>(e: E) -> String {
@@ -208,12 +208,15 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             IrType::Int => self.cg.ctx.i32_type().const_zero().into(),
             IrType::Long => self.cg.ctx.i64_type().const_zero().into(),
             IrType::Float => self.cg.ctx.f64_type().const_zero().into(),
-            // String/Null, an array handle (`CbArray*`), and a type-instance
-            // reference (`CbTypeHeader*`) default to a null pointer (an
-            // un-`New`'d array/instance is Null, matching the interpreter).
-            IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
-                self.cg.ptr_t().const_null().into()
-            }
+            // String/Null, an array handle (`CbArray*`), a type-instance
+            // reference (`CbTypeHeader*`), and a function pointer default to a
+            // null pointer (an un-`New`'d array/instance and an unassigned
+            // fn-pointer are all Null, matching the interpreter).
+            IrType::String
+            | IrType::Null
+            | IrType::Array { .. }
+            | IrType::TypeRef(_)
+            | IrType::FnPtr(_) => self.cg.ptr_t().const_null().into(),
             // A value struct default-inits to a zeroed aggregate (FD-049 Phase
             // 3b); its String sub-fields are then set to the empty sentinel by
             // `init_struct_strings` (const-zero gives null, violating the
@@ -445,10 +448,24 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
                 self.lower_delete_lvalue(slot)?;
             }
 
-            other => {
-                return Err(format!(
-                    "instruction {other:?} is out of scope for the Phase-1 LLVM backend"
-                ));
+            // ── Function pointers (FD-049 Phase 3c) ────────────────────
+            InstKind::FuncAddr { func } => {
+                let decl = &self.cg.program.func_table[func.0 as usize];
+                let fptr = match &decl.kind {
+                    FuncKind::UserDefined { body_index } => self.cg.user_funcs[*body_index]
+                        .as_global_value()
+                        .as_pointer_value(),
+                    FuncKind::Runtime { .. } => {
+                        return Err(format!(
+                            "FuncAddr of runtime function {} is unsupported",
+                            self.cg.interner.resolve(decl.name)
+                        ));
+                    }
+                };
+                self.bind(inst, fptr.into());
+            }
+            InstKind::CallIndirect { callee, args } => {
+                self.lower_call_indirect(inst, *callee, args)?;
             }
         }
         Ok(())
@@ -1343,16 +1360,80 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
         Ok(())
     }
 
+    /// Lower a `CallIndirect` through a fn-pointer reg (FD-049 Phase 3c). The
+    /// callee reg's IR type is `FnPtr(sig)`; rebuild the LLVM function type from
+    /// `sig`, marshal the args, then **null-check** the pointer — a null fn-ptr
+    /// call traps to a clean exit 1 (the interp's `NullFnPtr`) rather than
+    /// SIGSEGV-ing — and `build_indirect_call`. Binds the result iff non-Void.
+    fn lower_call_indirect(
+        &mut self,
+        inst: &Inst,
+        callee: Reg,
+        args: &[Reg],
+    ) -> Result<(), String> {
+        let callee_ty = self
+            .info
+            .type_of(callee)
+            .cloned()
+            .ok_or_else(|| format!("untyped CallIndirect callee {callee}"))?;
+        let sig = match &callee_ty {
+            IrType::FnPtr(sig) => (**sig).clone(),
+            other => return Err(format!("CallIndirect on a non-fn-pointer: {other:?}")),
+        };
+        if args.len() != sig.params.len() {
+            return Err(format!(
+                "indirect call arity mismatch: {} args vs {} params",
+                args.len(),
+                sig.params.len()
+            ));
+        }
+        let fty = fn_type(self.cg.ctx, &self.cg.program.struct_defs, &sig.params, &sig.ret)?;
+        let mut margs: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(args.len());
+        for (arg, pty) in args.iter().zip(&sig.params) {
+            margs.push(self.marshal_arg(*arg, pty)?);
+        }
+        let callee_ptr = self.pval(callee)?;
+
+        // Null-check: branch to a trap block (clean exit 1) on a null fn-pointer,
+        // mirroring the Phase-1 `Trap` idiom, else continue to the call.
+        let is_null = self.cg.builder.build_is_null(callee_ptr, "").map_err(berr)?;
+        let trap_bb = self.cg.ctx.append_basic_block(self.llvm_func, "fnptr_null");
+        let cont_bb = self.cg.ctx.append_basic_block(self.llvm_func, "fnptr_call");
+        self.cg
+            .builder
+            .build_conditional_branch(is_null, trap_bb, cont_bb)
+            .map_err(berr)?;
+        self.cg.builder.position_at_end(trap_bb);
+        let one = self.cg.ctx.i32_type().const_int(1, false);
+        self.call_void(self.cg.rt_exit(), &[one.into()])?;
+        self.cg.builder.build_unreachable().map_err(berr)?;
+
+        self.cg.builder.position_at_end(cont_bb);
+        let cs = self
+            .cg
+            .builder
+            .build_indirect_call(fty, callee_ptr, &margs, "")
+            .map_err(berr)?;
+        if !matches!(*sig.ret, IrType::Void) {
+            let v = call_basic(cs)?;
+            self.bind(inst, v);
+        }
+        Ok(())
+    }
+
     /// Marshal one argument to the callee's declared param type. String args are
     /// borrowed (the callee retains into its own slot); numbers are width-cast.
     fn marshal_arg(&self, arg: Reg, pty: &IrType) -> Result<BasicMetadataValueEnum<'ctx>, String> {
         Ok(match pty {
-            // String, a null reference, an array handle, and a type-instance
-            // reference are all borrowed pointers (the callee retains/copies as
-            // it needs; a type-instance is a shared `CbTypeHeader*`).
-            IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
-                self.pval(arg)?.into()
-            }
+            // String, a null reference, an array handle, a type-instance
+            // reference, and a function pointer are all borrowed pointers (the
+            // callee retains/copies as it needs; a type-instance is a shared
+            // `CbTypeHeader*`, a fn-pointer is the callee's address).
+            IrType::String
+            | IrType::Null
+            | IrType::Array { .. }
+            | IrType::TypeRef(_)
+            | IrType::FnPtr(_) => self.pval(arg)?.into(),
             IrType::Float => self.fval(arg)?.into(),
             IrType::Byte | IrType::Short | IrType::Int | IrType::Long => {
                 let aty = self

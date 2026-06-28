@@ -118,6 +118,18 @@ fn result_type(
         }
         InstKind::GetField { field_type, .. } => field_type.clone(),
         InstKind::Next { object } | InstKind::Previous { object } => types.get(object)?.clone(),
+        // ── Function pointers (FD-049 Phase 3c) ────────────────────────
+        // `FuncAddr` is the sole non-null fn-pointer producer: its type is
+        // `FnPtr(sig-of func)`. A `CallIndirect` returns the callee's signature
+        // return type (resolved once the callee reg's `FnPtr` type is known —
+        // the fixpoint retries otherwise, like `GetElement`).
+        InstKind::FuncAddr { func } => {
+            IrType::FnPtr(Box::new(program.func_table[func.0 as usize].sig.clone()))
+        }
+        InstKind::CallIndirect { callee, .. } => match types.get(callee)? {
+            IrType::FnPtr(sig) => (*sig.ret).clone(),
+            _ => return None,
+        },
         // Out-of-scope producers carry no derivable scalar type here; the
         // lowerer rejects them when it actually encounters one.
         _ => return None,
@@ -236,6 +248,11 @@ fn operand_regs(kind: &InstKind) -> Vec<Reg> {
         InstKind::Convert { value, .. } | InstKind::ConvertExplicit { value, .. } => vec![*value],
         InstKind::StrLen { s } => vec![*s],
         InstKind::Call { args, .. } => args.clone(),
+        InstKind::CallIndirect { callee, args } => {
+            let mut v = args.clone();
+            v.push(*callee);
+            v
+        }
         _ => Vec::new(),
     }
 }

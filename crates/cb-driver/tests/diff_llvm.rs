@@ -151,3 +151,12 @@ diff_tests! {
     struct_string_field,
     struct_param_value,
 }
+
+// Function pointers (FD-049 Phase 3c): FuncAddr (bare-name address-of) and
+// CallIndirect through a `Function(...)` value. `fnptr_null` is a fault fixture
+// — both backends print `before`, then the null fn-ptr call exits 1.
+diff_tests! {
+    fnptr_call,
+    fnptr_param,
+    fnptr_null,
+}

@@ -119,9 +119,11 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 IrType::Int => gv.set_initializer(&self.ctx.i32_type().const_zero()),
                 IrType::Long => gv.set_initializer(&self.ctx.i64_type().const_zero()),
                 IrType::Float => gv.set_initializer(&self.ctx.f64_type().const_zero()),
-                IrType::String | IrType::Null | IrType::Array { .. } | IrType::TypeRef(_) => {
-                    gv.set_initializer(&self.ptr_t().const_null())
-                }
+                IrType::String
+                | IrType::Null
+                | IrType::Array { .. }
+                | IrType::TypeRef(_)
+                | IrType::FnPtr(_) => gv.set_initializer(&self.ptr_t().const_null()),
                 // A value-struct global is zero-initialized (FD-049 Phase 3b).
                 // Its String sub-fields stay null rather than the empty sentinel
                 // — there is no runtime global-init hook to set them, and every

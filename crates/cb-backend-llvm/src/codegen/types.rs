@@ -48,10 +48,13 @@ pub fn basic_type<'ctx>(
             }
             ctx.struct_type(&elems, false).into()
         }
+        // A function pointer is an opaque `ptr` (FD-049 Phase 3c); the callee
+        // function type is rebuilt from its `FnSig` at the `CallIndirect` site.
+        IrType::FnPtr(_) => ctx.ptr_type(AddressSpace::default()).into(),
         other => {
             return Err(format!(
                 "IR type {other:?} is out of scope for the LLVM backend \
-                 (fn-pointers and runtime handles are not lowered yet)"
+                 (runtime handles are not lowered yet)"
             ));
         }
     })
@@ -158,7 +161,8 @@ mod tests {
             .unwrap();
         assert!(st.is_struct_type());
         assert_eq!(st.into_struct_type().count_fields(), 2);
-        // ...while fn-pointers are still rejected (Phase 3c).
+        // ...and a function pointer lowers to an opaque pointer (FD-049 Phase 3c);
+        // only runtime handles remain rejected.
         assert!(
             basic_type(
                 &ctx,
@@ -168,8 +172,10 @@ mod tests {
                     ret: Box::new(IrType::Void),
                 }))
             )
-            .is_err()
+            .unwrap()
+            .is_pointer_type()
         );
+        assert!(basic_type(&ctx, &[], &IrType::RuntimeType("Handle".into())).is_err());
     }
 
     #[test]
