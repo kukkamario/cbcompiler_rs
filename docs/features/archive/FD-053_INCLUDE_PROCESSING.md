@@ -1,6 +1,7 @@
 # FD-053: Include Processing — Driver-Level Include-Resolution Pass
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-29
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Makes `Include "file.cb"` actually pull in another source file, so multi-file programs (libraries + main) compile and run. Previously the statement parsed and was then silently discarded.

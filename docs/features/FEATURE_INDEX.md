@@ -9,7 +9,6 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
-| [FD-053](FD-053_INCLUDE_PROCESSING.md) | Include Processing — Driver-Level Include-Resolution Pass | Pending Verification | High | Medium |
 
 ## Deferred / Closed
 
@@ -33,6 +32,7 @@ Low-priority or blocked items. Promote to Active when ready to design.
 
 | FD | Title | Completed | Notes |
 |----|-------|-----------|-------|
+| [FD-053](archive/FD-053_INCLUDE_PROCESSING.md) | Include Processing — Driver-Level Include-Resolution Pass | 2026-06-29 | `Include "file"` now actually pulls in another source file (was parsed then silently dropped). A driver-level resolver parses every reachable file into one shared arena + `SourceMap`, splicing each top-level `Include` in place; relative paths resolve against the including file, each file is included at most once (repeats/cycles dropped), unreadable → E0334, nested `Include` → E0333. `analyze`/`lower` take `&SourceMap` so spans (and cross-file diagnostics) resolve per-file. |
 | [FD-052](archive/FD-052_REPEAT_UNTIL_LOOP.md) | `Repeat … Until` Loop — Loop Until Condition Is Truthy | 2026-06-28 | Adds the post-test `Repeat … Until cond`: body runs once, loops while `cond` is falsy, exits when truthy — the dual of `Repeat … While`. Frontend (`Kw::Until`, `Stmt::RepeatUntil`) + sema lowering (`lower_repeat_until`, a `lower_repeat_while` clone with the `BranchIf` arms swapped) only; no new IR instruction, no backend work. Verified by the 54-fixture `diff_llvm` differential suite (interp == native). |
 | [FD-051](archive/FD-051_STRING_LITERAL_ESCAPE_SYNTAX.md) | String Literal Syntax — Verbatim `"..."`, Escapes Move to `$"..."` | 2026-06-28 | Plain `"..."` is now verbatim (Windows paths like `"C:\new"` stop mangling); the C-style escape set moves to a new `$"..."` form (the `$` is a mode marker, not interpolation). `"""..."""` raw strings unchanged. Scoped to `cb-frontend` — decoding bakes the finished `String` at parse time, so IR + both backends untouched. |
 | [FD-049](archive/FD-049_IR_TO_LLVM_LOWERING.md) | IR → LLVM Lowering | 2026-06-28 | Walks `cb_ir::Program` and emits real native code — every `InstKind` + terminator lowered (scalar core, strings, arrays, user Types, value structs, function pointers) over native-only C-ABI heap helpers; `cb --backend llvm <file>` now behaves like `--backend interp`, gated by the `diff_llvm` differential suite (53 fixtures) + a two-phase multi-agent review-fix pass (13 findings). Trap *policy* (the div/mod-by-zero guard, `Terminator::Trap` lowering, checked/unchecked switch) split to FD-050. |
