@@ -1,0 +1,69 @@
+Struct ColorVec
+    Field r#
+    Field g#
+    Field b#
+EndStruct
+
+Struct Vec
+    Field x#
+    Field y#
+    Field z#
+EndStruct
+
+
+function newColorVec(r#,g#,b#) as ColorVec
+    Dim cv as ColorVec
+    cv.r#=r#:cv.g#=g#:cv.b#=b#
+    return cv
+endfunction
+
+function newVec(x#,y#,z#) as Vec
+    Dim v as Vec
+    v.x#=x#:v.y#=y#:v.z#=z#
+    return v
+endfunction
+
+
+function vecLength(v as Vec) as Float
+    return Sqrt(v.x*v.x+v.y*v.y+v.z*v.z)
+endfunction
+
+function vecSumAll(v as Vec) as Float
+	return v.x+v.y+v.z
+endFunction
+
+function vecDot(v1 as Vec,v2 as Vec) as Float
+    return vecSumAll(vecMul(v1,v2))
+endFunction
+
+function vecMul(v1 as Vec, v2 as Vec) as Vec
+    return newVec(v1.x*v2.x, v1.y*v2.y, v1.z*v2.z)
+endFunction
+
+function vecMulScalar(v1 as Vec, s as Float) as Vec
+    return newVec(v1.x*s, v1.y*s, v1.z*s)
+endFunction
+
+function vecSum(v1 as Vec, v2 as Vec) as Vec
+    return newVec(v1.x+v2.x, v1.y+v2.y, v1.z+v2.z)
+endFunction
+
+function vecSub(v1 as Vec, v2 as Vec) as Vec
+    return newVec(v1.x-v2.x, v1.y-v2.y, v1.z-v2.z)
+endFunction
+
+function vecSubScalar(v1 as Vec, s as Float) as Vec
+    return newVec(v1.x-s, v1.y-s, v1.z-s)
+endFunction
+
+function vecNegate(v as Vec) as Vec
+    return newVec(-v.x, -v.y, -v.z)
+endFunction
+
+function vecProject(v as Vec, n as Vec) as Vec
+	return vecSub(v, vecMulScalar(n, vecDot(vecMulScalar(v, 2),n)))
+endFunction
+
+function normalize(v as Vec) as Vec
+    return vecMulScalar(v,1.0/vecLength(v))
+endfunction

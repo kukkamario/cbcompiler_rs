@@ -1,0 +1,202 @@
+//http://www.coolbasic.com/phpBB3/viewtopic.php?f=12&t=697&start=320#p41458
+
+
+Include "coolVec.CB"
+
+
+Const screenw% = 300
+Const screenh% = 300
+
+Global fov=35
+Global maxiters=8
+ 
+SCREEN screenw, screenh
+
+struct Material
+    Field cv as ColorVec
+    Field specularity#
+    Field diffusivity#
+endstruct
+
+Type sphere
+    Field pos as Vec
+    Field origin as Vec
+    Field size#
+    Field m as Material
+EndType
+
+Type light
+    Field pos As Vec
+EndType
+
+Struct castData
+    field hit as rayHit
+    field shadow as float
+endStruct
+
+Struct rayHit
+    Field pos as Vec
+    Field normal as Vec
+    Field m as Material
+    Field dist as Float
+endStruct
+
+function newMaterial(cv As colorVec, diffusivity#, specularity#) as Material
+    Dim m as Material
+    m.cv=cv:m.specularity=specularity:m.diffusivity=diffusivity
+    return m
+endFunction
+
+function newSphere(x#,y#,z#,size#,r#,g#,b#,diffusivity#,specularity#) as Sphere
+    s As sphere = New(sphere)
+    s.origin=newVec(x#,y#,z#)
+    s.size# = size#
+    s.m=newMaterial(newColorVec(r#,g#,b#),diffusivity,specularity)
+    return s
+endFunction
+
+function newLight(x#,y#,z#) as Light
+    l As Light = New(Light)
+    l.pos=newVec(x#,y#,z#)
+    return l
+endFunction
+
+newSphere(-1,-1,7,  1.5,    255,0,0, 0.9,1)
+newSphere(2,1,6,    1,      5,0,255, 0.8,1)
+newSphere(0,1.5,7,  1,      5,205,0, 0.8,1)
+newLight(-3,0,0)
+
+global ambient as ColorVec = newColorVec(40,100,100)
+
+
+Dim lastUpdate as Integer
+Dim tim as Integer
+
+
+Repeat
+    Tim=Timer()
+
+    if keydown(205) then t#=t+1.5
+    if keydown(203) then t=t-1.5
+
+    t# = t# + (Timer() - lastUpdate) / 860.0
+    lastUpdate = Timer()
+    t2# = t#
+
+    For s = Each sphere
+        s.pos.x# = s.origin.x# + Sin(t2# * 2.0) * 0.7
+        s.pos.y# = s.origin.y# + Sin(t2# * 1.4 +124124) * 0.3
+        s.pos.z# = s.origin.z# + Sin(t2# + 343) * 0.6
+        t2# = t2# + t#
+        s.m.specularity#=sin(timer()/25.0)*0.25+0.5
+    Next s
+
+    l as light = first(light)
+    l.pos.x=sin(t*9.0+90)*10
+    l.pos.z=cos(t*9.0+90)*10+10.0
+
+    render()
+    DrawScreen
+    Print ((Timer()-Tim)+" "+FPS())
+Forever
+
+function render() as integer
+    Dim cv as ColorVec // use single struct for every pixel
+
+    fovc#=Tan(fov/2)/Cos(fov/2)'sama kulma joka resolla(pystysuunnassa)
+
+    // lock2(2) //writeonly lock
+    For x#=0 To screenw-1
+        For y#=0 To screenh-1
+            campos as Vec = newVec(0,0,0)
+            raydir as Vec = newVec(fovc*(float(x)/screenh-0.5*screenw/screenh)*2.0,fovc*(float(y)/screenh-0.5)*2.0,1)
+            col as ColorVec=trace(cv,campos,raydir,maxiters)
+            r as Byte = min(255.0,col.r)
+            g as Byte = min(255.0,col.g)
+            b as Byte = min(255.0,col.b)
+
+            putpixel x,y,r,g,b
+        Next
+    Next
+    // unlock
+endfunction
+
+function cast(pos as Vec, dir as Vec) as rayHit
+    d as castData = castLightDist(pos, dir,0)
+    return d.hit
+endFunction
+
+function castShadow(pos as Vec, dir as Vec,lightDist as float) as Float
+    d as castData = castLightDist(pos, dir, lightDist)
+    return d.shadow
+endFunction
+
+function castLightDist(pos as Vec, dir as Vec, lightDist as float) as castData
+    Dim hit as rayHit
+    Dim castD as castData
+    castD.shadow=1000
+    hit.dist=0
+    For obj =Each sphere
+        b# = 2*vecDot(dir,vecSub(pos,obj.pos))
+        c# = vecDot(obj.pos,obj.pos) + vecDot(pos,pos) -2*vecDot(obj.pos,pos) - obj.size#*obj.size#
+        d# = b#*b# - 4*c#
+        If d>0 Then
+            tt# = (-b#-Sqrt(d#))/2
+            If (hit.dist=0 or hit.dist#>tt) And tt>0.001 Then
+                hit.dist#=tt
+                nearest As sphere=obj
+                //castd.shadow=0
+            Endif
+        Else
+            //tt# = (-b#-Sqrt(-d#))/2
+            //objdist=vecLength(vecSub(obj.pos,pos))
+            //if tt>0 and objdist<lightDist then castD.shadow=min(castD.shadow,0.5-d*(1-objdist/lightDist))//*(lightDist-vecLength(vecProject(obj.pos,dir)))/lightDist)
+        EndIf
+        tt# = (-b#-Sqrt(abs(d#)))/2
+        objdist=vecLength(vecSub(obj.pos,pos))
+         if tt>0 and objdist<lightDist then castD.shadow=min(castD.shadow,0.5-d*(1-objdist/lightDist))
+        
+    Next 
+    If hit.dist Then
+        hit.pos=vecSum(pos,vecMulScalar(dir,hit.dist))
+        hit.m=nearest.m
+        hit.normal = normalize(vecSub(nearest.pos,hit.pos))
+    endif
+    castd.hit=hit
+    return castD
+endFunction
+
+Function trace(cv as ColorVec, pos as Vec, dir as Vec, iters) As ColorVec
+    dir=normalize(dir)
+    hit as rayHit = cast(pos,dir)
+
+    If hit.dist Then
+        specularDir as Vec = normalize(vecProject(dir,hit.normal))
+        //valaistus
+        specular#=0
+        diffuse#=0
+        For valo = Each light
+            lightVec as Vec = vecSub(valo.pos,hit.pos)
+            lightDir as Vec = normalize(lightVec)
+            shadow as float = min(1.0,max(0.0,2*castShadow(hit.pos,lightdir,vecLength(lightvec))))
+            //print shadow
+            diffuCos#=vecDot(hit.normal,lightDir)
+            diffuse#=diffuse+Max(0.0,-diffuCos)*shadow
+            specular#=specular+Max(0.0,-diffuCos)^8*0.5*shadow //a hack for more interresting specular
+            specular#=max(0.0,vecDot(lightdir,specularDir))^12/2.0*shadow+specular
+        Next valo
+        //heijastukset
+        If iters>0 Then
+            cv=trace(cv,hit.pos,speculardir,iters-1)
+        Else
+            cv=ambient
+        EndIf
+        diffuseAmount#=(1.0-hit.m.specularity)*hit.m.diffusivity
+        cv.r=(hit.m.cv.r*diffuse+ambient.r)*diffuseAmount+(cv.r+specular*255)*hit.m.specularity
+        cv.g=(hit.m.cv.g*diffuse+ambient.g)*diffuseAmount+(cv.g+specular*255)*hit.m.specularity
+        cv.b=(hit.m.cv.b*diffuse+ambient.b)*diffuseAmount+(cv.b+specular*255)*hit.m.specularity
+    Else
+        cv=ambient
+    EndIf
+    Return cv
+EndFunction

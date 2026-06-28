@@ -786,9 +786,10 @@ impl<'a> Lowerer<'a> {
 
             Node::Expr(Expr::Binary { op, lhs, rhs }) => {
                 if matches!(op, BinOp::And | BinOp::Or) {
-                    return self.lower_short_circuit(op, lhs, rhs, span);
+                    self.lower_short_circuit(op, lhs, rhs, span)
+                } else {
+                    self.lower_binary(op, lhs, rhs, span)
                 }
-                self.lower_binary(op, lhs, rhs, span)
             }
 
             Node::Expr(Expr::Unary { op, operand }) => {
@@ -841,7 +842,11 @@ impl<'a> Lowerer<'a> {
                 )
             }
 
-            Node::Expr(Expr::Paren { inner }) => return self.lower_expr(inner),
+            // Lower the inner expression, then fall through to `maybe_convert`
+            // so an implicit conversion recorded on the parenthesised node itself
+            // (e.g. `(intExpr) / 1.0` coercing the lhs to Float) is honored. An
+            // early `return` here would drop it.
+            Node::Expr(Expr::Paren { inner }) => self.lower_expr(inner),
 
             Node::Expr(Expr::New(kind)) => match kind {
                 NewKind::Type(_type_expr_id) => {
