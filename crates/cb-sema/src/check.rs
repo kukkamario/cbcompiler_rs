@@ -455,6 +455,15 @@ impl<'a> Checker<'a> {
 
     fn pass1(&mut self, program: &[NodeId]) {
         let top = self.current_scope;
+        // Pre-declare every `Type`/`Struct` *name* (with its kind, fields filled
+        // in below) before resolving any types. Definitions are hoisted (§7.3),
+        // so a field, global, or function signature may reference a record
+        // declared later in the source; without this pre-pass such a forward
+        // reference would freeze as an unresolved `TypeRef` placeholder and later
+        // mismatch the same record's resolved type.
+        for &id in program {
+            self.pass1_predeclare_type(id, top);
+        }
         for &id in program {
             self.pass1_stmt(id, top);
         }
@@ -620,11 +629,11 @@ impl<'a> Checker<'a> {
                 self.pass1_function(scope, name_span, return_sigil, &params, return_ty, span);
             }
             Node::Stmt(Stmt::TypeDecl {
-                kind,
+                kind: _,
                 name_span,
                 fields,
             }) => {
-                self.pass1_type_decl(scope, kind, name_span, &fields, span);
+                self.pass1_type_decl(scope, name_span, &fields, span);
             }
             Node::Stmt(Stmt::VarDecl {
                 is_global: true,
@@ -743,40 +752,53 @@ impl<'a> Checker<'a> {
         field_infos
     }
 
-    /// Register a `Type` or `Struct` declaration. The two forms differ only in
-    /// the resulting `DeclKind`/`Type` (heap reference vs value), selected from
-    /// `kind` (F-A1); the field collection is shared.
+    /// Pre-declare a `Type`/`Struct` *name* with its kind but no fields yet, so
+    /// forward references resolve to the right value/reference kind regardless of
+    /// source order (see `pass1`). Fields are filled in later by
+    /// `pass1_type_decl`. Non-record statements are ignored.
+    fn pass1_predeclare_type(&mut self, id: NodeId, scope: ScopeId) {
+        if let Node::Stmt(Stmt::TypeDecl {
+            kind, name_span, ..
+        }) = self.arena[id]
+        {
+            let name = self.intern_span(name_span);
+            let (decl_kind, ty) = match kind {
+                TypeDeclKind::Type => (
+                    DeclKind::TypeDef { fields: Vec::new() },
+                    Type::TypeRef { name },
+                ),
+                TypeDeclKind::Struct => (
+                    DeclKind::StructDef { fields: Vec::new() },
+                    Type::StructVal { name },
+                ),
+            };
+            let decl = Declaration {
+                kind: decl_kind,
+                ty,
+                span: name_span,
+                is_global: false,
+            };
+            self.try_declare(scope, name, decl, E_DUPLICATE_DEFINITION);
+        }
+    }
+
+    /// Resolve a `Type`/`Struct`'s fields and fill them into the declaration
+    /// pre-registered by `pass1_predeclare_type`. All record names are in scope
+    /// by now, so field types referencing other records resolve to their true
+    /// kind. A redeclared name (its `E_DUPLICATE_DEFINITION` already emitted in
+    /// the pre-pass) does not own the slot, so its fields are not written back.
     fn pass1_type_decl(
         &mut self,
         scope: ScopeId,
-        kind: TypeDeclKind,
         name_span: Span,
         fields: &[NodeId],
         _full_span: Span,
     ) {
         let name = self.intern_span(name_span);
         let field_infos = self.collect_fields(fields);
-        let (decl_kind, ty) = match kind {
-            TypeDeclKind::Type => (
-                DeclKind::TypeDef {
-                    fields: field_infos,
-                },
-                Type::TypeRef { name },
-            ),
-            TypeDeclKind::Struct => (
-                DeclKind::StructDef {
-                    fields: field_infos,
-                },
-                Type::StructVal { name },
-            ),
-        };
-        let decl = Declaration {
-            kind: decl_kind,
-            ty,
-            span: name_span,
-            is_global: false,
-        };
-        self.try_declare(scope, name, decl, E_DUPLICATE_DEFINITION);
+        if self.symbols.lookup(scope, name).map(|d| d.span) == Some(name_span) {
+            self.symbols.update_record_fields(scope, name, field_infos);
+        }
     }
 
     fn pass1_global(
@@ -2600,6 +2622,47 @@ mod tests {
     #[test]
     fn pass1_collects_struct_def() {
         let result = analyze_src("Struct Vec2\nField x As Float\nField y As Float\nEndStruct\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn struct_field_forward_ref_to_later_struct_ok() {
+        // `A.fieldB` is type `B`, declared *after* `A`. Returning the field from
+        // a function whose return type is `B` must type-check: the field type and
+        // the return type must resolve to the same `StructVal{B}` regardless of
+        // declaration order (records are hoisted, §7.3). Previously the field
+        // froze as an unresolved `TypeRef{B}` and mismatched the return type
+        // (E0317 "cannot implicitly convert `B` to `B`").
+        let result = analyze_src(
+            "Struct A\nField fieldB As B\nEndStruct\n\
+             Struct B\nField x As Float\nEndStruct\n\
+             Function getB(a As A) As B\nReturn a.fieldB\nEndFunction\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn global_forward_ref_to_later_struct_ok() {
+        // A `Global` whose type is a `Struct` declared later must resolve to the
+        // value `StructVal`, not a heap `TypeRef` — otherwise field access on it
+        // is laid out as a reference and dereferences null at runtime.
+        let result = analyze_src(
+            "Global g As Vec2\n\
+             Struct Vec2\nField x As Float\nEndStruct\n\
+             Function getX() As Float\nReturn g.x\nEndFunction\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn function_signature_forward_ref_to_later_struct_ok() {
+        // A parameter/return type naming a `Struct` declared after the function
+        // must resolve to the same `StructVal` the caller sees.
+        let result = analyze_src(
+            "Function makeit(p As Vec2) As Vec2\nReturn p\nEndFunction\n\
+             Struct Vec2\nField x As Float\nEndStruct\n\
+             Dim a As Vec2\nDim b As Vec2\nb = makeit(a)\n",
+        );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 

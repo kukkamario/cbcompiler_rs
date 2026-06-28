@@ -290,4 +290,32 @@ impl SymbolTable {
         }
         debug_assert!(found, "update_const_value found no Constant decl to update");
     }
+
+    /// Fill in the fields of an existing `TypeDef`/`StructDef` declaration.
+    ///
+    /// Pass 1 declares every record's name (and kind) up front so forward
+    /// references resolve, then resolves field types in a second step once all
+    /// names are in scope; this writes the resolved fields back.
+    pub(crate) fn update_record_fields(
+        &mut self,
+        scope: ScopeId,
+        name: Symbol,
+        fields: Vec<FieldInfo>,
+    ) {
+        let s = &mut self.scopes[scope.0 as usize];
+        let mut found = false;
+        if let Some(decl) = s.symbols.get_mut(&name) {
+            match &mut decl.kind {
+                DeclKind::TypeDef { fields: f } | DeclKind::StructDef { fields: f } => {
+                    *f = fields;
+                    found = true;
+                }
+                _ => {}
+            }
+        }
+        debug_assert!(
+            found,
+            "update_record_fields found no Type/Struct decl to update"
+        );
+    }
 }
