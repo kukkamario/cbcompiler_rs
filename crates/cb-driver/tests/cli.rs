@@ -713,3 +713,24 @@ fn nested_include_exits_one_e0333() {
         .code(1)
         .stderr(contains("E0333"));
 }
+
+#[test]
+fn error_in_included_file_renders_with_that_files_name() {
+    // A sema error inside an included file must render against *that* file's
+    // name/line (each file keeps its own `FileId` in the shared `SourceMap`),
+    // not the main file's — the point of resolving spans per-file.
+    let dir = tempdir().unwrap();
+    write_cb(
+        &dir,
+        "lib.cb",
+        "Function fromLib() As Integer\nReturn missingVar\nEndFunction\n",
+    );
+    let main = write_cb(&dir, "main.cb", "Include \"lib.cb\"\nPrint fromLib()\n");
+    Command::cargo_bin("cb")
+        .unwrap()
+        .arg(&main)
+        .assert()
+        .code(1)
+        // The undefined `missingVar` lives in lib.cb, so the diagnostic names it.
+        .stderr(contains("E0300").and(contains("lib.cb")));
+}
