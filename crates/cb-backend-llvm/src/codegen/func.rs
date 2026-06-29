@@ -1356,7 +1356,9 @@ impl<'a, 'ctx, 'f> FunctionLowerer<'a, 'ctx, 'f> {
             // the same opaque `ptr`, and a null pointer is CB `Null` for every
             // reference type (e.g. `n = Null`, `n <> Null`). Pass it through.
             IrType::TypeRef(_) | IrType::Array { .. } | IrType::FnPtr(_) => Ok(self.regs[&value]),
-            other => Err(format!("convert to {other:?} is out of scope for the LLVM backend")),
+            other => Err(format!(
+                "convert to {other:?} is out of scope for the LLVM backend"
+            )),
         }
     }
 
