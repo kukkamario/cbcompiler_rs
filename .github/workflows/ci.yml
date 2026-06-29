@@ -12,6 +12,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Formatting gate. Fast, toolchain-only (no compile, no cache): fails the build
+  # if any file isn't `cargo fmt`-clean. Runs first so style drift is caught
+  # without waiting on the heavier build/test jobs.
+  rustfmt:
+    name: Rustfmt check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
   # Proves FD-033: the workspace builds and the full test suite runs on Linux
   # with only a Rust toolchain + a C++ compiler — no CMake, vcpkg, or Allegro
   # SDK. CB_RUNTIME_FORCE_SDK_FREE makes build.rs skip the CMake/Allegro probe
