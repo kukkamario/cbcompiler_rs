@@ -81,8 +81,12 @@ jobs:
   # Windows x64: vcpkg builds static Allegro + LLVM 18 (matching the dev recipe
   # in CLAUDE.md). The first run compiles LLVM from source (slow — ~1h+); vcpkg
   # binary caching into the GitHub Actions cache makes later runs fast. The
-  # archive bundles `cb.exe` + the runtime + Allegro static libs + clang/lld, so
-  # users need only the Windows SDK/CRT — see packaging/RELEASE-README-windows.md.
+  # archive bundles `cb.exe` + the runtime + Allegro static libs + clang/lld +
+  # the `xwin` fetch tool, so users need no Visual Studio / Windows SDK: a
+  # one-time `cb --setup-toolchain` downloads the MS CRT + Windows SDK import libs
+  # on their machine (only the VC++ Redistributable is needed to *run* output).
+  # CI never splats the MS libs into the archive — only the MIT/Apache `xwin.exe`
+  # ships. See packaging/RELEASE-README-windows.md.
   windows:
     name: Release (Windows x64)
     runs-on: windows-latest
@@ -137,6 +141,13 @@ jobs:
       - name: Build (release, llvm backend)
         run: cargo build -p cb-driver --release --features llvm --locked
 
+      # The xwin fetch tool ships in the archive so users can download the MS
+      # CRT/SDK import libs themselves (`cb --setup-toolchain`). Pinned for
+      # reproducibility; cached by Swatinem/rust-cache. Only this MIT/Apache
+      # binary is bundled — never the Microsoft content it downloads.
+      - name: Build the xwin fetch tool
+        run: cargo install xwin --version 0.9.0 --locked --root xwin-tool
+
       - name: Stage portable tree
         shell: pwsh
         run: |
@@ -147,6 +158,7 @@ jobs:
           $llvmbin = Join-Path $env:LLVM_SYS_181_PREFIX "bin"
           Copy-Item (Join-Path $llvmbin "clang.exe") "$dist/bin/clang.exe"
           Copy-Item (Join-Path $llvmbin "lld-link.exe") "$dist/bin/lld-link.exe"
+          Copy-Item xwin-tool/bin/xwin.exe "$dist/bin/xwin.exe"
           Copy-Item packaging/RELEASE-README-windows.md "$dist/README.md"
           Compress-Archive -Path $dist -DestinationPath "$dist.zip"
           "ASSET=$dist.zip" >> $env:GITHUB_ENV
@@ -156,3 +168,41 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload $env:GITHUB_REF_NAME $env:ASSET --clobber
+
+  # Smoke-test the released archive on a clean Windows with NO Visual Studio /
+  # Windows SDK — the one configuration neither a dev box nor the VS-equipped
+  # build runner can prove. Runs in a Server Core container (only the VC++ Redist
+  # is added, needed to *run* cb.exe + produced exes): fetch the import libs with
+  # `cb --setup-toolchain`, AOT-compile, and diff the native output against the
+  # interpreter oracle. The actual test logic lives in
+  # packaging/windows-no-sdk-smoke.ps1.
+  #
+  # Host pinned to windows-2022 so the ltsc2022 image runs under fast process
+  # isolation (the container base image must match the host build). First cut —
+  # the container / VC++-redist / isolation details may need a tag-triggered dry
+  # run to settle.
+  windows-no-sdk-smoke:
+    name: Smoke test (Windows, no VS/SDK)
+    runs-on: windows-2022
+    needs: windows
+    steps:
+      - uses: actions/checkout@v5 # for packaging/windows-no-sdk-smoke.ps1
+
+      - name: Download the release archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download $env:GITHUB_REF_NAME --pattern "*x64-windows.zip" --dir .
+          $zip = (Get-ChildItem *x64-windows.zip)[0].Name
+          Expand-Archive -Path $zip -DestinationPath dist-extract
+          $inner = (Get-ChildItem dist-extract -Directory)[0].FullName
+          Copy-Item packaging/windows-no-sdk-smoke.ps1 (Join-Path $inner "smoke.ps1")
+          "CB_DIST=$inner" >> $env:GITHUB_ENV
+
+      - name: Run smoke test in a clean Server Core container
+        shell: pwsh
+        run: |
+          docker run --rm -v "${env:CB_DIST}:C:\dist" `
+            mcr.microsoft.com/windows/servercore:ltsc2022 `
+            powershell -NoProfile -ExecutionPolicy Bypass -File C:\dist\smoke.ps1

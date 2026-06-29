@@ -9,6 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
+| [FD-055](FD-055_SELF_CONTAINED_WINDOWS_TOOLCHAIN.md) | Self-Contained Windows AOT Toolchain | In Progress | Medium | Medium |
 
 ## Deferred / Closed
 
