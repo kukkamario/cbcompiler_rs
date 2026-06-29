@@ -12,13 +12,19 @@ name: Windows LLVM
 # only read the default-branch (master) scope. Nothing wrote LLVM into that scope
 # before, so every release rebuilt LLVM from source (~1h+).
 #
-# This workflow runs the same vcpkg build ON master (and weekly) with
-# x-gha,readwrite, populating the master-scope cache. Release tag runs then
-# restore it warm. The weekly schedule keeps the entry inside the 7-day eviction
-# window during quiet periods and re-warms after a windows-latest image / MSVC
-# bump changes vcpkg's ABI hash. PRs that touch the build read the warm master
-# cache (read-only — a PR cannot write the master scope anyway, the fork-PR
-# cache-poisoning guard) to smoke the link path without rebuilding from scratch.
+# This workflow runs the same vcpkg build ON master (and weekly) and saves
+# vcpkg's `files` binary cache (VCPKG_BINARY_SOURCES) via actions/cache,
+# populating the master-scope cache. Release tag runs then restore it warm. The
+# weekly schedule keeps the entry inside the 7-day eviction window during quiet
+# periods and re-warms after a windows-latest image / MSVC bump changes vcpkg's
+# ABI hash. PRs that touch the build read the warm master cache (read-only — a
+# PR cannot write the master scope anyway, the fork-PR cache-poisoning guard) to
+# smoke the link path without rebuilding from scratch.
+#
+# (vcpkg removed its old `x-gha` backend, so binary caching now rides on the
+# generic `files` provider plus actions/cache rather than vcpkg's built-in GHA
+# source — the ref-scope reasoning above is unchanged: actions/cache is itself
+# ref-scoped, and a run reads its own ref plus the default branch.)
 #
 # The triplet overlay, runner image, and submodule-pinned vcpkg/LLVM versions
 # MUST match release.yml exactly, or the vcpkg ABI hash (hence the cache key)
@@ -27,6 +33,17 @@ name: Windows LLVM
 on:
   push:
     branches: [master]
+    # Same filter as the PR trigger: only warm when a build-relevant file
+    # changes (which is also when the cached ABI moves). Doc-only master pushes
+    # would otherwise re-run the build and re-upload the multi-GB cache for
+    # nothing; the weekly cron still re-warms after a toolchain image bump.
+    paths:
+      - ".github/workflows/windows-llvm.yml"
+      - "crates/cb-backend-llvm/**"
+      - "crates/cb-runtime-sys/**"
+      - "crates/cb-driver/**"
+      - "runtime/**"
+      - "Cargo.lock"
   pull_request:
     # Only PRs that can affect the vcpkg/LLVM/runtime build or the link path. A
     # path-filtered job never reports a status on unrelated PRs, so do NOT mark
@@ -50,8 +67,8 @@ env:
   # Write the binary cache only on trusted refs (master push / schedule). On PRs
   # restore read-only: a PR can't write the master scope (fork-PR cache-poisoning
   # guard), so a write would only fill a throwaway per-PR scope the release can't
-  # read.
-  VCPKG_BINARY_SOURCES: "${{ github.event_name == 'pull_request' && 'clear;x-gha,read' || 'clear;x-gha,readwrite' }}"
+  # read. The `files` provider writes archives into the dir actions/cache saves.
+  VCPKG_BINARY_SOURCES: "${{ github.event_name == 'pull_request' && format('clear;files,{0}/vcpkg-bincache,read', github.workspace) || format('clear;files,{0}/vcpkg-bincache,readwrite', github.workspace) }}"
   # Release-only static-md triplet — MUST match release.yml so the cache keys line
   # up (the triplet feeds vcpkg's ABI hash).
   VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/runtime/vcpkg-triplets
@@ -71,16 +88,20 @@ jobs:
       - name: Cache cargo registry + build
         uses: Swatinem/rust-cache@v2
 
-      - name: Export GitHub Actions cache env for vcpkg
-        uses: actions/github-script@v7
+      # Restore the vcpkg `files` binary cache (LLVM + the Allegro closure) the
+      # last warm produced. The run-id suffix on the save key (below) makes each
+      # warm a fresh entry, so a new package ABI persists after an MSVC / image
+      # bump; the prefix restore-keys grab the most recent warm. Keyed on the
+      # inputs that move the ABI: the llvm port, the triplet overlay, and the
+      # runtime manifest (which pins the vcpkg baseline).
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
         with:
-          script: |
-            // vcpkg's x-gha binary-cache provider reads these from the env; the
-            // var names differ across GitHub's cache-service versions, so export
-            // all of them and let vcpkg pick whichever it supports.
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ${{ github.workspace }}/vcpkg-bincache
+          key: vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}-
+            vcpkg-bincache-${{ runner.os }}-
 
       - name: Bootstrap vcpkg
         run: runtime\vcpkg\bootstrap-vcpkg.bat -disableMetrics
@@ -109,6 +130,16 @@ jobs:
       # proving the Windows LLVM link still works.
       - name: Build (release, llvm backend)
         run: cargo build -p cb-driver --release --features llvm --locked
+
+      # Persist the warmed `files` cache to the master scope (skip on PRs — they
+      # can't write it). The build above succeeded, so the archives are complete;
+      # a later smoke failure still keeps this cache.
+      - name: Save vcpkg binary cache
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-bincache
+          key: vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}-${{ github.run_id }}
 
       # AOT-compile a non-graphics program to a native exe (cb finds the pinned
       # clang via LLVM_SYS_181_PREFIX; windows-latest supplies the MS CRT/SDK

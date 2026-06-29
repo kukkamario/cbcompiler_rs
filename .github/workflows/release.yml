@@ -94,7 +94,11 @@ jobs:
     runs-on: windows-latest
     needs: create-release
     env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      # Read-only `files` binary cache: a tag run can't write the master scope,
+      # so it only consumes the cache the Windows LLVM workflow warmed on master.
+      # If the warm is present and ABI-matching the LLVM/Allegro build is skipped;
+      # otherwise this run rebuilds from source (slow) but stores nothing.
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-bincache,read"
       # Build vcpkg ports (LLVM, Allegro) release-only — half the build vs the
       # default debug+release. Applies to both the classic `vcpkg install llvm`
       # and the manifest Allegro build the cargo step drives through CMake.
@@ -110,16 +114,18 @@ jobs:
       - name: Cache cargo registry + build
         uses: Swatinem/rust-cache@v2
 
-      - name: Export GitHub Actions cache env for vcpkg
-        uses: actions/github-script@v7
+      # Restore (read-only) the vcpkg `files` binary cache the Windows LLVM
+      # workflow warmed on master — actions/cache lets a tag run read the
+      # default-branch scope. The restore-keys grab the most recent warm; the
+      # key inputs match the warmer so the same archive resolves.
+      - name: Restore vcpkg binary cache (read-only)
+        uses: actions/cache/restore@v4
         with:
-          script: |
-            // vcpkg's x-gha binary-cache provider reads these from the env; the
-            // var names differ across GitHub's cache-service versions, so export
-            // all of them and let vcpkg pick whichever it supports.
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ${{ github.workspace }}/vcpkg-bincache
+          key: vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}-
+            vcpkg-bincache-${{ runner.os }}-
 
       - name: Bootstrap vcpkg
         run: runtime\vcpkg\bootstrap-vcpkg.bat -disableMetrics
