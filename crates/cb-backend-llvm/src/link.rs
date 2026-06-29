@@ -90,9 +90,22 @@ pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
         for lib in ["msvcrt", "vcruntime", "ucrt"] {
             cmd.arg("-Xlinker").arg(format!("/defaultlib:{lib}"));
         }
+        // Point lld at a bundled/cached Windows sysroot (the MS CRT + Windows SDK
+        // import libs) when one is present — e.g. after `cb --setup-toolchain` —
+        // so no system-installed Visual Studio / Windows SDK is needed. Absent:
+        // unchanged, clang/lld discover a system SDK as before (the dev path). lld
+        // searches %LIB% + /libpath: and never probes the registry, so /libpath:
+        // is the right knob for the xwin splat layout (vs /winsysroot, which wants
+        // a VS-style tree). Discovery alone gates this, so a dev box with a real
+        // SDK and no CB_WIN_SDK/cache produces a byte-for-byte-unchanged command.
+        if let Some(sdk) = win_sdk_dir() {
+            for sub in WIN_SDK_LIB_SUBDIRS {
+                cmd.arg("-Xlinker")
+                    .arg(format!("/libpath:{}", sdk.join(sub).display()));
+            }
+        }
         // When using the bundled clang from a release (next to the exe), prefer
-        // the bundled lld-link so no Visual Studio link.exe is needed — only the
-        // Windows SDK/CRT import libs, which clang/lld discover themselves.
+        // the bundled lld-link so no Visual Studio link.exe is needed.
         for a in bundled_lld_args(&driver) {
             cmd.arg(a);
         }
@@ -391,6 +404,54 @@ fn bundled_lld_args(driver: &Path) -> Vec<String> {
     }
 }
 
+/// The lib subdirs an `xwin --preserve-ms-arch-notation` splat produces, relative
+/// to the sysroot root: the MSVC CRT, the Windows SDK `um` (system) libs, and the
+/// Universal CRT. Replayed as `/libpath:` so lld resolves the explicit
+/// `/defaultlib:{msvcrt,vcruntime,ucrt}` and the closure's `-lNAME` system libs.
+const WIN_SDK_LIB_SUBDIRS: [&str; 3] = ["crt/lib/x64", "sdk/lib/um/x64", "sdk/lib/ucrt/x64"];
+
+/// Locate a splatted Windows sysroot (the MS CRT + Windows SDK import libs).
+/// Order mirrors [`resolve_runtime_dir`]: an explicit `CB_WIN_SDK` override is
+/// trusted as-is; auto-discovered candidates — the per-user cache
+/// (`%LOCALAPPDATA%\cb\winsdk`, written by [`setup_windows_toolchain`]) then
+/// `<exe-dir>/sdk` (a site-admin pre-splat) — are accepted only when *complete*
+/// (see [`is_complete_sysroot`]), so a partial/interrupted splat is skipped.
+/// `None` ⇒ no bundled sysroot; clang/lld fall back to a system SDK (the
+/// unchanged dev path).
+fn win_sdk_dir() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os("CB_WIN_SDK")
+        && !v.is_empty()
+    {
+        return Some(PathBuf::from(v));
+    }
+    [per_user_sdk_cache(), exe_dir().map(|d| d.join("sdk"))]
+        .into_iter()
+        .flatten()
+        .find(|p| is_complete_sysroot(p))
+}
+
+/// The default per-user sysroot cache, `%LOCALAPPDATA%\cb\winsdk`. `None` when
+/// `LOCALAPPDATA` is unset (non-Windows, or a stripped environment).
+fn per_user_sdk_cache() -> Option<PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA")?;
+    if base.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(base).join("cb").join("winsdk"))
+}
+
+/// True when `dir` holds the sentinel import libs of a finished xwin splat — the
+/// signal that an auto-discovered sysroot is usable rather than a partial
+/// download. Mirrors [`has_runtime_archives`].
+fn is_complete_sysroot(dir: &Path) -> bool {
+    const SENTINELS: [&str; 3] = [
+        "crt/lib/x64/msvcrt.lib",
+        "sdk/lib/um/x64/kernel32.lib",
+        "sdk/lib/ucrt/x64/ucrt.lib",
+    ];
+    SENTINELS.iter().all(|rel| dir.join(rel).is_file())
+}
+
 /// True when `<cmd> --version` runs successfully — used to confirm a driver on
 /// PATH before committing to it.
 fn probe(cmd: &str) -> bool {
@@ -495,4 +556,114 @@ pub fn stage_runtime_bundle(dest: &Path) -> Result<BundleReport, String> {
         closure_libs,
         system_libs,
     })
+}
+
+/// Summary of a Windows toolchain fetch, for the driver to report.
+#[derive(Debug)]
+pub struct ToolchainReport {
+    /// The sysroot the CRT + Windows SDK import libs were splatted into;
+    /// [`win_sdk_dir`] discovers it here at link time.
+    pub dest: PathBuf,
+    /// The `xwin` tool that performed the splat.
+    pub xwin: PathBuf,
+}
+
+/// Fetch the Microsoft CRT + Windows SDK *import libraries* into a per-user cache
+/// so the AOT link needs no system-installed Visual Studio / Windows SDK. Shells
+/// out to a bundled `xwin` ([`find_xwin`]) which downloads the MS packages and
+/// splats just the import libs (no headers — the link step runs no compile
+/// phase). The MS content is governed by the Microsoft license; the driver prints
+/// a notice and passes `--accept-license` on the user's behalf.
+///
+/// Splats into `CB_WIN_SDK` if set, else `%LOCALAPPDATA%\cb\winsdk`; the xwin
+/// download cache lives under `<dest>/.xwin-cache` so nothing lands in the cwd.
+/// Windows-only — other platforms link AOT output with the system `cc`, so the
+/// driver short-circuits this as a no-op there (the guard here is defensive).
+pub fn setup_windows_toolchain() -> Result<ToolchainReport, String> {
+    if !cfg!(target_os = "windows") {
+        return Err("a Windows toolchain is only needed on Windows".to_string());
+    }
+    let dest = win_sdk_cache_target()?;
+    let xwin = find_xwin()?;
+    std::fs::create_dir_all(&dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+
+    // Global opts (before the subcommand): target x64, accept the MS license, and
+    // keep the download cache inside `dest`. `splat` opts: emit `x64` leaf dirs
+    // (--preserve-ms-arch-notation) and real files rather than symlinks on
+    // Windows (--disable-symlinks). Debug CRT libs are omitted (no flag).
+    let mut cmd = Command::new(&xwin);
+    cmd.arg("--accept-license")
+        .arg("--arch")
+        .arg("x86_64")
+        .arg("--cache-dir")
+        .arg(dest.join(".xwin-cache"))
+        .arg("splat")
+        .arg("--output")
+        .arg(&dest)
+        .arg("--preserve-ms-arch-notation")
+        .arg("--disable-symlinks");
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run xwin {}: {e}", xwin.display()))?;
+    // Judge success by the import libs, NOT xwin's exit code. xwin also splats
+    // the SDK *headers* and symlinks their versioned directory, which can fail on
+    // a non-admin Windows machine that lacks symlink privilege ("a required
+    // privilege is not held", os error 1314). We need only the libs — the link
+    // step runs no compile phase — so a complete lib sysroot is success even when
+    // xwin grumbled over header symlinks. Only when the libs are missing do we
+    // surface xwin's exit status + output for diagnosis.
+    if !is_complete_sysroot(&dest) {
+        return Err(format!(
+            "xwin did not produce a complete import-lib sysroot in {} (need {}); \
+             xwin exited {}:\n{}{}",
+            dest.display(),
+            WIN_SDK_LIB_SUBDIRS.join(", "),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    Ok(ToolchainReport { dest, xwin })
+}
+
+/// The directory `--setup-toolchain` splats into: `CB_WIN_SDK` if set, else the
+/// per-user cache `%LOCALAPPDATA%\cb\winsdk`.
+fn win_sdk_cache_target() -> Result<PathBuf, String> {
+    if let Some(v) = std::env::var_os("CB_WIN_SDK")
+        && !v.is_empty()
+    {
+        return Ok(PathBuf::from(v));
+    }
+    per_user_sdk_cache().ok_or_else(|| {
+        "cannot determine the toolchain cache dir: LOCALAPPDATA is unset; \
+         set CB_WIN_SDK to an explicit path"
+            .to_string()
+    })
+}
+
+/// Locate the bundled `xwin` tool. Order mirrors [`find_driver`]'s bundled
+/// lookup: `CB_XWIN` env override → `<exe-dir>/bin/xwin.exe` / `<exe-dir>/xwin.exe`
+/// (release layout) → `xwin` on PATH.
+fn find_xwin() -> Result<PathBuf, String> {
+    if let Some(v) = std::env::var_os("CB_XWIN")
+        && !v.is_empty()
+    {
+        return Ok(PathBuf::from(v));
+    }
+    if let Some(exe_d) = exe_dir() {
+        for sub in ["bin/xwin.exe", "xwin.exe"] {
+            let p = exe_d.join(sub);
+            if p.is_file() {
+                return Ok(p);
+            }
+        }
+    }
+    if probe("xwin") {
+        return Ok(PathBuf::from("xwin"));
+    }
+    Err(
+        "no xwin tool found: set CB_XWIN, ship a bundled xwin next to cb, or put \
+         xwin on PATH (install with `cargo install xwin`)"
+            .to_string(),
+    )
 }

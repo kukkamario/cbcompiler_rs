@@ -22,11 +22,14 @@ mod emit;
 #[cfg(feature = "codegen")]
 mod link;
 
-/// Stage a relocatable copy of the CoolBasic runtime under `dest` (which becomes
-/// `<exe-dir>/lib` in a published release), so a moved `cb` links AOT output
-/// without the build machine's paths. See [`link::stage_runtime_bundle`].
+/// Release-packaging / setup actions exposed to the driver:
+/// - [`link::stage_runtime_bundle`] stages a relocatable copy of the CoolBasic
+///   runtime under `dest` (which becomes `<exe-dir>/lib` in a published release),
+///   so a moved `cb` links AOT output without the build machine's paths;
+/// - [`link::setup_windows_toolchain`] fetches the Microsoft CRT + Windows SDK
+///   import libs into a per-user cache so AOT linking needs no installed VS/SDK.
 #[cfg(feature = "codegen")]
-pub use link::{BundleReport, stage_runtime_bundle};
+pub use link::{BundleReport, ToolchainReport, setup_windows_toolchain, stage_runtime_bundle};
 
 /// Optimization level for the AOT pipeline, selected by the driver's `-O` flag
 /// and injected at construction. It drives **both** knobs together: the IR-level

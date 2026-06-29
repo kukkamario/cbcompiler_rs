@@ -61,8 +61,18 @@ struct Cli {
     #[arg(long = "bundle-runtime", value_name = "DIR")]
     bundle_runtime: Option<PathBuf>,
 
+    /// Download the Microsoft CRT + Windows SDK import libraries into a per-user
+    /// cache (one-time), then exit — so the AOT backend can link without an
+    /// installed Visual Studio / Windows SDK. Windows + llvm backend only; a
+    /// no-op on other platforms. No source file is compiled.
+    #[arg(long = "setup-toolchain")]
+    setup_toolchain: bool,
+
     /// CoolBasic source file to compile.
-    #[arg(value_name = "FILE", required_unless_present = "bundle_runtime")]
+    #[arg(
+        value_name = "FILE",
+        required_unless_present_any = ["bundle_runtime", "setup_toolchain"]
+    )]
     file: Option<PathBuf>,
 }
 
@@ -228,6 +238,46 @@ fn bundle_runtime_cmd(_dir: &Path) -> ExitCode {
     ExitCode::from(exit::USAGE)
 }
 
+/// Handle `--setup-toolchain`: fetch the Microsoft CRT + Windows SDK import libs
+/// into a per-user cache and exit. Windows-only work; on other platforms the
+/// system `cc` links AOT output, so this is a friendly no-op so scripts stay
+/// portable. Like `--bundle-runtime`, only the llvm build can do it.
+#[cfg(feature = "llvm")]
+fn setup_toolchain_cmd() -> ExitCode {
+    if !cfg!(target_os = "windows") {
+        println!("cb: --setup-toolchain is only needed on Windows; nothing to do");
+        return ExitCode::SUCCESS;
+    }
+    // Auto-accept the Microsoft license on the user's behalf (passed to xwin),
+    // with a notice — these are Microsoft components, not ours to relicense.
+    println!(
+        "cb: downloading the Microsoft CRT + Windows SDK import libraries.\n\
+         cb: these are Microsoft components governed by the Microsoft Software License\n\
+         cb: Terms (https://visualstudio.microsoft.com/license-terms/); running\n\
+         cb: --setup-toolchain accepts them."
+    );
+    match cb_backend_llvm::setup_windows_toolchain() {
+        Ok(r) => {
+            println!(
+                "cb: Windows toolchain ready in {} (via {})",
+                r.dest.display(),
+                r.xwin.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("cb: --setup-toolchain failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(feature = "llvm"))]
+fn setup_toolchain_cmd() -> ExitCode {
+    eprintln!("cb: --setup-toolchain requires the llvm backend (rebuild with --features llvm)");
+    ExitCode::from(exit::USAGE)
+}
+
 fn main() -> ExitCode {
     let Cli {
         backend: backend_arg,
@@ -236,16 +286,20 @@ fn main() -> ExitCode {
         output,
         opt,
         bundle_runtime,
+        setup_toolchain,
         file,
     } = Cli::parse();
 
-    // `--bundle-runtime DIR` is a standalone utility action: stage the runtime
-    // and exit before any source compile (clap makes FILE optional in this case).
+    // Standalone utility actions: run and exit before any source compile (clap
+    // makes FILE optional when either is present).
     if let Some(dir) = bundle_runtime {
         return bundle_runtime_cmd(&dir);
     }
-    // clap's `required_unless_present` guarantees FILE here.
-    let path = file.expect("clap requires FILE unless --bundle-runtime is given");
+    if setup_toolchain {
+        return setup_toolchain_cmd();
+    }
+    // clap's `required_unless_present_any` guarantees FILE here.
+    let path = file.expect("clap requires FILE unless a utility action is given");
 
     // Resolve the requested backend up front so an explicitly named but
     // invalid/unavailable backend fails fast — but don't *require* one: a
