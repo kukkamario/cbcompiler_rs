@@ -16,7 +16,7 @@ name: Windows LLVM
 # vcpkg's `files` binary cache (VCPKG_BINARY_SOURCES) via actions/cache,
 # populating the master-scope cache. Release tag runs then restore it warm. The
 # weekly schedule keeps the entry inside the 7-day eviction window during quiet
-# periods and re-warms after a windows-latest image / MSVC bump changes vcpkg's
+# periods and re-warms after a windows-2022 image / MSVC bump changes vcpkg's
 # ABI hash. PRs that touch the build read the warm master cache (read-only — a
 # PR cannot write the master scope anyway, the fork-PR cache-poisoning guard) to
 # smoke the link path without rebuilding from scratch.
@@ -76,7 +76,11 @@ env:
 jobs:
   windows-llvm:
     name: Windows vcpkg LLVM (cache warm + AOT smoke)
-    runs-on: windows-latest
+    # Pinned to windows-2022 to MATCH release.yml's Windows job (same MSVC → same
+    # vcpkg ABI → shared cache; and the runtime must be built by the stable
+    # VS2022 toolchain whose STL symbols xwin's fetched libs export — see the
+    # runs-on note in release.yml). Do not change to windows-latest.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
         with:
@@ -142,7 +146,7 @@ jobs:
           key: vcpkg-bincache-${{ runner.os }}-${{ hashFiles('runtime/vcpkg/ports/llvm/**', 'runtime/vcpkg-triplets/x64-windows-static-md.cmake', 'runtime/vcpkg.json') }}-${{ github.run_id }}
 
       # AOT-compile a non-graphics program to a native exe (cb finds the pinned
-      # clang via LLVM_SYS_181_PREFIX; windows-latest supplies the MS CRT/SDK
+      # clang via LLVM_SYS_181_PREFIX; the windows-2022 runner supplies the MS CRT/SDK
       # import libs) and assert its stdout matches the interpreter oracle. Builds
       # the .cb from a string array — a PowerShell here-string's closing delimiter
       # collides with YAML block-scalar dedenting.

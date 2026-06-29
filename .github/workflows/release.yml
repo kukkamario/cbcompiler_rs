@@ -91,7 +91,14 @@ jobs:
   # ships. See packaging/RELEASE-README-windows.md.
   windows:
     name: Release (Windows x64)
-    runs-on: windows-latest
+    # Pinned to windows-2022 (stable VS2022), NOT windows-latest. The runtime
+    # (Allegro/OpenAL) is compiled here, and the released `cb --setup-toolchain`
+    # (xwin) fetches stable VS2022-era CRT/STL import libs. windows-latest's
+    # VS18/MSVC 14.51 emits newer STL symbols (e.g. __std_max_element_*) that
+    # xwin's libs don't export, so the self-contained AOT link fails with
+    # undefined symbols. Pinning also keeps builds reproducible and the vcpkg
+    # cache ABI stable, and matches the smoke job's host.
+    runs-on: windows-2022
     needs: create-release
     env:
       # Read-only `files` binary cache: a tag run can't write the master scope,
