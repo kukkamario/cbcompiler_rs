@@ -1,0 +1,10 @@
+# Force LF in the working tree on every platform. The lexer/snapshot fixtures
+# are byte-offset sensitive, so a CRLF checkout (GitHub's Windows runners default
+# to core.autocrlf=true) shifts every offset and fails the snapshot tests. This
+# keeps Windows checkouts identical to Linux.
+* text=auto eol=lf
+
+# Binary assets — never apply line-ending conversion.
+*.bmp binary
+*.wav binary
+*.til binary

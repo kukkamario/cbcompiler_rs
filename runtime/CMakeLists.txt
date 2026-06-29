@@ -165,11 +165,20 @@ if(CB_ALLEGRO_SYSTEM)
     # Dynamic system Allegro: emit bare `-l` names for the allegro modules. Their
     # own transitive deps (libpng, freetype, …) load via the shared objects'
     # NEEDED entries at runtime, so they need not appear on the link line, and a
-    # published binary stays small (the user supplies liballegro5).
+    # published binary stays small (the user supplies liballegro5). We use the
+    # canonical module link names (`liballegro.so` etc., via the -dev symlinks)
+    # rather than pkg-config's ALLEGRO_LIBRARIES, which can resolve to a versioned
+    # soname (`liballegro.so.5.2`) that the linker's `-l` lookup cannot satisfy.
     set(_cb_link_content "")
-    foreach(_lib IN LISTS ALLEGRO_LIBRARIES)
+    foreach(_lib allegro allegro_primitives allegro_image allegro_font
+                 allegro_ttf allegro_audio allegro_acodec)
         string(APPEND _cb_link_content "-l${_lib}\n")
     endforeach()
+    # cb_font.cpp links fontconfig (when found) for named-font resolution; it is
+    # not an Allegro module, so add it to the closure explicitly.
+    if(Fontconfig_FOUND)
+        string(APPEND _cb_link_content "-lfontconfig\n")
+    endif()
 else()
     # Static linking (vcpkg): Rust must be told about every transitive dependency
     # (libpng, zlib, ogg, vorbis, ...) and Windows system lib (dwmapi, mfplat,
