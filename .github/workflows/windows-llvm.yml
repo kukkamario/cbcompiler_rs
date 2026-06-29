@@ -58,7 +58,7 @@ env:
 
 jobs:
   windows-llvm:
-    name: Windows vcpkg LLVM (cache warm)
+    name: Windows vcpkg LLVM (cache warm + AOT smoke)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -106,3 +106,28 @@ jobs:
       # proving the Windows LLVM link still works.
       - name: Build (release, llvm backend)
         run: cargo build -p cb-driver --release --features llvm --locked
+
+      # AOT-compile a non-graphics program to a native exe (cb finds the pinned
+      # clang via LLVM_SYS_181_PREFIX; windows-latest supplies the MS CRT/SDK
+      # import libs) and assert its stdout matches the interpreter oracle. Builds
+      # the .cb from a string array — a PowerShell here-string's closing delimiter
+      # collides with YAML block-scalar dedenting.
+      - name: AOT vs interp smoke
+        shell: pwsh
+        run: |
+          $src = @(
+            'Print "WINDOWS_LLVM_OK"',
+            'Dim i',
+            'For i = 1 To 3',
+            '    Print i * i',
+            'Next i'
+          )
+          Set-Content -Path smoke.cb -Value $src -Encoding utf8
+          & ./target/release/cb.exe --backend llvm smoke.cb -o smoke_aot.exe
+          $aot = (& ./smoke_aot.exe | Out-String).Trim()
+          $interp = (& ./target/release/cb.exe --backend interp smoke.cb | Out-String).Trim()
+          Write-Host "AOT:`n$aot"
+          Write-Host "interp:`n$interp"
+          if ($aot -ne $interp) { throw "AOT output differs from interp oracle" }
+          if ($aot -notmatch 'WINDOWS_LLVM_OK') { throw "expected marker missing from output" }
+          Write-Host "AOT vs interp smoke OK"
