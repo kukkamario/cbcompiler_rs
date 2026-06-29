@@ -1,0 +1,38 @@
+name: Container DLL probe
+
+# TEMPORARY diagnostic (manual only): checks which OS DLLs cb.exe load-imports
+# are present in candidate Windows container base images, so the no-SDK smoke
+# test can pick a base image cb.exe can actually load in. Remove once settled.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe base-image DLLs
+    runs-on: windows-2022
+    steps:
+      - name: Check DLL presence per image
+        shell: pwsh
+        run: |
+          $imgs = @(
+            'mcr.microsoft.com/windows/servercore:ltsc2022',
+            'mcr.microsoft.com/windows/server:ltsc2022'
+          )
+          # cb.exe's non-CRT load-time imports (CRT ones come from the VC++ Redist,
+          # so they're expected MISSING in a bare base image).
+          $dlls = @(
+            'dsound.dll','gdiplus.dll','winmm.dll','avrt.dll',
+            'opengl32.dll','glu32.dll','d3d9.dll',
+            'msvcp140.dll','vcruntime140.dll'
+          )
+          foreach ($img in $imgs) {
+            Write-Host "==== $img ===="
+            docker pull $img | Out-Null
+            foreach ($d in $dlls) {
+              $r = docker run --rm $img cmd /c "if exist C:\Windows\System32\$d (echo PRESENT) else (echo MISSING)"
+              Write-Host ("  {0,-22} {1}" -f $d, ($r -join '').Trim())
+            }
+          }
