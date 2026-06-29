@@ -1,0 +1,108 @@
+name: Windows LLVM
+
+# Builds the heavy Windows toolchain the release archive depends on (vcpkg
+# static-md LLVM 18 + the Allegro runtime closure), purely to keep its vcpkg
+# binary cache warm — and, on relevant PRs, to validate the Windows LLVM/AOT
+# link path before a tag is cut.
+#
+# Why this exists separately from release.yml: the GitHub Actions cache is
+# ref-scoped. A run can READ caches from its own ref plus the default branch, but
+# can only WRITE to its own ref scope. Releases run on fresh tag refs
+# (refs/tags/vX.Y.Z), so a release can never read a previous tag's cache — it can
+# only read the default-branch (master) scope. Nothing wrote LLVM into that scope
+# before, so every release rebuilt LLVM from source (~1h+).
+#
+# This workflow runs the same vcpkg build ON master (and weekly) with
+# x-gha,readwrite, populating the master-scope cache. Release tag runs then
+# restore it warm. The weekly schedule keeps the entry inside the 7-day eviction
+# window during quiet periods and re-warms after a windows-latest image / MSVC
+# bump changes vcpkg's ABI hash. PRs that touch the build read the warm master
+# cache (read-only — a PR cannot write the master scope anyway, the fork-PR
+# cache-poisoning guard) to smoke the link path without rebuilding from scratch.
+#
+# The triplet overlay, runner image, and submodule-pinned vcpkg/LLVM versions
+# MUST match release.yml exactly, or the vcpkg ABI hash (hence the cache key)
+# diverges and the release won't hit this cache.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    # Only PRs that can affect the vcpkg/LLVM/runtime build or the link path. A
+    # path-filtered job never reports a status on unrelated PRs, so do NOT mark
+    # it a required check (GitHub leaves a never-run required check pending).
+    paths:
+      - ".github/workflows/windows-llvm.yml"
+      - "crates/cb-backend-llvm/**"
+      - "crates/cb-runtime-sys/**"
+      - "crates/cb-driver/**"
+      - "runtime/**"
+      - "Cargo.lock"
+  schedule:
+    # Mondays 06:00 UTC — cache keep-alive + re-warm after toolchain image bumps.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Write the binary cache only on trusted refs (master push / schedule). On PRs
+  # restore read-only: a PR can't write the master scope (fork-PR cache-poisoning
+  # guard), so a write would only fill a throwaway per-PR scope the release can't
+  # read.
+  VCPKG_BINARY_SOURCES: "${{ github.event_name == 'pull_request' && 'clear;x-gha,read' || 'clear;x-gha,readwrite' }}"
+  # Release-only static-md triplet — MUST match release.yml so the cache keys line
+  # up (the triplet feeds vcpkg's ABI hash).
+  VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/runtime/vcpkg-triplets
+
+jobs:
+  windows-llvm:
+    name: Windows vcpkg LLVM (cache warm)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Export GitHub Actions cache env for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // vcpkg's x-gha binary-cache provider reads these from the env; the
+            // var names differ across GitHub's cache-service versions, so export
+            // all of them and let vcpkg pick whichever it supports.
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Bootstrap vcpkg
+        run: runtime\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+        shell: cmd
+
+      - name: Install LLVM 18 (vcpkg, static-md)
+        run: runtime\vcpkg\vcpkg.exe install llvm:x64-windows-static-md
+        shell: cmd
+
+      - name: Set up llvm-sys prefix junction
+        shell: pwsh
+        run: |
+          $inst = "runtime/vcpkg/installed/x64-windows-static-md"
+          $prefix = "$inst/llvm-sys-prefix"
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+          if (-not (Test-Path "$prefix/bin")) {
+            New-Item -ItemType Junction -Path "$prefix/bin" -Target "$inst/tools/llvm" | Out-Null
+          }
+          "LLVM_SYS_181_PREFIX=$((Resolve-Path $prefix).Path)" >> $env:GITHUB_ENV
+
+      # Drives the Allegro runtime vcpkg build through CMake and links the
+      # llvm-backend `cb`, warming both the LLVM and Allegro binary caches and
+      # proving the Windows LLVM link still works.
+      - name: Build (release, llvm backend)
+        run: cargo build -p cb-driver --release --features llvm --locked
