@@ -661,7 +661,9 @@ fn find_xwin() -> Result<PathBuf, String> {
     if probe("xwin") {
         return Ok(PathBuf::from("xwin"));
     }
-    Err("no xwin tool found: set CB_XWIN, ship a bundled xwin next to cb, or put \
+    Err(
+        "no xwin tool found: set CB_XWIN, ship a bundled xwin next to cb, or put \
          xwin on PATH (install with `cargo install xwin`)"
-        .to_string())
+            .to_string(),
+    )
 }
