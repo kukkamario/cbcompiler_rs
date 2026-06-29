@@ -89,6 +89,10 @@ jobs:
     needs: create-release
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      # Build vcpkg ports (LLVM, Allegro) release-only — half the build vs the
+      # default debug+release. Applies to both the classic `vcpkg install llvm`
+      # and the manifest Allegro build the cargo step drives through CMake.
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/runtime/vcpkg-triplets
     steps:
       - uses: actions/checkout@v5
         with:

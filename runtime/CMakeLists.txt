@@ -7,18 +7,24 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Allegro: prefer the CMake CONFIG package (vcpkg ships it; gives per-module
-# Allegro::* targets, statically linked under a -static-md triplet). When it is
-# absent — a system install via Debian/Ubuntu liballegro5-dev — fall back to
-# pkg-config, which links Allegro *dynamically* against the user's system libs.
-find_package(Allegro CONFIG QUIET)
-if(Allegro_FOUND)
+# Allegro source differs by platform:
+#   • Windows  → vcpkg's CONFIG package (static Allegro::* targets, -static-md).
+#   • else     → a system install via pkg-config (Debian/Ubuntu liballegro5-dev),
+#                linked *dynamically*.
+# We pick by platform rather than by "is a CONFIG package present", because
+# Ubuntu's liballegro5-dev *also* ships a CMake CONFIG package — but it describes
+# the dynamic libraries, whose versioned sonames (liballegro.so.5.2) the
+# static-closure path cannot consume. Forcing pkg-config off-Windows keeps the
+# dynamic path deterministic.
+if(WIN32)
+    find_package(Allegro CONFIG REQUIRED)
     set(CB_ALLEGRO_SYSTEM OFF)
 else()
     set(CB_ALLEGRO_SYSTEM ON)
     find_package(PkgConfig REQUIRED)
     # One imported target (PkgConfig::ALLEGRO) carrying every module's
-    # include/link flags; ALLEGRO_LIBRARIES holds the bare lib names.
+    # include/link flags (used for compile flags; the link closure is emitted
+    # from the canonical module names below).
     pkg_check_modules(ALLEGRO REQUIRED IMPORTED_TARGET
         allegro-5
         allegro_primitives-5
