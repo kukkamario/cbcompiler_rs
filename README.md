@@ -6,11 +6,9 @@ with a pluggable backend design:
 
 - **Interpreter backend** (`cb-backend-interp`) — the reference implementation,
   built for debuggability. Default.
-- **LLVM backend** (`cb-backend-llvm`) — for AOT native codegen. Currently a
-  stub; no LLVM toolchain is required yet.
+- **LLVM backend** (`cb-backend-llvm`) — for AOT native codegen.
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture and [`docs/`](docs/) for the
-language and runtime references.
+See [`docs/`](docs/) for the language and runtime references.
 
 ---
 
@@ -34,7 +32,7 @@ links **Allegro 5** and its addons (`primitives`, `image`, `font`, `ttf`, `audio
 > [SDK-free build](#sdk-free-build-no-allegro-toolchain) — Rust + a C++ compiler,
 > no CMake/Allegro/vcpkg — so `cargo build` and `cargo test --workspace` work on
 > any machine (CI, cloud, containers). Graphics/input/audio are omitted and those
-> fixtures skip. Ideal for CI.
+> fixtures skip.
 
 ### Why vcpkg?
 
