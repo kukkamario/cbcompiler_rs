@@ -1,10 +1,8 @@
-// FD-013 Batch 4 graphics smoke demo (manual — opens a real window).
+// Graphics demo — a ball bounces around the window; close the window to exit.
+// Exercises Screen, Cls/ClsColor, Color, Circle (filled), Box, and DrawScreen
+// together.
 //
-//   cargo run -p cb-driver -- examples/bounce.cb
-//
-// A ball bounces around the window; close the window to exit. Exercises Screen,
-// Cls/ClsColor, Color, Circle (filled), Box, and DrawScreen together. Not an
-// automated test — window code can't run headless.
+//   cb examples/bounce.cb
 
 Screen 640, 480
 ClsColor 16, 16, 48

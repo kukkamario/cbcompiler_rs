@@ -1,13 +1,10 @@
-// FD-018 Text & Fonts showcase (manual — opens a real window).
-//
-//   cargo run -p cb-driver -- examples/text_showcase.cb
-//
-// Draws lots of on-screen text in many faces, styles, sizes, colours, and
-// alignments, exercising every command in the Text & Fonts surface:
+// Text & Fonts showcase — draws lots of on-screen text in many faces, styles,
+// sizes, colours, and alignments, exercising the Text & Fonts commands:
 //   LoadFont / SetFont / DeleteFont, Text / CenterText / VerticalText,
 //   Locate / AddText / ClearText, TextWidth / TextHeight, and the default font.
-// Press Esc (or close the window) to quit. Not an automated test — window code
-// can't run headless.
+// Press Esc (or close the window) to quit.
+//
+//   cb examples/text_showcase.cb
 
 Screen 800, 600
 ClsColor 12, 12, 24

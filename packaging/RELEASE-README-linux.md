@@ -2,10 +2,12 @@
 
 This archive contains:
 
-| Path    | What it is                                                              |
-| ------- | ----------------------------------------------------------------------- |
-| `cb`    | The compiler — both backends: `--backend interp` and `--backend llvm`.  |
-| `lib/`  | The CoolBasic runtime the AOT (`llvm`) backend links into your program. |
+| Path        | What it is                                                              |
+| ----------- | ----------------------------------------------------------------------- |
+| `cb`        | The compiler — both backends: `--backend interp` and `--backend llvm`.  |
+| `lib/`      | The CoolBasic runtime the AOT (`llvm`) backend links into your program. |
+| `examples/` | Sample CoolBasic programs to run right away (`.cb`).                     |
+| `docs/`     | Language reference: `cb_syntax.md` (syntax) and `cb_runtime.md` (built-in commands). |
 
 `cb` links Allegro 5 **dynamically**, so the Allegro shared libraries must be
 present to run `cb` at all.
@@ -27,12 +29,12 @@ sudo apt install \
 ## Usage
 
 ```sh
-# Run a program with the interpreter:
-./cb --backend interp program.cb
+# Run a bundled example with the interpreter:
+./cb --backend interp examples/bounce.cb
 
 # Compile a native executable and run it:
-./cb --backend llvm program.cb -o program
-./program
+./cb --backend llvm examples/bounce.cb -o bounce
+./bounce
 ```
 
 The AOT backend finds its runtime in `lib/` next to `cb`; keep the two together.

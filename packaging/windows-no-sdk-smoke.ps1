@@ -1,12 +1,12 @@
 # Smoke test for the self-contained Windows AOT toolchain, run INSIDE a clean
-# Windows Server Core container with NO Visual Studio / Windows SDK installed.
+# Windows base-image container with NO Visual Studio / Windows SDK installed.
 # Proves `cb --setup-toolchain` + `cb --backend llvm` produce a runnable exe
 # whose stdout + exit code match the interpreter oracle, using only the per-user
 # Microsoft import-lib fetch — i.e. the released compiler is self-contained.
 #
 # Expects the extracted release tree mounted at C:\dist (cb.exe, bin\, lib\, and
 # this script copied in as smoke.ps1). Adds only the VC++ Redistributable, which
-# is needed to *run* cb.exe + produced exes; Server Core does not ship it.
+# is needed to *run* cb.exe + produced exes; the base image does not ship it.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 

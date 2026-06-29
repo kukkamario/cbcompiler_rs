@@ -1,12 +1,9 @@
-// FD-013 Batch 5 input smoke demo (manual — opens a real window).
+// Input demo — move the square with the arrow keys; hold the left mouse button
+// to change its colour; the square also snaps to the mouse on a right-click.
+// Press Esc (or close the window) to quit. Exercises KeyDown, EscapeKey,
+// MouseX/Y, MouseDown, and MouseHit together with the graphics surface.
 //
-//   cargo run -p cb-driver -- examples/input_demo.cb
-//
-// Move the square with the arrow keys; hold the left mouse button to change its
-// colour; the square also snaps to the mouse on a right-click. Press Esc (or
-// close the window) to quit. Exercises KeyDown, EscapeKey, MouseX/Y, MouseDown,
-// and MouseHit together with the graphics surface. Not an automated test —
-// window/input code can't run headless.
+//   cb examples/input_demo.cb
 
 Screen 640, 480
 ClsColor 16, 16, 48

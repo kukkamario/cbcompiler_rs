@@ -2,16 +2,19 @@
 
 This archive contains:
 
-| Path      | What it is                                                                 |
-| --------- | ------------------------------------------------------------------------- |
-| `cb.exe`  | The compiler — both backends: `--backend interp` and `--backend llvm`.     |
-| `lib\`    | The CoolBasic runtime + the Allegro static libraries the AOT backend uses. |
-| `bin\`    | A bundled `clang.exe` + `lld-link.exe` (the AOT link driver) and `xwin.exe`, which fetches the Microsoft CRT + Windows SDK import libraries on first use. |
+| Path        | What it is                                                                 |
+| ----------- | ------------------------------------------------------------------------- |
+| `cb.exe`    | The compiler — both backends: `--backend interp` and `--backend llvm`.     |
+| `lib\`      | The CoolBasic runtime + the Allegro static libraries the AOT backend uses. |
+| `bin\`      | A bundled `clang.exe` + `lld-link.exe` (the AOT link driver) and `xwin.exe`, which fetches the Microsoft CRT + Windows SDK import libraries on first use. |
+| `examples\` | Sample CoolBasic programs to run right away (`.cb`).                        |
+| `docs\`     | Language reference: `cb_syntax.md` (syntax) and `cb_runtime.md` (built-in commands). |
 
-Allegro is linked **statically**, so the interpreter backend is self-contained:
+Allegro is linked **statically**, so the interpreter backend is self-contained.
+Try one of the bundled examples:
 
 ```bat
-cb.exe --backend interp program.cb
+cb.exe --backend interp examples\bounce.cb
 ```
 
 ## AOT compilation (`--backend llvm`)
