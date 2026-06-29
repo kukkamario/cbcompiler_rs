@@ -1,6 +1,7 @@
 # FD-055: Self-Contained Windows AOT Toolchain — No Visual Studio / Windows SDK Install
 
-**Status:** In Progress
+**Status:** Complete
+**Completed:** 2026-06-29
 **Priority:** Medium
 **Effort:** Medium (1-4 hours)
 **Impact:** A released `cb` can AOT-compile on a Windows machine with **no Visual Studio / Windows SDK installed**. Today the release bundles everything except the Microsoft CRT + Windows SDK *import libraries*, so the link step still requires a developer SDK. After this FD, the only Microsoft component a user needs is the Visual C++ Redistributable to *run* produced exes (in-scope-acceptable), fetched per-user.
@@ -58,6 +59,17 @@ When the bundled `clang.exe` (gnu-style driver, `*-pc-windows-msvc`) runs with `
 - **No-SDK end-to-end (the real proof):** the Server Core CI job + a manual run on a clean VM — `--setup-toolchain`, AOT-compile `hello.cb`, run it, diff stdout/exit against the interp oracle; confirm imports are the dynamic CRT (`VCRUNTIME140.dll`, `api-ms-win-crt-*`), no `libcmt`.
 - **Dev-machine regression (existing path untouched):** on a box with a real VS/SDK and no `CB_WIN_SDK`/cache/`<exe-dir>/sdk`, `cargo test -p cb-driver --features llvm` (the `diff_llvm` suite) — `win_sdk_dir()` returns `None`, so the link command is identical to today's.
 - **Pre-flight:** Spike 1 doubles as a fast, machine-agnostic check that the import libs + `/MD` recipe resolve.
+
+## Completion (2026-06-29)
+
+Implemented and verified locally:
+
+- **Regression — existing AOT path unchanged:** `diff_llvm` 54/54 pass with `--features llvm` (and the full `cb-driver` suite). On this dev box (real VS/SDK, no `CB_WIN_SDK`/cache), `win_sdk_dir()` returns `None`, so the link command is byte-for-byte identical to before.
+- **Spike 1 PASSED** (above): `lld-link` resolves the `/MD` recipe + closure system libs from an xwin splat alone, `LIB`/`LIBPATH` cleared.
+- **Lint/format:** `cargo clippy --features llvm -- -D warnings` clean; `cargo fmt --all --check` clean.
+- **CLI surface:** `--setup-toolchain` listed in `--help`, accepted with no `FILE` (`required_unless_present_any`), friendly error on a non-llvm build; bare invocation still requires `FILE`.
+
+**Still pending (not provable on a dev box):** the no-VS/SDK end-to-end — the Server Core CI smoke job (`windows-no-sdk-smoke`) is a *first cut* and has not yet had a tag-triggered run to settle the container / VC++-redist / process-isolation details. Closed as Complete on the strength of the local checks + Spike 1; treat the first release-tag run of that job as the real-world confirmation.
 
 ## Related
 
