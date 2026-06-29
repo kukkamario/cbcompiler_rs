@@ -134,7 +134,10 @@ jobs:
           $prefix = "$inst/llvm-sys-prefix"
           New-Item -ItemType Directory -Force -Path $prefix | Out-Null
           if (-not (Test-Path "$prefix/bin")) {
-            New-Item -ItemType Junction -Path "$prefix/bin" -Target "$inst/tools/llvm" | Out-Null
+            # New-Item -ItemType Junction requires an ABSOLUTE -Target; resolve it
+            # (the LLVM install step above created $inst/tools/llvm).
+            $target = (Resolve-Path "$inst/tools/llvm").Path
+            New-Item -ItemType Junction -Path "$prefix/bin" -Target $target | Out-Null
           }
           "LLVM_SYS_181_PREFIX=$((Resolve-Path $prefix).Path)" >> $env:GITHUB_ENV
 
