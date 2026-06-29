@@ -185,19 +185,22 @@ jobs:
 
   # Smoke-test the released archive on a clean Windows with NO Visual Studio /
   # Windows SDK — the one configuration neither a dev box nor the VS-equipped
-  # build runner can prove. Runs in the FULL Windows base-image container (only
-  # the VC++ Redist is added, needed to *run* cb.exe + produced exes): fetch the
-  # import libs with `cb --setup-toolchain`, AOT-compile, and diff the native
-  # output against the interpreter oracle. The actual test logic lives in
+  # build runner can prove. Runs in the Windows Server base-image container
+  # (`windows/server`, which carries far more of the OS than Server Core); only
+  # the VC++ Redist is added, needed to *run* cb.exe + produced exes. Then: fetch
+  # the import libs with `cb --setup-toolchain`, AOT-compile, and diff the native
+  # output against the interpreter oracle. The test logic lives in
   # packaging/windows-no-sdk-smoke.ps1.
   #
-  # Why the full `windows` image and not `servercore`: cb.exe links the full
-  # Allegro runtime, so it load-imports the desktop graphics/audio DLLs (DSOUND,
-  # gdiplus, OPENGL32, WINMM, …). Headless Server Core omits those, so the OS
-  # loader fails cb.exe with STATUS_DLL_NOT_FOUND (0xC0000135) before its main
-  # runs — a missing DLL has nothing to do with the VS/SDK this test isolates.
-  # The full Windows base image carries the desktop DLL set while still shipping
-  # no VS/SDK, which is exactly the environment this test needs.
+  # Why `windows/server` and not `servercore`: cb.exe links the full Allegro
+  # runtime, so it load-imports desktop graphics/audio DLLs (DSOUND, AVRT,
+  # OPENGL32, glu32, …). Headless Server Core omits several of them (verified:
+  # dsound/avrt/opengl32/glu32 absent), so the OS loader fails cb.exe with
+  # STATUS_DLL_NOT_FOUND (0xC0000135) before its main runs — a missing OS DLL has
+  # nothing to do with the VS/SDK this test isolates. The `windows/server` image
+  # ships all of them while still having no VC++ runtime/SDK (only the Redist is
+  # added), which is exactly the environment this test needs. (The full
+  # `mcr.microsoft.com/windows` image has no ltsc2022 tag, so it isn't an option.)
   #
   # Host pinned to windows-2022 so the ltsc2022 image runs under fast process
   # isolation (the container base image must match the host build).
@@ -224,5 +227,5 @@ jobs:
         shell: pwsh
         run: |
           docker run --rm -v "${env:CB_DIST}:C:\dist" `
-            mcr.microsoft.com/windows:ltsc2022 `
+            mcr.microsoft.com/windows/server:ltsc2022 `
             powershell -NoProfile -ExecutionPolicy Bypass -File C:\dist\smoke.ps1
