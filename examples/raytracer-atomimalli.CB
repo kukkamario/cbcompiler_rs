@@ -105,7 +105,7 @@ function render() as integer
 
     fovc#=Tan(fov/2)/Cos(fov/2)'sama kulma joka resolla(pystysuunnassa)
 
-    // lock2(2) //writeonly lock
+    lock 2 //writeonly lock
     For x#=0 To screenw-1
         For y#=0 To screenh-1
             campos as Vec = newVec(0,0,0)
@@ -118,7 +118,7 @@ function render() as integer
             putpixel x,y,r,g,b
         Next
     Next
-    // unlock
+    unlock
 endfunction
 
 function cast(pos as Vec, dir as Vec) as rayHit

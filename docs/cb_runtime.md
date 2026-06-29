@@ -203,10 +203,22 @@ coordinates by `+0.5` for pixel-center alignment.
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `PutPixel` | `x: Integer, y: Integer, color: Integer, buffer: Integer` | — | Writes packed `0xRRGGBB` to a target; `buffer`=0 means current target (`PutPixel2` is an alias) |
-| `GetPixel` | `x: Integer, y: Integer, buffer: Integer` | `Integer` | Reads a pixel as packed `0xRRGGBB`; `buffer`=0 means current target (`GetPixel2` is an alias) |
-| `Lock` | `buffer: Integer` | — | Locks a render target for direct pixel access (`buffer`=0 = current) |
-| `Unlock` | `buffer: Integer` | — | Unlocks a render target, flushing pixel writes |
+| `PutPixel` | `x: Integer, y: Integer, r: Integer, g: Integer, b: Integer` | — | Writes an RGB pixel to the current render target |
+| `PutPixel` | `x: Integer, y: Integer, r: Integer, g: Integer, b: Integer, a: Integer` | — | Writes an RGBA pixel to the current render target |
+| `PutPixel` | `x: Integer, y: Integer, argb: Integer` | — | Writes a packed 32-bit `0xAARRGGBB` pixel (`PutPixel2` is the alias for this form) |
+| `GetPixel` | `x: Integer, y: Integer` | `Integer` | Reads the current render target as packed `0xAARRGGBB` (`GetPixel2` is an alias) |
+| `GetPixel` | `img: Image, x: Integer, y: Integer` | `Integer` | Reads a pixel from a specific image as packed `0xAARRGGBB` |
+| `Lock` | `[mode: Integer]` | — | Locks the **current** render target for direct pixel access. `mode` (optional): 0=read/write (default), 1=read-only, 2=write-only |
+| `Lock` | `img: Image [, mode: Integer]` | — | Locks a specific image's bitmap; `mode` as above |
+| `Unlock` | `[img: Image]` | — | Unlocks the current render target (or `img`), flushing pixel writes back |
+
+**Locking.** `Lock`/`Unlock` bracket a run of `PutPixel`/`GetPixel` calls: locking
+maps the target bitmap into directly-addressable memory so per-pixel access skips
+the per-call driver round-trip, and `Unlock` flushes writes back. Always pair a
+`Lock` with an `Unlock`. The optional `mode` lets the runtime pick a faster
+transfer path when you only read (`1`) or only write (`2`) — e.g. `Lock 2` for a
+pure pixel-generation loop. Which surface is locked follows the current render
+target (`DrawToImage`/`DrawToScreen`) unless an `Image` is passed explicitly.
 
 ### Render targets
 
@@ -910,7 +922,9 @@ and divergences as of the latest runtime work:
   to Allegro's built-in 8×8 font so `Text`/`TextWidth`/`TextHeight` never crash
   and work headless. `VerticalText` is documented as `(x, y, s)`.
 - **Pixel-precise ARGB.** `PutPixel`/`GetPixel` use packed 32-bit **ARGB** (vs
-  the `0xRRGGBB` packing classic CoolBasic used).
+  the `0xRRGGBB` packing classic CoolBasic used). `Lock`/`Unlock` (current target
+  or an explicit `Image`, with the optional read/write/`mode` access flag) bracket
+  them — the access-mode form is a `Lock` overload, not a separate `Lock2`.
 - **Camera** is implemented: the world↔screen transform core (`PositionCamera`,
   `MoveCamera`, `TranslateCamera`, `RotateCamera`, `TurnCamera`,
   `CameraX`/`Y`/`Angle`), `DrawToWorld` (wired into every user draw command), and
