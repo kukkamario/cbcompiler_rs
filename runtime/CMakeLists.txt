@@ -7,7 +7,28 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Allegro CONFIG REQUIRED)
+# Allegro: prefer the CMake CONFIG package (vcpkg ships it; gives per-module
+# Allegro::* targets, statically linked under a -static-md triplet). When it is
+# absent — a system install via Debian/Ubuntu liballegro5-dev — fall back to
+# pkg-config, which links Allegro *dynamically* against the user's system libs.
+find_package(Allegro CONFIG QUIET)
+if(Allegro_FOUND)
+    set(CB_ALLEGRO_SYSTEM OFF)
+else()
+    set(CB_ALLEGRO_SYSTEM ON)
+    find_package(PkgConfig REQUIRED)
+    # One imported target (PkgConfig::ALLEGRO) carrying every module's
+    # include/link flags; ALLEGRO_LIBRARIES holds the bare lib names.
+    pkg_check_modules(ALLEGRO REQUIRED IMPORTED_TARGET
+        allegro-5
+        allegro_primitives-5
+        allegro_image-5
+        allegro_font-5
+        allegro_ttf-5
+        allegro_audio-5
+        allegro_acodec-5)
+    message(STATUS "Allegro: using system pkg-config (dynamic linkage)")
+endif()
 
 # ─── Core library ────────────────────────────────────────────────────────
 # The irreducible, plugin-facing runtime: the opaque string type + its
@@ -47,46 +68,54 @@ add_library(cb_runtime STATIC
 target_include_directories(cb_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cb_runtime PUBLIC cb_runtime_core)
 
-set(CB_ALLEGRO_MODULES
-    Allegro::allegro
-    Allegro::allegro_primitives
-    Allegro::allegro_image
-    Allegro::allegro_font
-    Allegro::allegro_ttf
-    Allegro::allegro_audio
-    Allegro::allegro_acodec
-)
+if(CB_ALLEGRO_SYSTEM)
+    # System (pkg-config) Allegro: one imported target carrying every module's
+    # flags. Dynamic linkage, so Allegro's own transitive closure (libpng,
+    # freetype, ogg, …) loads via the shared objects' NEEDED entries at runtime —
+    # only the allegro modules themselves go on the link line.
+    set(CB_LINK_SEEDS PkgConfig::ALLEGRO)
+else()
+    set(CB_ALLEGRO_MODULES
+        Allegro::allegro
+        Allegro::allegro_primitives
+        Allegro::allegro_image
+        Allegro::allegro_font
+        Allegro::allegro_ttf
+        Allegro::allegro_audio
+        Allegro::allegro_acodec
+    )
 
-# Allegro's public headers gate function declarations on
-# ALLEGRO_STATICLINK — without it they're declared __declspec(dllimport),
-# producing __imp_al_* symbols the static .libs can't satisfy. vcpkg's
-# port doesn't propagate this via INTERFACE_COMPILE_DEFINITIONS, so set
-# it explicitly when targeting a static triplet.
-set(CB_LINK_SEEDS ${CB_ALLEGRO_MODULES})
-if(VCPKG_TARGET_TRIPLET MATCHES "static")
-    target_compile_definitions(cb_runtime PRIVATE ALLEGRO_STATICLINK)
-    # vcpkg's allegro5 port forgets to list shell32 in its static-build
-    # INTERFACE_LINK_LIBRARIES, but allegro_win_get_path needs SHGetFolderPathW.
-    if(WIN32)
-        list(APPEND CB_LINK_SEEDS shell32)
-        # allegro_audio's WASAPI backend (openal-soft) boosts its mixer thread via
-        # MMCSS — AvSetMmThreadCharacteristicsW / AvRevertMmThreadCharacteristics
-        # from avrt.lib. Like shell32 and fmt below, the static openal
-        # references it but the vcpkg port doesn't surface it to the transitive
-        # walk (openal is recorded as an absolute path), so add it explicitly.
-        list(APPEND CB_LINK_SEEDS avrt)
+    # Allegro's public headers gate function declarations on
+    # ALLEGRO_STATICLINK — without it they're declared __declspec(dllimport),
+    # producing __imp_al_* symbols the static .libs can't satisfy. vcpkg's
+    # port doesn't propagate this via INTERFACE_COMPILE_DEFINITIONS, so set
+    # it explicitly when targeting a static triplet.
+    set(CB_LINK_SEEDS ${CB_ALLEGRO_MODULES})
+    if(VCPKG_TARGET_TRIPLET MATCHES "static")
+        target_compile_definitions(cb_runtime PRIVATE ALLEGRO_STATICLINK)
+        # vcpkg's allegro5 port forgets to list shell32 in its static-build
+        # INTERFACE_LINK_LIBRARIES, but allegro_win_get_path needs SHGetFolderPathW.
+        if(WIN32)
+            list(APPEND CB_LINK_SEEDS shell32)
+            # allegro_audio's WASAPI backend (openal-soft) boosts its mixer thread via
+            # MMCSS — AvSetMmThreadCharacteristicsW / AvRevertMmThreadCharacteristics
+            # from avrt.lib. Like shell32 and fmt below, the static openal
+            # references it but the vcpkg port doesn't surface it to the transitive
+            # walk (openal is recorded as an absolute path), so add it explicitly.
+            list(APPEND CB_LINK_SEEDS avrt)
+        endif()
     endif()
-endif()
 
-# openal-soft (Allegro's audio backend, pulled in via allegro_audio) de-vendors
-# its bundled {fmt} to the standalone `fmt` package. Allegro records openal as
-# an absolute library path rather than an imported target, so the transitive
-# walk below never reaches openal's own `fmt` dependency. Add it to the seeds
-# explicitly so libfmt lands on the final link line — after openal, which
-# references it (GNU ld resolves left-to-right).
-find_package(fmt CONFIG QUIET)
-if(TARGET fmt::fmt)
-    list(APPEND CB_LINK_SEEDS fmt::fmt)
+    # openal-soft (Allegro's audio backend, pulled in via allegro_audio) de-vendors
+    # its bundled {fmt} to the standalone `fmt` package. Allegro records openal as
+    # an absolute library path rather than an imported target, so the transitive
+    # walk below never reaches openal's own `fmt` dependency. Add it to the seeds
+    # explicitly so libfmt lands on the final link line — after openal, which
+    # references it (GNU ld resolves left-to-right).
+    find_package(fmt CONFIG QUIET)
+    if(TARGET fmt::fmt)
+        list(APPEND CB_LINK_SEEDS fmt::fmt)
+    endif()
 endif()
 
 target_link_libraries(cb_runtime PRIVATE ${CB_LINK_SEEDS})
@@ -108,11 +137,8 @@ if(NOT WIN32)
     endif()
 endif()
 
-# With static linking, Rust must be told about every transitive dependency
-# (libpng, zlib, ogg, vorbis, ...) and Windows system lib (dwmapi, mfplat,
-# ...) that CMake would otherwise inject automatically. Walk the
-# INTERFACE_LINK_LIBRARIES of the seed Allegro modules to collect the
-# full closure, then emit it via file(GENERATE) for build.rs to parse.
+# Emit the link closure for build.rs to replay onto rustc (the interp `cb`) and
+# the standalone AOT link. Two shapes depending on how Allegro was found.
 function(cb_collect_transitive_links seeds out_var)
     set(_visited "")
     set(_pending ${seeds})
@@ -135,19 +161,34 @@ function(cb_collect_transitive_links seeds out_var)
     set(${out_var} "${_visited}" PARENT_SCOPE)
 endfunction()
 
-cb_collect_transitive_links("${CB_LINK_SEEDS}" _cb_all_links)
+if(CB_ALLEGRO_SYSTEM)
+    # Dynamic system Allegro: emit bare `-l` names for the allegro modules. Their
+    # own transitive deps (libpng, freetype, …) load via the shared objects'
+    # NEEDED entries at runtime, so they need not appear on the link line, and a
+    # published binary stays small (the user supplies liballegro5).
+    set(_cb_link_content "")
+    foreach(_lib IN LISTS ALLEGRO_LIBRARIES)
+        string(APPEND _cb_link_content "-l${_lib}\n")
+    endforeach()
+else()
+    # Static linking (vcpkg): Rust must be told about every transitive dependency
+    # (libpng, zlib, ogg, vorbis, ...) and Windows system lib (dwmapi, mfplat,
+    # ...) that CMake would otherwise inject automatically. Walk the
+    # INTERFACE_LINK_LIBRARIES of the seed Allegro modules to collect the closure.
+    cb_collect_transitive_links("${CB_LINK_SEEDS}" _cb_all_links)
 
-set(_cb_link_content "")
-foreach(_link IN LISTS _cb_all_links)
-    if(TARGET ${_link})
-        get_target_property(_type ${_link} TYPE)
-        if(NOT _type STREQUAL "INTERFACE_LIBRARY")
-            string(APPEND _cb_link_content "$<TARGET_LINKER_FILE:${_link}>\n")
+    set(_cb_link_content "")
+    foreach(_link IN LISTS _cb_all_links)
+        if(TARGET ${_link})
+            get_target_property(_type ${_link} TYPE)
+            if(NOT _type STREQUAL "INTERFACE_LIBRARY")
+                string(APPEND _cb_link_content "$<TARGET_LINKER_FILE:${_link}>\n")
+            endif()
+        elseif(_link AND NOT _link MATCHES "-NOTFOUND$")
+            string(APPEND _cb_link_content "${_link}\n")
         endif()
-    elseif(_link AND NOT _link MATCHES "-NOTFOUND$")
-        string(APPEND _cb_link_content "${_link}\n")
-    endif()
-endforeach()
+    endforeach()
+endif()
 
 file(GENERATE
     OUTPUT "${CMAKE_BINARY_DIR}/cb_runtime_link_libs_$<CONFIG>.txt"

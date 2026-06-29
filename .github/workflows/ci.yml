@@ -95,3 +95,72 @@ jobs:
 
       - name: Diff test (driver, llvm + interp backends)
         run: cargo test -p cb-driver --features llvm --locked
+
+  # Windows build agent. Proves the workspace builds and the full suite passes on
+  # Windows with only the MSVC toolchain — SDK-free, so no vcpkg/Allegro/LLVM and
+  # no display. The full Allegro + LLVM Windows path (vcpkg) is heavy (LLVM builds
+  # from source) and is exercised at release time instead (.github/workflows/release.yml).
+  windows-sdk-free:
+    name: Windows SDK-free build + tests
+    runs-on: windows-latest
+    env:
+      CB_RUNTIME_FORCE_SDK_FREE: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test (workspace)
+        run: cargo test --workspace --locked
+
+      - name: Clippy (workspace, all targets)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # Proves the full runtime against a *system* Allegro (Debian/Ubuntu
+  # liballegro5-dev), linked dynamically via the pkg-config fallback in
+  # runtime/CMakeLists.txt — the path a published Linux build uses. Builds the
+  # llvm-backend `cb` (CB_RUNTIME_REQUIRE_ALLEGRO makes a missing Allegro fatal)
+  # and runs a non-graphics AOT-vs-interp smoke (no display needed). Allegro
+  # here comes from apt — fast, no vcpkg.
+  linux-allegro:
+    name: Linux full runtime (system Allegro) + AOT smoke
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_181_PREFIX: /usr/lib/llvm-18
+      CB_RUNTIME_REQUIRE_ALLEGRO: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Allegro 5 + LLVM 18 + CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            liballegro5-dev liballegro-acodec5-dev liballegro-audio5-dev \
+            liballegro-image5-dev liballegro-ttf5-dev libfontconfig1-dev \
+            llvm-18-dev libpolly-18-dev cmake
+
+      - name: Build cb (system Allegro, llvm backend)
+        run: cargo build -p cb-driver --features llvm --locked
+
+      - name: AOT vs interp smoke (no display)
+        run: |
+          printf 'Print "ALLEGRO_LINUX_OK"\nDim i\nFor i = 1 To 3\n    Print i * i\nNext i\n' > smoke.cb
+          ./target/debug/cb --backend llvm smoke.cb -o smoke_aot
+          out_aot="$(./smoke_aot)"
+          out_interp="$(./target/debug/cb --backend interp smoke.cb)"
+          echo "AOT:    $out_aot"
+          echo "interp: $out_interp"
+          test "$out_aot" = "$out_interp"
+          echo "$out_aot" | grep -q ALLEGRO_LINUX_OK

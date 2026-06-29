@@ -227,10 +227,15 @@ fn build_full(out_dir: &Path, runtime_src: &Path) -> Result<(), String> {
     let build_dir = out_dir.join("cmake-build");
     std::fs::create_dir_all(&build_dir).map_err(|e| format!("create build dir: {e}"))?;
 
-    // Configure
+    // Configure. Pin the build type to Release: multi-config generators (MSVC)
+    // ignore it (we pass `--config Release` at build time), but single-config
+    // generators (Make/Ninja on Linux) need it so `$<CONFIG>` resolves to
+    // "Release" — making the link list deterministically `..._Release.txt`
+    // (the first candidate below) rather than the empty-suffix guess.
     let mut cmake_args = vec![
         runtime_src.to_str().unwrap().to_string(),
         format!("-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={}", out_dir.display()),
+        "-DCMAKE_BUILD_TYPE=Release".to_string(),
     ];
     if vcpkg_toolchain.exists() {
         cmake_args.push(format!(

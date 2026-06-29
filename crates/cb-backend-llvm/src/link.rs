@@ -6,15 +6,22 @@
 //! driver rather than a bare `ld`/`lld` so the toolchain (CRT, SDK lib paths) is
 //! auto-discovered — no `vcvars`/`-libpath:` wrangling.
 //!
-//! The runtime location is not hardcoded: it comes from the `CB_RT_*` env vars
-//! the build script re-exported from `cb-runtime-sys`'s `DEP_CB_RUNTIME_*`
-//! metadata, so we link *whatever* runtime was built — the full Allegro closure
-//! locally, or the SDK-free core on a machine/CI without Allegro.
+//! The runtime location is resolved at *use* time, not hardcoded, so a relocated
+//! `cb` (a published release moved off the build machine) finds its runtime next
+//! to the executable. Resolution order — see [`resolve_runtime_dir`]:
+//!   1. `CB_RUNTIME_DIR` env var (explicit override);
+//!   2. `<exe-dir>/lib` (the layout [`stage_runtime_bundle`] / the release
+//!      archive produces), when it actually holds the runtime archives;
+//!   3. the build-time `CB_RT_*` metadata `cb-runtime-sys` published — the
+//!      unchanged dev / `cargo test` path.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Runtime link metadata, re-exported by build.rs from cb-runtime-sys.
+// Runtime link metadata, re-exported by build.rs from cb-runtime-sys. These are
+// the *build-time* locations; at use time they serve only as the dev fallback
+// (see [`resolve_runtime_dir`]).
 const FLAVOR: &str = env!("CB_RT_FLAVOR"); // "full" | "sdkfree"
 const LIB_DIR: &str = env!("CB_RT_LIB_DIR"); // cb-runtime-sys OUT_DIR
 const RUNTIME_LIBS: &str = env!("CB_RT_RUNTIME_LIBS"); // comma-separated archive names
@@ -37,6 +44,19 @@ pub enum WholeArchive {
     Yes,
 }
 
+/// The resolved location of the runtime archives + (full flavor) the Allegro
+/// closure for *this* invocation of `cb`.
+struct RuntimeDir {
+    /// Directory holding the `cb_runtime[_core]` (or `cb_runtime_sdkfree`)
+    /// archives.
+    lib_dir: PathBuf,
+    /// `true` for a relocated/bundled dir: the closure is read from
+    /// `<lib_dir>/closure.txt` with lib entries relative to `lib_dir`. `false`
+    /// for the build-time fallback: the closure is read from the absolute
+    /// `CB_RT_CLOSURE_LIST` file.
+    bundled: bool,
+}
+
 /// Link `obj` into the executable `exe`, pulling in the runtime closure.
 pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
     if FLAVOR != "full" && FLAVOR != "sdkfree" {
@@ -46,6 +66,7 @@ pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
         ));
     }
 
+    let rt = resolve_runtime_dir();
     let driver = find_driver()?;
     let mut cmd = Command::new(&driver);
     cmd.arg(obj);
@@ -69,31 +90,21 @@ pub fn link(obj: &Path, exe: &Path, whole: WholeArchive) -> Result<(), String> {
         for lib in ["msvcrt", "vcruntime", "ucrt"] {
             cmd.arg("-Xlinker").arg(format!("/defaultlib:{lib}"));
         }
+        // When using the bundled clang from a release (next to the exe), prefer
+        // the bundled lld-link so no Visual Studio link.exe is needed — only the
+        // Windows SDK/CRT import libs, which clang/lld discover themselves.
+        for a in bundled_lld_args(&driver) {
+            cmd.arg(a);
+        }
     }
 
     // The CoolBasic runtime archives (cb_runtime[/_core] or cb_runtime_sdkfree).
-    let archives = resolve_runtime_archives()?;
+    let archives = resolve_runtime_archives(&rt.lib_dir)?;
     add_runtime_archives(&mut cmd, &archives, whole);
 
-    // The transitive Allegro/system closure (full flavor only): absolute lib
-    // paths go to the linker verbatim; bare system names become `-l<name>`.
-    if FLAVOR == "full" && !CLOSURE_LIST.is_empty() {
-        let content = std::fs::read_to_string(CLOSURE_LIST)
-            .map_err(|e| format!("read runtime closure list {CLOSURE_LIST}: {e}"))?;
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if Path::new(line).is_absolute() {
-                cmd.arg(line);
-            } else {
-                let name = line.trim_start_matches("-l").trim_end_matches(".lib");
-                if !name.is_empty() {
-                    cmd.arg(format!("-l{name}"));
-                }
-            }
-        }
+    // The transitive Allegro/system closure (full flavor only).
+    for arg in closure_args(&rt)? {
+        cmd.arg(arg);
     }
 
     // The runtime is C++; name the C++ standard library explicitly and last (the
@@ -158,11 +169,111 @@ fn add_runtime_archives(cmd: &mut Command, archives: &[PathBuf], whole: WholeArc
     }
 }
 
+/// Resolve the runtime directory for this invocation (see the module docs).
+fn resolve_runtime_dir() -> RuntimeDir {
+    if let Some(dir) = std::env::var_os("CB_RUNTIME_DIR")
+        && !dir.is_empty()
+    {
+        return RuntimeDir {
+            lib_dir: PathBuf::from(dir),
+            bundled: true,
+        };
+    }
+    if let Some(exe_d) = exe_dir() {
+        let lib = exe_d.join("lib");
+        if has_runtime_archives(&lib) {
+            return RuntimeDir {
+                lib_dir: lib,
+                bundled: true,
+            };
+        }
+    }
+    RuntimeDir {
+        lib_dir: PathBuf::from(LIB_DIR),
+        bundled: false,
+    }
+}
+
+/// The directory containing the running `cb` executable.
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(Path::to_path_buf)
+}
+
+/// True when every runtime archive resolves under `dir` — the signal that an
+/// `<exe-dir>/lib` is a real bundle rather than an empty/absent directory.
+fn has_runtime_archives(dir: &Path) -> bool {
+    RUNTIME_LIBS
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .all(|name| resolve_lib(dir, name).is_ok())
+}
+
+/// The transitive Allegro/system closure as ready-to-pass linker args (full
+/// flavor only; empty for sdkfree). Bundled dirs read `<lib_dir>/closure.txt`
+/// (lib filenames relative to the dir, `-lNAME` system libs verbatim); the
+/// build-time fallback reads the absolute `CB_RT_CLOSURE_LIST` (absolute lib
+/// paths verbatim, bare names → `-lNAME`).
+fn closure_args(rt: &RuntimeDir) -> Result<Vec<OsString>, String> {
+    if FLAVOR != "full" {
+        return Ok(Vec::new());
+    }
+
+    let (list_path, base): (PathBuf, Option<&Path>) = if rt.bundled {
+        let p = rt.lib_dir.join("closure.txt");
+        if !p.is_file() {
+            return Err(format!(
+                "bundled runtime at {} is missing closure.txt (malformed bundle)",
+                rt.lib_dir.display()
+            ));
+        }
+        (p, Some(rt.lib_dir.as_path()))
+    } else {
+        if CLOSURE_LIST.is_empty() {
+            return Ok(Vec::new());
+        }
+        (PathBuf::from(CLOSURE_LIST), None)
+    };
+
+    let content = std::fs::read_to_string(&list_path)
+        .map_err(|e| format!("read runtime closure list {}: {e}", list_path.display()))?;
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match base {
+            // Bundled: `-lNAME` is a system lib; anything else is a lib filename
+            // relative to the bundle dir.
+            Some(base) => {
+                if let Some(name) = line.strip_prefix("-l") {
+                    out.push(OsString::from(format!("-l{name}")));
+                } else {
+                    out.push(base.join(line).into_os_string());
+                }
+            }
+            // Build-time list: absolute path → verbatim; bare name → -lNAME.
+            None => {
+                if Path::new(line).is_absolute() {
+                    out.push(OsString::from(line));
+                } else {
+                    let name = line.trim_start_matches("-l").trim_end_matches(".lib");
+                    if !name.is_empty() {
+                        out.push(OsString::from(format!("-l{name}")));
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Resolve each runtime archive name (from `CB_RT_RUNTIME_LIBS`) to a file on
-/// disk under the runtime's lib dir. Handles the MSVC multi-config `Release/`
-/// subdir and the `lib<name>.a` Unix naming.
-fn resolve_runtime_archives() -> Result<Vec<PathBuf>, String> {
-    let lib_dir = Path::new(LIB_DIR);
+/// disk under `lib_dir`.
+fn resolve_runtime_archives(lib_dir: &Path) -> Result<Vec<PathBuf>, String> {
     RUNTIME_LIBS
         .split(',')
         .filter(|s| !s.is_empty())
@@ -170,6 +281,8 @@ fn resolve_runtime_archives() -> Result<Vec<PathBuf>, String> {
         .collect()
 }
 
+/// Resolve one archive `name` to a file under `lib_dir`, handling the MSVC
+/// multi-config `Release/` subdir and the `lib<name>.a` Unix naming.
 fn resolve_lib(lib_dir: &Path, name: &str) -> Result<PathBuf, String> {
     let candidates = [
         lib_dir.join(format!("{name}.lib")),
@@ -190,12 +303,28 @@ fn resolve_lib(lib_dir: &Path, name: &str) -> Result<PathBuf, String> {
         })
 }
 
-/// Locate the link driver. On Windows, anchor on the vcpkg LLVM 18 prefix so we
-/// use the pinned clang and not any stray clang on PATH;
-/// vcpkg surfaces `clang.exe` under `bin/` only via the junction prefix, else at
-/// `tools/llvm/`. On Unix, prefer the build-time discovered `cc`, then PATH.
+/// Locate the link driver. Order on every platform: the `CB_LINK_DRIVER`
+/// override, then a bundled driver next to the exe (release), then the
+/// platform-specific dev/system search.
+///
+/// Windows anchors on the bundled/vcpkg LLVM 18 `clang.exe`; Unix prefers the
+/// build-time discovered `cc`, then PATH.
 fn find_driver() -> Result<PathBuf, String> {
+    if let Some(d) = env_driver() {
+        return Ok(d);
+    }
+
     if cfg!(target_os = "windows") {
+        // Bundled clang next to the exe (release layout).
+        if let Some(exe_d) = exe_dir() {
+            for sub in ["bin/clang.exe", "clang.exe"] {
+                let p = exe_d.join(sub);
+                if p.is_file() {
+                    return Ok(p);
+                }
+            }
+        }
+        // Dev: the vcpkg LLVM 18 prefix (`bin/` via the junction, else `tools/llvm/`).
         if !LLVM_SYS_PREFIX.is_empty() {
             for sub in ["bin/clang.exe", "tools/llvm/clang.exe"] {
                 let p = Path::new(LLVM_SYS_PREFIX).join(sub);
@@ -208,11 +337,20 @@ fn find_driver() -> Result<PathBuf, String> {
             return Ok(PathBuf::from("clang"));
         }
         Err(
-            "no clang link driver found: set LLVM_SYS_181_PREFIX to the vcpkg \
-             LLVM 18 prefix, or put clang on PATH"
+            "no clang link driver found: set CB_LINK_DRIVER, ship a bundled \
+             clang next to cb, set LLVM_SYS_181_PREFIX, or put clang on PATH"
                 .to_string(),
         )
     } else {
+        // Bundled clang next to the exe (release layout), if any.
+        if let Some(exe_d) = exe_dir() {
+            for sub in ["bin/clang", "clang"] {
+                let p = exe_d.join(sub);
+                if p.is_file() {
+                    return Ok(p);
+                }
+            }
+        }
         if !HOST_CC.is_empty() && Path::new(HOST_CC).is_file() {
             return Ok(PathBuf::from(HOST_CC));
         }
@@ -225,6 +363,34 @@ fn find_driver() -> Result<PathBuf, String> {
     }
 }
 
+/// The `CB_LINK_DRIVER` override, when set to a non-empty value.
+fn env_driver() -> Option<PathBuf> {
+    let v = std::env::var_os("CB_LINK_DRIVER")?;
+    if v.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(v))
+    }
+}
+
+/// Linker args that steer clang at a bundled `lld-link.exe`. Returned only when
+/// `driver` is the bundled clang under the exe dir *and* an `lld-link.exe` sits
+/// beside it — i.e. a Windows release. Dev builds (clang from the vcpkg prefix
+/// or PATH) get an empty list and keep using the MSVC `link.exe`, unchanged.
+fn bundled_lld_args(driver: &Path) -> Vec<String> {
+    let (Some(dir), Some(exe_d)) = (driver.parent(), exe_dir()) else {
+        return Vec::new();
+    };
+    if !dir.starts_with(&exe_d) {
+        return Vec::new();
+    }
+    if dir.join("lld-link.exe").is_file() {
+        vec!["-fuse-ld=lld".to_string(), format!("-B{}", dir.display())]
+    } else {
+        Vec::new()
+    }
+}
+
 /// True when `<cmd> --version` runs successfully — used to confirm a driver on
 /// PATH before committing to it.
 fn probe(cmd: &str) -> bool {
@@ -233,4 +399,100 @@ fn probe(cmd: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// Summary of a staged runtime bundle, for the driver to report.
+#[derive(Debug)]
+pub struct BundleReport {
+    /// Directory the bundle was written to.
+    pub dest: PathBuf,
+    /// The runtime flavor staged: `"full"` or `"sdkfree"`.
+    pub flavor: &'static str,
+    /// Number of CoolBasic runtime archives copied.
+    pub archives: usize,
+    /// Number of closure lib *files* copied into the bundle (Allegro + its
+    /// transitive static deps; 0 for sdkfree and for the dynamic/system flavor).
+    pub closure_libs: usize,
+    /// Number of bare system libs recorded as `-lNAME` (resolved from the user's
+    /// system at AOT link time, not copied).
+    pub system_libs: usize,
+}
+
+/// Stage a relocatable copy of the runtime under `dest` so a `cb` placed beside
+/// it (with `dest` as `<exe-dir>/lib`) links AOT output without the build
+/// machine's paths.
+///
+/// Copies the runtime archives and, for the full flavor, every absolute closure
+/// lib file, then writes a `closure.txt` whose lib entries are *relative* to
+/// `dest` (bare system libs are recorded as `-lNAME` and resolved from the
+/// user's system at link time). Always reads the *build-time* metadata — the
+/// runtime this `cb` was built against — so it is meant to run from the same
+/// build that produced the binary being packaged.
+pub fn stage_runtime_bundle(dest: &Path) -> Result<BundleReport, String> {
+    if FLAVOR != "full" && FLAVOR != "sdkfree" {
+        return Err(format!(
+            "runtime link metadata missing (flavor {FLAVOR:?}); \
+             was cb-runtime-sys built under the codegen feature?"
+        ));
+    }
+    std::fs::create_dir_all(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+
+    // Runtime archives, from the build-time lib dir.
+    let archives = resolve_runtime_archives(Path::new(LIB_DIR))?;
+    for a in &archives {
+        let name = a
+            .file_name()
+            .ok_or_else(|| format!("archive path has no file name: {}", a.display()))?;
+        let to = dest.join(name);
+        std::fs::copy(a, &to)
+            .map_err(|e| format!("copy {} -> {}: {e}", a.display(), to.display()))?;
+    }
+
+    // Closure (full flavor): copy each absolute lib file, record it relatively;
+    // pass bare system names through as `-lNAME`.
+    let mut closure_lines: Vec<String> = Vec::new();
+    let mut closure_libs = 0usize;
+    let mut system_libs = 0usize;
+    if FLAVOR == "full" && !CLOSURE_LIST.is_empty() {
+        let content = std::fs::read_to_string(CLOSURE_LIST)
+            .map_err(|e| format!("read closure list {CLOSURE_LIST}: {e}"))?;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if Path::new(line).is_absolute() {
+                let src = Path::new(line);
+                let name = src
+                    .file_name()
+                    .ok_or_else(|| format!("closure lib path has no file name: {line}"))?;
+                let to = dest.join(name);
+                std::fs::copy(src, &to)
+                    .map_err(|e| format!("copy {} -> {}: {e}", src.display(), to.display()))?;
+                closure_lines.push(name.to_string_lossy().into_owned());
+                closure_libs += 1;
+            } else {
+                let nm = line.trim_start_matches("-l").trim_end_matches(".lib");
+                if !nm.is_empty() {
+                    closure_lines.push(format!("-l{nm}"));
+                    system_libs += 1;
+                }
+            }
+        }
+    }
+    if FLAVOR == "full" {
+        let closure_path = dest.join("closure.txt");
+        let mut body = closure_lines.join("\n");
+        body.push('\n');
+        std::fs::write(&closure_path, body)
+            .map_err(|e| format!("write {}: {e}", closure_path.display()))?;
+    }
+
+    Ok(BundleReport {
+        dest: dest.to_path_buf(),
+        flavor: FLAVOR,
+        archives: archives.len(),
+        closure_libs,
+        system_libs,
+    })
 }

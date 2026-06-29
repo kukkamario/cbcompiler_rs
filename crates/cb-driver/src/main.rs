@@ -54,9 +54,16 @@ struct Cli {
     #[arg(short = 'O', value_name = "LEVEL", default_value = "2", value_parser = parse_opt_level)]
     opt: OptLevelArg,
 
+    /// Stage the relocatable runtime bundle (CoolBasic runtime archives + the
+    /// Allegro closure) into DIR, then exit — DIR becomes `<exe-dir>/lib` in a
+    /// published release so a moved `cb` can link AOT output. Requires the llvm
+    /// backend; no source file is compiled.
+    #[arg(long = "bundle-runtime", value_name = "DIR")]
+    bundle_runtime: Option<PathBuf>,
+
     /// CoolBasic source file to compile.
-    #[arg(value_name = "FILE")]
-    file: PathBuf,
+    #[arg(value_name = "FILE", required_unless_present = "bundle_runtime")]
+    file: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -191,6 +198,36 @@ fn parse_backend(name: &str) -> Result<Backend, String> {
     }
 }
 
+/// Handle `--bundle-runtime DIR`: stage the relocatable runtime and exit. Only
+/// the llvm build can stage (the metadata + closure live in cb-backend-llvm);
+/// other builds report the gap rather than silently doing nothing.
+#[cfg(feature = "llvm")]
+fn bundle_runtime_cmd(dir: &Path) -> ExitCode {
+    match cb_backend_llvm::stage_runtime_bundle(dir) {
+        Ok(r) => {
+            println!(
+                "cb: staged {} runtime into {} ({} archive(s), {} bundled lib(s), {} system lib(s))",
+                r.flavor,
+                r.dest.display(),
+                r.archives,
+                r.closure_libs,
+                r.system_libs
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("cb: --bundle-runtime failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(feature = "llvm"))]
+fn bundle_runtime_cmd(_dir: &Path) -> ExitCode {
+    eprintln!("cb: --bundle-runtime requires the llvm backend (rebuild with --features llvm)");
+    ExitCode::from(exit::USAGE)
+}
+
 fn main() -> ExitCode {
     let Cli {
         backend: backend_arg,
@@ -198,8 +235,17 @@ fn main() -> ExitCode {
         dump_ir,
         output,
         opt,
-        file: path,
+        bundle_runtime,
+        file,
     } = Cli::parse();
+
+    // `--bundle-runtime DIR` is a standalone utility action: stage the runtime
+    // and exit before any source compile (clap makes FILE optional in this case).
+    if let Some(dir) = bundle_runtime {
+        return bundle_runtime_cmd(&dir);
+    }
+    // clap's `required_unless_present` guarantees FILE here.
+    let path = file.expect("clap requires FILE unless --bundle-runtime is given");
 
     // Resolve the requested backend up front so an explicitly named but
     // invalid/unavailable backend fails fast — but don't *require* one: a
