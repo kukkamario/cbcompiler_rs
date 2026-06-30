@@ -1040,7 +1040,32 @@ step(2.5)        // count = 1
 step(2.5, 4)     // count = 4
 ```
 
-There is **no function overloading**: each function name is bound to exactly one definition.
+**Function overloading.** A name may have several definitions as long as their
+signatures are distinguishable, and a call selects the matching one by its
+argument types:
+
+```cb
+Function area(s As Int) As Int        : Return s * s        : EndFunction
+Function area(w As Int, h As Int) As Int : Return w * h     : EndFunction
+area(5)       // 25  — one-argument overload
+area(3, 4)    // 12  — two-argument overload
+```
+
+Resolution rules:
+
+- Overloads are distinguished by their **parameter types** (and count), not by
+  parameter names or defaults. Two definitions with the *same* parameter types
+  **and** the same return type are a redefinition error.
+- A call ranks candidates by argument fit: an **exact** type match is preferred,
+  then a **widening** implicit conversion, then a **narrowing** one (§3.4). If no
+  candidate accepts the arguments it is an error; if two remain equally good the
+  call is **ambiguous** and is rejected.
+- Overloads **may differ only by return type**, and a **sub** (no return type)
+  may share a name with a **function**. Because a sub is a statement and a
+  function call yields a value, the call context picks between them: a
+  statement-position call selects the sub, an expression-position call selects
+  the function. Any tie a context cannot break is ambiguous (see also §7.4 for
+  taking the address of such a name).
 
 **Parameter passing rules:**
 
@@ -1074,7 +1099,37 @@ fnPointer = MySub               // takes address of MySub
 fnPointer(0.42, "Hello", "x")   // calls through the pointer
 ```
 
-The compiler decides "address-of" vs "call" by the expression's expected type and the absence/presence of `()`. Because there is no overloading (§7.2), `MySub` always names exactly one function, so this is unambiguous.
+The compiler decides "address-of" vs "call" by the expression's expected type
+and the absence/presence of `()`.
+
+**Address-of an overloaded name.** When a name has several overloads (§7.2), a
+bare reference to it cannot be resolved on its own — the **destination's declared
+function-pointer type** selects the overload, by an **exact** signature match
+(equal parameter types *and* the same return-ness). The presence or absence of
+`As <ReturnType>` in that type discriminates a function from a sub of the same
+parameters:
+
+```cb
+Function handle(x As Integer)              // sub
+EndFunction
+Function handle(x As Integer) As Integer   // function
+    Return x
+EndFunction
+
+Dim asSub  As Function(Integer)              // no `As` → the sub
+Dim asFunc As Function(Integer) As Integer   // `As Integer` → the function
+asSub  = handle    // unambiguous
+asFunc = handle    // unambiguous
+```
+
+The destination type can come from a variable, a function-pointer parameter, or
+a function's return type. If the type is **not stated** — e.g. a bare
+`x = handle` whose `x` would be inferred — the reference is an error: type
+inference does not apply to an overloaded name. A type that matches no overload,
+or matches more than one, is likewise an error.
+
+A name with a **single** definition needs no destination type; `MySub` above
+always resolves to that one function.
 
 Functions cannot capture non-global variables, so a function pointer is always a plain typed pointer — never a closure.
 

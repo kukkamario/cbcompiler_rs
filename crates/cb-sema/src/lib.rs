@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use cb_diagnostics::{Diagnostic, Interner, SourceMap, Symbol};
+use cb_diagnostics::{Diagnostic, Interner, SourceMap};
 use cb_frontend::{Arena, NodeId};
 
 mod check;
@@ -18,8 +18,8 @@ mod types;
 
 pub use convert::{Conversion, ConversionTable};
 pub use scope::{
-    ConstValue, DeclKind, Declaration, FieldInfo, OverloadVariant, ParamInfo, ScopeId, ScopeKind,
-    SymbolTable,
+    ConstValue, DeclKind, Declaration, FieldInfo, OverloadTarget, OverloadVariant, ParamInfo,
+    ScopeId, ScopeKind, SymbolTable,
 };
 pub use types::Type;
 
@@ -30,8 +30,15 @@ pub use cb_ir::{
 /// How a call expression was resolved during type checking.
 #[derive(Clone, Debug)]
 pub enum ResolvedCall {
-    UserDefined { name: Symbol },
-    RuntimeFn { c_symbol: String },
+    /// A user-defined function or sub, identified by the `NodeId` of its
+    /// `Stmt::Function` declaration — the stable per-definition key that lets
+    /// overloads sharing a name resolve to distinct targets.
+    UserDefined {
+        def: NodeId,
+    },
+    RuntimeFn {
+        c_symbol: String,
+    },
 }
 
 /// Whether a Delete operand is an lvalue (variable/field/index) or rvalue.
@@ -67,6 +74,11 @@ pub struct SemaResult {
     pub delete_classes: HashMap<NodeId, DeleteClass>,
     /// Resolved call target for each `Expr::Call` node.
     pub resolved_calls: HashMap<NodeId, ResolvedCall>,
+    /// For each bare identifier taken as a function-pointer *value* that named
+    /// an overload set, the `NodeId` of the `Stmt::Function` the destination
+    /// fn-pointer type selected (cb_syntax.md §7.4). Non-overloaded function
+    /// names resolve directly in lowering and are absent here.
+    pub resolved_fn_refs: HashMap<NodeId, NodeId>,
     /// Diagnostics produced during analysis.
     pub diagnostics: Vec<Diagnostic>,
     /// The string interner used during analysis (needed by the lowering pass).

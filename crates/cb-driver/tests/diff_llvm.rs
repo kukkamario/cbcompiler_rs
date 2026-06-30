@@ -231,6 +231,13 @@ diff_tests! {
     fnptr_null_equality,
 }
 
+// User function overloading: by-param-type/arity resolution,
+// sub-vs-function sharing a name, and overloaded address-of into a typed
+// destination + function-pointer parameter.
+diff_tests! {
+    overloading,
+}
+
 // Fault fixtures: programs that trap at runtime (out-of-bounds / empty /
 // negative array index, null fn-ptr call). Beyond stdout + exit-code parity,
 // these assert the produced exe wrote a non-empty stderr trap message and that

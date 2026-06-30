@@ -17,7 +17,7 @@ use cb_ir::{
 };
 
 use crate::convert::ConversionTable;
-use crate::scope::{ConstValue, DeclKind, ScopeId, SymbolTable};
+use crate::scope::{ConstValue, DeclKind, OverloadTarget, ParamInfo, ScopeId, SymbolTable};
 use crate::types::Type;
 use crate::{DeleteClass, ResolvedCall, SemaResult, TypeTable};
 
@@ -37,6 +37,7 @@ pub fn lower(
         conversions,
         delete_classes,
         resolved_calls,
+        resolved_fn_refs,
         diagnostics: _,
         interner,
     } = sema;
@@ -50,6 +51,7 @@ pub fn lower(
         conversions,
         delete_classes,
         resolved_calls,
+        resolved_fn_refs,
 
         current_scope: ScopeId(0),
         locals: Vec::new(),
@@ -63,7 +65,7 @@ pub fn lower(
         next_temp: 0,
 
         func_table: Vec::new(),
-        func_id_map: HashMap::new(),
+        func_def_map: HashMap::new(),
         runtime_func_map: HashMap::new(),
         functions: Vec::new(),
         globals: Vec::new(),
@@ -109,6 +111,7 @@ struct Lowerer<'a> {
     conversions: &'a ConversionTable,
     delete_classes: &'a HashMap<NodeId, DeleteClass>,
     resolved_calls: &'a HashMap<NodeId, ResolvedCall>,
+    resolved_fn_refs: &'a HashMap<NodeId, NodeId>,
 
     // Per-function state (reset between functions)
     current_scope: ScopeId,
@@ -124,7 +127,9 @@ struct Lowerer<'a> {
 
     // Collected output (program-scoped)
     func_table: Vec<FuncDecl>,
-    func_id_map: HashMap<Symbol, FuncId>,
+    /// User functions keyed by their declaration `NodeId`, so overloads sharing
+    /// a name still map to distinct `FuncId`s.
+    func_def_map: HashMap<NodeId, FuncId>,
     runtime_func_map: HashMap<String, FuncId>,
     functions: Vec<Function>,
     globals: Vec<Global>,
@@ -389,6 +394,51 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Sema-level parameter list, return type, and body scope of the user
+    /// function defined at `def` — from its single `Function` declaration, or
+    /// the matching variant of an `OverloadSet` (overloads share `name`).
+    fn user_fn_parts(
+        &self,
+        top_scope: ScopeId,
+        name: Symbol,
+        def: NodeId,
+    ) -> (Vec<ParamInfo>, Type, Option<ScopeId>) {
+        if let Some(decl) = self.symbols.lookup(top_scope, name) {
+            match &decl.kind {
+                DeclKind::Function {
+                    params,
+                    return_ty,
+                    scope,
+                    ..
+                } => return (params.clone(), return_ty.clone(), *scope),
+                DeclKind::OverloadSet { variants } => {
+                    if let Some(v) = variants
+                        .iter()
+                        .find(|v| matches!(v.target, OverloadTarget::User { def: d } if d == def))
+                    {
+                        return (v.params.clone(), v.return_ty.clone(), v.scope);
+                    }
+                }
+                _ => {}
+            }
+        }
+        (Vec::new(), Type::Void, None)
+    }
+
+    /// IR parameter/return types for the user function defined at `def`.
+    fn user_fn_sig_ir(
+        &self,
+        top_scope: ScopeId,
+        name: Symbol,
+        def: NodeId,
+    ) -> (Vec<IrType>, Box<IrType>) {
+        let (params, ret_ty, _) = self.user_fn_parts(top_scope, name, def);
+        (
+            params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect(),
+            Box::new(self.sema_type_to_ir(&ret_ty)),
+        )
+    }
+
     fn build_func_table(&mut self, program: &[NodeId], top_scope: ScopeId) {
         // 1. Register runtime functions.
         for (sym, decl) in self.symbols.iter_scope(top_scope) {
@@ -413,6 +463,12 @@ impl<'a> Lowerer<'a> {
                 }
                 DeclKind::OverloadSet { variants } => {
                     for variant in variants {
+                        // User-function variants are registered in step 2, keyed
+                        // by their declaration node; only runtime variants emit
+                        // here.
+                        let OverloadTarget::Runtime { c_symbol } = &variant.target else {
+                            continue;
+                        };
                         let func_id = FuncId(self.func_table.len() as u32);
                         self.func_table.push(FuncDecl {
                             name: sym,
@@ -425,11 +481,10 @@ impl<'a> Lowerer<'a> {
                                 ret: Box::new(self.sema_type_to_ir(&variant.return_ty)),
                             },
                             kind: FuncKind::Runtime {
-                                symbol: variant.c_symbol.clone(),
+                                symbol: c_symbol.clone(),
                             },
                         });
-                        self.runtime_func_map
-                            .insert(variant.c_symbol.clone(), func_id);
+                        self.runtime_func_map.insert(c_symbol.clone(), func_id);
                     }
                 }
                 _ => {}
@@ -447,17 +502,7 @@ impl<'a> Lowerer<'a> {
         for (body_index, &id) in func_stmts.iter().enumerate() {
             if let Node::Stmt(Stmt::Function { name_span, .. }) = &self.arena[id] {
                 let name = self.intern_ident(*name_span, None);
-                let (param_types, ret) = if let Some(decl) = self.symbols.lookup(top_scope, name)
-                    && let DeclKind::Function {
-                        params, return_ty, ..
-                    } = &decl.kind
-                {
-                    let pt: Vec<_> = params.iter().map(|p| self.sema_type_to_ir(&p.ty)).collect();
-                    let rt = Box::new(self.sema_type_to_ir(return_ty));
-                    (pt, rt)
-                } else {
-                    (Vec::new(), Box::new(IrType::Void))
-                };
+                let (param_types, ret) = self.user_fn_sig_ir(top_scope, name, id);
 
                 let func_id = FuncId(self.func_table.len() as u32);
                 self.func_table.push(FuncDecl {
@@ -468,14 +513,13 @@ impl<'a> Lowerer<'a> {
                     },
                     kind: FuncKind::UserDefined { body_index },
                 });
-                self.func_id_map.insert(name, func_id);
+                self.func_def_map.insert(id, func_id);
             }
         }
 
         // 3. Register @main.
         let main_name = self.interner.intern("@main");
         let main_body_index = func_stmts.len();
-        let func_id = FuncId(self.func_table.len() as u32);
         self.func_table.push(FuncDecl {
             name: main_name,
             sig: FnSig {
@@ -486,7 +530,6 @@ impl<'a> Lowerer<'a> {
                 body_index: main_body_index,
             },
         });
-        self.func_id_map.insert(main_name, func_id);
     }
 
     fn lower_main(&mut self, program: &[NodeId], top_scope: ScopeId) {
@@ -551,27 +594,17 @@ impl<'a> Lowerer<'a> {
 
         let func_name = self.intern_ident(name_span, None);
 
-        // Look up the function declaration to get param/return types and scope.
-        let decl = self.symbols.lookup(ScopeId(0), func_name).cloned();
-        let (param_types, ret_type, param_infos) = if let Some(ref d) = decl
-            && let DeclKind::Function {
-                params: ref param_infos,
-                ref return_ty,
-                ref scope,
-            } = d.kind
-        {
-            if let Some(fn_scope) = scope {
-                self.current_scope = *fn_scope;
-            }
-            let pt: Vec<_> = param_infos
-                .iter()
-                .map(|p| self.sema_type_to_ir(&p.ty))
-                .collect();
-            let rt = self.sema_type_to_ir(return_ty);
-            (pt, rt, param_infos.clone())
-        } else {
-            (Vec::new(), IrType::Void, Vec::new())
-        };
+        // Get this definition's param/return types and body scope. The name may
+        // resolve to an `OverloadSet`, so look up by the definition node `id`.
+        let (param_infos, return_ty, scope) = self.user_fn_parts(ScopeId(0), func_name, id);
+        if let Some(fn_scope) = scope {
+            self.current_scope = fn_scope;
+        }
+        let param_types: Vec<_> = param_infos
+            .iter()
+            .map(|p| self.sema_type_to_ir(&p.ty))
+            .collect();
+        let ret_type = self.sema_type_to_ir(&return_ty);
 
         // Allocate locals for parameters.
         for (i, pi) in param_infos.iter().enumerate() {
@@ -781,7 +814,7 @@ impl<'a> Lowerer<'a> {
             Node::Expr(Expr::NullLit) => self.emit(InstKind::ConstNull, span),
 
             Node::Expr(Expr::Ident { name_span, sigil }) => {
-                self.lower_ident_expr(name_span, sigil, span)
+                self.lower_ident_expr(id, name_span, sigil, span)
             }
 
             Node::Expr(Expr::Binary { op, lhs, rhs }) => {
@@ -924,6 +957,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_ident_expr(
         &mut self,
+        node: NodeId,
         name_span: Span,
         sigil: Option<cb_frontend::Sigil>,
         span: Span,
@@ -956,12 +990,20 @@ impl<'a> Lowerer<'a> {
         // (cb_syntax.md §7.4). The call path (see `lower_call`) intercepts a
         // function name used as a callee before it reaches here, and bare 0-arg
         // sub calls are intercepted in `lower_stmt`, so this only fires for
-        // genuine value uses. §7.2 forbids overloading, so the name resolves to
-        // exactly one `func_id`.
-        if let Some(decl) = self.symbols.lookup(self.current_scope, name)
-            && matches!(decl.kind, DeclKind::Function { .. })
-            && let Some(&func_id) = self.func_id_map.get(&name)
-        {
+        // genuine value uses. An overloaded name was disambiguated by sema and
+        // recorded in `resolved_fn_refs`; a single function resolves by its own
+        // declaration node.
+        let func = if let Some(&def) = self.resolved_fn_refs.get(&node) {
+            self.func_def_map.get(&def).copied()
+        } else if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
+            match &decl.kind {
+                DeclKind::Function { def, .. } => self.func_def_map.get(def).copied(),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(func_id) = func {
             return self.emit(InstKind::FuncAddr { func: func_id }, span);
         }
 
@@ -1240,7 +1282,7 @@ impl<'a> Lowerer<'a> {
         if let Some(resolved) = self.resolved_calls.get(&call_id) {
             let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();
             let func_id = match resolved {
-                ResolvedCall::UserDefined { name } => self.func_id_map[name],
+                ResolvedCall::UserDefined { def } => self.func_def_map[def],
                 ResolvedCall::RuntimeFn { c_symbol } => self.runtime_func_map[c_symbol],
             };
             return self.emit(
@@ -1253,19 +1295,23 @@ impl<'a> Lowerer<'a> {
         }
 
         // Check if callee is an identifier referring to a known function
-        // (fallback for calls not in resolved_calls, e.g. function pointers).
+        // (fallback for calls not in resolved_calls). Valid programs record
+        // every direct call in `resolved_calls`, so this only catches a single
+        // function or runtime command reached without a recorded resolution.
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
-            if let Some(decl) = self.symbols.lookup(self.current_scope, name)
-                && matches!(
-                    decl.kind,
-                    DeclKind::Function { .. }
-                        | DeclKind::RuntimeFn { .. }
-                        | DeclKind::OverloadSet { .. }
-                )
-            {
+            let func_id =
+                self.symbols
+                    .lookup(self.current_scope, name)
+                    .and_then(|decl| match &decl.kind {
+                        DeclKind::Function { def, .. } => self.func_def_map.get(def).copied(),
+                        DeclKind::RuntimeFn { c_symbol, .. } => {
+                            self.runtime_func_map.get(c_symbol).copied()
+                        }
+                        _ => None,
+                    });
+            if let Some(func_id) = func_id {
                 let arg_regs: Vec<_> = args.iter().map(|&a| self.lower_expr(a)).collect();
-                let func_id = self.func_id_map[&name];
                 return self.emit(
                     InstKind::Call {
                         callee: func_id,
@@ -1302,28 +1348,44 @@ impl<'a> Lowerer<'a> {
             Node::Stmt(Stmt::ExprStmt { expr }) => {
                 // A bare identifier in statement position that resolves to a
                 // function is a 0-arg call (CoolBasic subroutine call syntax).
-                // Callee resolution is duplicated here rather than delegated to
-                // `lower_call`: for an ambiguous `OverloadSet` (multiple zero-arg
-                // variants) sema records no `resolved_calls` entry, so `lower_call`
-                // would fall through to its `func_id_map[&name]` lookup and panic.
-                // This arm instead picks the first zero-param variant.
+                // Sema routes such calls through overload resolution and records
+                // the target in `resolved_calls`; the structure-based fallback
+                // picks the zero-parameter variant for anything left unrecorded
+                // (e.g. a runtime command like `DrawScreen` / `Lock`).
                 if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
                     let name = self.intern_ident(*name_span, *sigil);
-                    if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
-                        let func_id = match &decl.kind {
-                            DeclKind::Function { .. } => self.func_id_map.get(&name).copied(),
-                            DeclKind::RuntimeFn { c_symbol, .. } => {
+                    {
+                        let func_id = match self.resolved_calls.get(&expr) {
+                            Some(ResolvedCall::UserDefined { def }) => {
+                                self.func_def_map.get(def).copied()
+                            }
+                            Some(ResolvedCall::RuntimeFn { c_symbol }) => {
                                 self.runtime_func_map.get(c_symbol).copied()
                             }
-                            // An overloaded command called bare (no parens, no
-                            // args) — e.g. `DrawScreen`, `Lock` — resolves to its
-                            // zero-parameter variant. Without this arm the call is
-                            // silently dropped (the window never flips/pumps).
-                            DeclKind::OverloadSet { variants } => variants
-                                .iter()
-                                .find(|v| v.params.is_empty())
-                                .and_then(|v| self.runtime_func_map.get(&v.c_symbol).copied()),
-                            _ => None,
+                            None => {
+                                self.symbols
+                                    .lookup(self.current_scope, name)
+                                    .and_then(|decl| match &decl.kind {
+                                        DeclKind::Function { def, .. } => {
+                                            self.func_def_map.get(def).copied()
+                                        }
+                                        DeclKind::RuntimeFn { c_symbol, .. } => {
+                                            self.runtime_func_map.get(c_symbol).copied()
+                                        }
+                                        DeclKind::OverloadSet { variants } => variants
+                                            .iter()
+                                            .find(|v| v.params.is_empty())
+                                            .and_then(|v| match &v.target {
+                                                OverloadTarget::Runtime { c_symbol } => {
+                                                    self.runtime_func_map.get(c_symbol).copied()
+                                                }
+                                                OverloadTarget::User { def } => {
+                                                    self.func_def_map.get(def).copied()
+                                                }
+                                            }),
+                                        _ => None,
+                                    })
+                            }
                         };
                         if let Some(func_id) = func_id {
                             let span = self.arena.span_of(expr);

@@ -532,3 +532,15 @@ fn delete_field_and_index_are_rvalue() {
     );
     insta::assert_snapshot!(ir);
 }
+
+#[test]
+fn user_overload_dispatch() {
+    // Two same-named functions lower to distinct funcs; each call targets the
+    // matching overload.
+    let ir = lower_src(
+        "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+         Function f(a As String) As Int\nReturn 0\nEndFunction\n\
+         Dim x As Int\nx = f(1)\nDim y As Int\ny = f(\"hi\")\n",
+    );
+    insta::assert_snapshot!(ir);
+}

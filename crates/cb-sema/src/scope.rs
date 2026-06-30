@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use cb_diagnostics::{FileId, Span, Symbol};
+use cb_frontend::NodeId;
 
 use crate::types::Type;
 
@@ -51,6 +52,10 @@ pub enum DeclKind {
         params: Vec<ParamInfo>,
         return_ty: Type,
         scope: Option<ScopeId>,
+        /// `NodeId` of this function's `Stmt::Function` declaration — the stable
+        /// identity carried across analysis and lowering so a name shared by
+        /// several overloads still maps each call/address-of to one definition.
+        def: NodeId,
     },
     TypeDef {
         fields: Vec<FieldInfo>,
@@ -92,12 +97,62 @@ impl DeclKind {
     }
 }
 
-/// One variant of an overloaded runtime function.
+/// One variant of an overload set — either a runtime command or a user
+/// function/sub. Variants of one set share a name but differ in signature.
 #[derive(Clone, Debug)]
 pub struct OverloadVariant {
     pub params: Vec<ParamInfo>,
     pub return_ty: Type,
-    pub c_symbol: String,
+    pub target: OverloadTarget,
+    /// For a user-function variant, its body scope (set in pass 2, as for a
+    /// single [`DeclKind::Function`]); `None` for runtime variants.
+    pub scope: Option<ScopeId>,
+}
+
+/// What an [`OverloadVariant`] dispatches to — the per-variant identity used
+/// when a call resolves to it. Runtime commands carry their C symbol; user
+/// functions carry the `NodeId` of their declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OverloadTarget {
+    Runtime { c_symbol: String },
+    User { def: NodeId },
+}
+
+/// Outcome of [`SymbolTable::declare_user_function`].
+pub(crate) enum DeclareFnOutcome {
+    /// First definition of this name — inserted as a single function.
+    Declared,
+    /// Merged with prior same-named definition(s) into an overload set.
+    Merged,
+    /// A prior definition has an identical signature; the span is the
+    /// previous definition's (caller emits the duplicate diagnostic).
+    Duplicate(Span),
+    /// The name is already taken by a non-function declaration; the span is
+    /// the existing declaration's.
+    Conflict(Span),
+}
+
+/// The `Type` stored on a function declaration: its return type, or `Void`
+/// for a sub. Mirrors the rule the checker applies to a single function.
+fn fn_decl_ty(return_ty: &Type) -> Type {
+    match return_ty {
+        Type::Void => Type::Void,
+        t => t.clone(),
+    }
+}
+
+/// Whether two function signatures are indistinguishable for overloading:
+/// same parameter types in order and the same return type. Parameter names
+/// and defaults are not part of the signature.
+fn same_signature(
+    a_params: &[ParamInfo],
+    a_ret: &Type,
+    b_params: &[ParamInfo],
+    b_ret: &Type,
+) -> bool {
+    a_params.len() == b_params.len()
+        && a_params.iter().zip(b_params).all(|(x, y)| x.ty == y.ty)
+        && a_ret == b_ret
 }
 
 /// Compile-time constant value.
@@ -191,6 +246,97 @@ impl SymbolTable {
             })
     }
 
+    /// Declare a user function/sub, merging same-named definitions into an
+    /// overload set (cb_syntax.md §7.2). The runtime catalog is registered
+    /// *after* `pass1`, so any existing local entry here is another user
+    /// declaration, never a runtime command.
+    ///
+    /// - No prior entry → inserted as a single [`DeclKind::Function`].
+    /// - Prior user function/overload set with a *distinguishable* signature →
+    ///   upgraded to / extended as a [`DeclKind::OverloadSet`].
+    /// - Prior definition with an *identical* signature (same parameter types
+    ///   and return type) → [`DeclareFnOutcome::Duplicate`] (caller emits E0319).
+    /// - Name taken by any other kind → [`DeclareFnOutcome::Conflict`].
+    pub(crate) fn declare_user_function(
+        &mut self,
+        scope: ScopeId,
+        name: Symbol,
+        params: Vec<ParamInfo>,
+        return_ty: Type,
+        span: Span,
+        def: NodeId,
+    ) -> DeclareFnOutcome {
+        let new_variant = OverloadVariant {
+            params,
+            return_ty,
+            target: OverloadTarget::User { def },
+            scope: None,
+        };
+        let s = &mut self.scopes[scope.0 as usize];
+        match s.symbols.get_mut(&name) {
+            None => {
+                let OverloadVariant {
+                    params, return_ty, ..
+                } = new_variant;
+                let ty = fn_decl_ty(&return_ty);
+                s.symbols.insert(
+                    name,
+                    Declaration {
+                        kind: DeclKind::Function {
+                            params,
+                            return_ty,
+                            scope: None,
+                            def,
+                        },
+                        ty,
+                        span,
+                        is_global: false,
+                    },
+                );
+                DeclareFnOutcome::Declared
+            }
+            Some(existing) => match &mut existing.kind {
+                DeclKind::Function {
+                    params: ep,
+                    return_ty: er,
+                    def: edef,
+                    ..
+                } => {
+                    if same_signature(ep, er, &new_variant.params, &new_variant.return_ty) {
+                        return DeclareFnOutcome::Duplicate(existing.span);
+                    }
+                    let prev_variant = OverloadVariant {
+                        params: std::mem::take(ep),
+                        return_ty: er.clone(),
+                        target: OverloadTarget::User { def: *edef },
+                        scope: None,
+                    };
+                    existing.kind = DeclKind::OverloadSet {
+                        variants: vec![prev_variant, new_variant],
+                    };
+                    existing.ty = Type::Void;
+                    DeclareFnOutcome::Merged
+                }
+                DeclKind::OverloadSet { variants } if matches!(variants.first(), Some(v) if matches!(v.target, OverloadTarget::User { .. })) =>
+                {
+                    if variants.iter().any(|v| {
+                        same_signature(
+                            &v.params,
+                            &v.return_ty,
+                            &new_variant.params,
+                            &new_variant.return_ty,
+                        )
+                    }) {
+                        return DeclareFnOutcome::Duplicate(existing.span);
+                    }
+                    variants.push(new_variant);
+                    DeclareFnOutcome::Merged
+                }
+                _ => DeclareFnOutcome::Conflict(existing.span),
+            },
+        }
+    }
+
     /// Look up a name following CoolBasic's visibility rules.
     ///
     /// From a function scope:
@@ -255,27 +401,34 @@ impl SymbolTable {
             .map(|(&sym, decl)| (sym, decl))
     }
 
-    /// Store the scope ID in a function declaration (set during pass 2).
+    /// Store the body scope of the function defined at `def` (set during pass
+    /// 2). For an overloaded name the entry is an `OverloadSet`; the matching
+    /// variant is found by its definition `NodeId`.
     pub(crate) fn update_function_scope(
         &mut self,
         scope: ScopeId,
         name: Symbol,
+        def: NodeId,
         fn_scope: ScopeId,
     ) {
         let s = &mut self.scopes[scope.0 as usize];
-        let mut found = false;
-        if let Some(decl) = s.symbols.get_mut(&name)
-            && let DeclKind::Function {
-                scope: ref mut s, ..
-            } = decl.kind
-        {
-            *s = Some(fn_scope);
-            found = true;
+        match s.symbols.get_mut(&name).map(|d| &mut d.kind) {
+            Some(DeclKind::Function { scope: s, .. }) => {
+                *s = Some(fn_scope);
+            }
+            Some(DeclKind::OverloadSet { variants }) => {
+                if let Some(v) = variants
+                    .iter_mut()
+                    .find(|v| matches!(v.target, OverloadTarget::User { def: d } if d == def))
+                {
+                    v.scope = Some(fn_scope);
+                }
+            }
+            _ => debug_assert!(
+                false,
+                "update_function_scope found no Function decl to update"
+            ),
         }
-        debug_assert!(
-            found,
-            "update_function_scope found no Function decl to update"
-        );
     }
 
     /// Update the ConstValue of an existing Constant declaration.
