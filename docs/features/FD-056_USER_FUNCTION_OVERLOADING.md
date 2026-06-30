@@ -1,6 +1,6 @@
 # FD-056: User Function Overloading
 
-**Status:** Open
+**Status:** Pending Verification
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Lets a user define multiple `Function`s sharing a name, distinguished by parameter signature — the same way runtime commands are already overload sets.
@@ -158,6 +158,29 @@ replaced by this rule:
 - Add `.cb` fixtures and run them through the `diff_llvm` differential suite so
   interp and native agree on which overload is selected and the result.
 - Confirm `E0319` still fires for truly indistinguishable redefinitions.
+
+## Implementation notes
+
+Implemented as designed; cross-phase identity is the function's `Stmt::Function`
+`NodeId` (`DeclKind::Function.def`, `OverloadTarget::User { def }`,
+`ResolvedCall::UserDefined { def }`, lowering's `func_def_map`). The expected-type
+helper `check_value_with_expected` drives address-of resolution at all three
+sites (assignment/Dim-init, function-pointer argument, return). Two refinements
+surfaced during implementation:
+
+- **Body scope per overload.** `DeclKind::Function.scope` linked a function to
+  its body scope, but an overloaded name is an `OverloadSet`; `OverloadVariant`
+  gained a `scope` field and `update_function_scope` keys it by definition node,
+  so each overload's locals/consts resolve correctly in lowering.
+- **Sub/function tie-break is user-only.** The void-vs-value call-context
+  tie-break (decision 5) is gated to user-function variants; runtime overloads
+  keep the prior "any tie ⇒ `E0323`" behaviour (preserves existing tests). A
+  statement-position call (parenthesised or bare) is checked with
+  `value_required = false`.
+
+Verified: full `cargo test --workspace` (829 tests) + `cargo clippy --workspace
+--all-targets -D warnings` clean + the 55-fixture `diff_llvm` differential suite
+(interp == native), including the new `overloading` fixture.
 
 ## Related
 

@@ -9,7 +9,7 @@ See `CLAUDE.md` for FD lifecycle stages and management guidelines.
 | FD | Title | Status | Effort | Priority |
 |----|-------|--------|--------|----------|
 | [FD-050](FD-050_OPTIONAL_TRAP_GENERATION.md) | Optional Trap Generation | Planned | Medium | Medium |
-| [FD-056](FD-056_USER_FUNCTION_OVERLOADING.md) | User Function Overloading | Open | High | Medium |
+| [FD-056](FD-056_USER_FUNCTION_OVERLOADING.md) | User Function Overloading | Pending Verification | High | Medium |
 
 ## Deferred / Closed
 

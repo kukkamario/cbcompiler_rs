@@ -1,0 +1,38 @@
+// FD-056: user function overloading
+
+// Distinguished by parameter type and arity.
+Function area(s As Int) As Int
+    Return s * s
+EndFunction
+Function area(w As Int, h As Int) As Int
+    Return w * h
+EndFunction
+Print area(5)
+Print area(3, 4)
+
+// A sub and a function may share a name; call context selects.
+Function show(n As Int)
+    Print "sub " + Str(n)
+EndFunction
+Function show(n As Int) As String
+    Return "fn " + Str(n)
+EndFunction
+show(7)
+Print show(7)
+
+// Overloaded address-of: the destination type picks the overload.
+Function dbl(x As Int) As Int
+    Return x * 2
+EndFunction
+Function dbl(x As Float) As Float
+    Return x * 2.0
+EndFunction
+Dim p As Function(Int) As Int
+p = dbl
+Print p(21)
+
+// Bare overloaded name passed to a function-pointer parameter.
+Function apply(f As Function(Int) As Int, v As Int) As Int
+    Return f(v)
+EndFunction
+Print apply(dbl, 50)

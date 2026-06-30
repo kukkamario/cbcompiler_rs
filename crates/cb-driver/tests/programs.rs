@@ -201,6 +201,11 @@ fn mutual_recursion() {
     run("mutual_recursion");
 }
 
+#[test]
+fn overloading() {
+    run("overloading");
+}
+
 // User-defined Type ------------------------------------------------------
 
 #[test]

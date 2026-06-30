@@ -9,8 +9,8 @@ use cb_frontend::{Arena, BinOp, DimName, NodeId, Sigil, SpanExt, UnOp};
 use crate::convert::{self, ConversionTable};
 use crate::diagnostics::*;
 use crate::scope::{
-    ConstValue, DeclKind, Declaration, FieldInfo, OverloadVariant, ParamInfo, ScopeId, ScopeKind,
-    SymbolTable,
+    ConstValue, DeclKind, Declaration, DeclareFnOutcome, FieldInfo, OverloadTarget,
+    OverloadVariant, ParamInfo, ScopeId, ScopeKind, SymbolTable,
 };
 use crate::types::{self, Type};
 use crate::{FuncDesc, ResolvedCall, RuntimeCatalog, SemaResult, TypeTable};
@@ -39,6 +39,9 @@ pub(crate) struct Checker<'a> {
     conversions: ConversionTable,
     delete_classes: std::collections::HashMap<NodeId, crate::DeleteClass>,
     resolved_calls: std::collections::HashMap<NodeId, ResolvedCall>,
+    /// For a bare overloaded name taken as a function pointer, the function
+    /// declaration its destination type selected (see `resolve_fn_ref`).
+    resolved_fn_refs: std::collections::HashMap<NodeId, NodeId>,
     diagnostics: Vec<Diagnostic>,
     current_scope: ScopeId,
     /// The return type of the function we're currently inside, if any.
@@ -79,6 +82,7 @@ impl<'a> Checker<'a> {
             conversions: ConversionTable::new(),
             delete_classes: std::collections::HashMap::new(),
             resolved_calls: std::collections::HashMap::new(),
+            resolved_fn_refs: std::collections::HashMap::new(),
             diagnostics: Vec::new(),
             current_scope: top,
             current_fn_return_ty: None,
@@ -98,6 +102,7 @@ impl<'a> Checker<'a> {
             conversions: checker.conversions,
             delete_classes: checker.delete_classes,
             resolved_calls: checker.resolved_calls,
+            resolved_fn_refs: checker.resolved_fn_refs,
             diagnostics: checker.diagnostics,
             interner: checker.interner,
         }
@@ -423,7 +428,10 @@ impl<'a> Checker<'a> {
                         OverloadVariant {
                             params,
                             return_ty,
-                            c_symbol: desc.c_symbol.clone(),
+                            target: OverloadTarget::Runtime {
+                                c_symbol: desc.c_symbol.clone(),
+                            },
+                            scope: None,
                         }
                     })
                     .collect();
@@ -644,7 +652,7 @@ impl<'a> Checker<'a> {
                 return_ty,
                 body: _,
             }) => {
-                self.pass1_function(scope, name_span, return_sigil, &params, return_ty, span);
+                self.pass1_function(scope, name_span, return_sigil, &params, return_ty, id);
             }
             Node::Stmt(Stmt::TypeDecl {
                 kind: _,
@@ -677,7 +685,7 @@ impl<'a> Checker<'a> {
         return_sigil: Option<Sigil>,
         params: &[NodeId],
         return_ty_node: Option<NodeId>,
-        _full_span: Span,
+        def: NodeId,
     ) {
         let name = self.intern_span(name_span);
         let mut param_infos = Vec::with_capacity(params.len());
@@ -718,21 +726,26 @@ impl<'a> Checker<'a> {
                 Label::new(name_span),
             ));
         }
-        let fn_type = match &ret_ty {
-            Type::Void => Type::Void,
-            _ => ret_ty.clone(),
-        };
-        let decl = Declaration {
-            kind: DeclKind::Function {
-                params: param_infos,
-                return_ty: ret_ty,
-                scope: None,
-            },
-            ty: fn_type,
-            span: name_span,
-            is_global: false,
-        };
-        self.try_declare(scope, name, decl, E_DUPLICATE_DEFINITION);
+        // Same-named user functions with distinguishable signatures merge into
+        // an overload set (cb_syntax.md §7.2); an identical signature, or a
+        // clash with a non-function name, is E0319.
+        match self
+            .symbols
+            .declare_user_function(scope, name, param_infos, ret_ty, name_span, def)
+        {
+            DeclareFnOutcome::Declared | DeclareFnOutcome::Merged => {}
+            DeclareFnOutcome::Duplicate(prev_span) | DeclareFnOutcome::Conflict(prev_span) => {
+                let name_str = self.interner.resolve(name);
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        E_DUPLICATE_DEFINITION,
+                        format!("duplicate declaration of `{name_str}`"),
+                        Label::new(name_span),
+                    )
+                    .with_secondary(Label::with_message(prev_span, "previously declared here")),
+                );
+            }
+        }
     }
 
     /// Collect a `Type`/`Struct` body's `FieldDecl`s into `FieldInfo`s,
@@ -916,7 +929,9 @@ impl<'a> Checker<'a> {
 
             Node::Expr(Expr::Unary { op, operand }) => self.check_unary(op, operand, span),
 
-            Node::Expr(Expr::Call { callee, args }) => self.check_call(id, callee, &args, span),
+            Node::Expr(Expr::Call { callee, args }) => {
+                self.check_call(id, callee, &args, span, true)
+            }
 
             Node::Expr(Expr::Index { array, indices }) => self.check_index(array, &indices, span),
 
@@ -965,10 +980,14 @@ impl<'a> Checker<'a> {
             } else {
                 None
             };
-            let is_command = matches!(
-                decl.kind,
-                DeclKind::OverloadSet { .. } | DeclKind::RuntimeFn { .. }
-            );
+            // An overload set has no single address (§7.4): a runtime command
+            // never does, and a *user* overload set needs an explicit
+            // function-pointer destination type to disambiguate (decision 6) —
+            // a context-free value use like this one cannot resolve it.
+            let is_user_overload = matches!(&decl.kind, DeclKind::OverloadSet { variants }
+                if matches!(variants.first(), Some(v) if matches!(v.target, OverloadTarget::User { .. })));
+            let is_command = matches!(decl.kind, DeclKind::RuntimeFn { .. })
+                || matches!(decl.kind, DeclKind::OverloadSet { .. }) && !is_user_overload;
             // A bare Type/Struct/runtime-type name is not a value. The positions
             // that legitimately take a bare Type name (First/Last, For-Each
             // source) resolve it directly via `resolve_type_name_arg` and never
@@ -990,11 +1009,22 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            if is_user_overload {
+                self.diagnostics.push(Diagnostic::error(
+                    E_ADDRESS_OF_UNSUPPORTED,
+                    format!(
+                        "cannot infer which overload of `{}` is meant here; assign it to a variable, parameter, or return value declared with an explicit `Function(...)` type",
+                        self.interner.resolve(name)
+                    ),
+                    Label::new(name_span),
+                ));
+                return Type::Error;
+            }
             if is_command {
                 self.diagnostics.push(Diagnostic::error(
                     E_ADDRESS_OF_UNSUPPORTED,
                     format!(
-                        "cannot take the address of overloaded or built-in command `{}`; only user-defined functions and subs have addresses",
+                        "cannot take the address of built-in command `{}`; only user-defined functions and subs have addresses",
                         self.interner.resolve(name)
                     ),
                     Label::new(name_span),
@@ -1085,7 +1115,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_call(&mut self, call_id: NodeId, callee: NodeId, args: &[NodeId], span: Span) -> Type {
+    fn check_call(
+        &mut self,
+        call_id: NodeId,
+        callee: NodeId,
+        args: &[NodeId],
+        span: Span,
+        value_required: bool,
+    ) -> Type {
         // Check if callee is an identifier that names an intrinsic.
         if let Node::Expr(Expr::Ident {
             name_span,
@@ -1100,23 +1137,25 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Check arg expressions first; both the direct-call and indirect-call
-        // paths below need their types.
-        let arg_types: Vec<Type> = args.iter().map(|&a| self.check_expr(a)).collect();
-
         // Direct call: a callee ident naming a function, runtime command, or
         // overload set is resolved by name here — *without* typing the callee as
         // a value. That distinction is what makes `print(...)` a call rather than
         // an address-of (cb_syntax.md §7.4); typing the callee as a value first
-        // would mis-fire E0329 on every command call.
+        // would mis-fire E0329 on every command call. Arguments are typed against
+        // their parameter types so a bare overloaded name passed to a
+        // function-pointer parameter resolves (§7.4).
         if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[callee] {
             let name = self.intern_ident(*name_span, *sigil);
             if let Some(decl) = self.symbols.lookup(self.current_scope, name) {
                 let decl_kind = decl.kind.clone();
                 match &decl_kind {
                     DeclKind::Function {
-                        params, return_ty, ..
+                        params,
+                        return_ty,
+                        def,
+                        ..
                     } => {
+                        let arg_types = self.check_args_typed(args, params);
                         let min_args = params.iter().filter(|p| !p.has_default).count();
                         let max_args = params.len();
                         if arg_types.len() < min_args || arg_types.len() > max_args {
@@ -1147,7 +1186,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                         self.resolved_calls
-                            .insert(call_id, ResolvedCall::UserDefined { name });
+                            .insert(call_id, ResolvedCall::UserDefined { def: *def });
                         return return_ty.clone();
                     }
                     DeclKind::RuntimeFn {
@@ -1155,6 +1194,7 @@ impl<'a> Checker<'a> {
                         return_ty,
                         c_symbol,
                     } => {
+                        let arg_types = self.check_args_typed(args, params);
                         if arg_types.len() != params.len() {
                             self.diagnostics.push(Diagnostic::error(
                                 E_WRONG_ARG_COUNT,
@@ -1182,7 +1222,16 @@ impl<'a> Checker<'a> {
                     }
                     DeclKind::OverloadSet { variants } => {
                         let variants = variants.clone();
-                        return self.resolve_overload(call_id, &variants, &arg_types, args, span);
+                        let arg_types: Vec<Type> =
+                            args.iter().map(|&a| self.check_expr(a)).collect();
+                        return self.resolve_overload(
+                            call_id,
+                            &variants,
+                            &arg_types,
+                            args,
+                            span,
+                            value_required,
+                        );
                     }
                     _ => {}
                 }
@@ -1193,6 +1242,7 @@ impl<'a> Checker<'a> {
         // error / undeclared / non-callable. This is the only place a callee is
         // typed as a value (so a function/command name handled above never goes
         // through `check_ident`'s address-of path).
+        let arg_types: Vec<Type> = args.iter().map(|&a| self.check_expr(a)).collect();
         let callee_ty = self.check_expr(callee);
         if callee_ty.is_error() {
             return Type::Error;
@@ -1224,6 +1274,11 @@ impl<'a> Checker<'a> {
         Type::Error
     }
 
+    /// Resolve an overloaded call (runtime command or user function) to one
+    /// variant and record it. `value_required` is true when the call's result
+    /// is used (expression position) and false for a statement-position call;
+    /// it breaks a sub-vs-function tie between same-signature variants
+    /// (cb_syntax.md §7.2, decision 5).
     fn resolve_overload(
         &mut self,
         call_id: NodeId,
@@ -1231,6 +1286,7 @@ impl<'a> Checker<'a> {
         arg_types: &[Type],
         arg_nodes: &[NodeId],
         span: Span,
+        value_required: bool,
     ) -> Type {
         // Filter variants by arity.
         let candidates: Vec<_> = variants
@@ -1274,18 +1330,40 @@ impl<'a> Checker<'a> {
             return Type::Error;
         }
 
-        // Pick best: most exact matches wins.
+        // Best score wins; collect every candidate sharing it as the top tier.
         scored.sort_by_key(|s| std::cmp::Reverse(s.1));
-        if scored.len() > 1 && scored[0].1 == scored[1].1 {
-            self.diagnostics.push(Diagnostic::error(
-                E_AMBIGUOUS_OVERLOAD,
-                "ambiguous overload: multiple candidates match equally well",
-                Label::new(span),
-            ));
-            return Type::Error;
+        let best = scored[0].1;
+        let mut top: Vec<&OverloadVariant> =
+            scored.iter().filter(|s| s.1 == best).map(|s| s.0).collect();
+
+        if top.len() > 1 {
+            // For *user* functions, a residual tie between a void sub and a
+            // value-returning function of the same signature is broken by call
+            // context — an expression wants the value-returning one, a statement
+            // wants the sub (§7.2, decision 5). Runtime overloads have no such
+            // sub/function distinction, so any tie there is ambiguous.
+            let all_user = top
+                .iter()
+                .all(|v| matches!(v.target, OverloadTarget::User { .. }));
+            let want_void = !value_required;
+            let filtered: Vec<&OverloadVariant> = top
+                .iter()
+                .copied()
+                .filter(|v| (v.return_ty == Type::Void) == want_void)
+                .collect();
+            if all_user && filtered.len() == 1 {
+                top = filtered;
+            } else {
+                self.diagnostics.push(Diagnostic::error(
+                    E_AMBIGUOUS_OVERLOAD,
+                    "ambiguous overload: multiple candidates match equally well",
+                    Label::new(span),
+                ));
+                return Type::Error;
+            }
         }
 
-        let winner = scored[0].0;
+        let winner = top[0];
 
         // Record coercions for args that need conversion.
         for (i, param) in winner.params.iter().enumerate() {
@@ -1294,13 +1372,117 @@ impl<'a> Checker<'a> {
             }
         }
 
-        self.resolved_calls.insert(
-            call_id,
-            ResolvedCall::RuntimeFn {
-                c_symbol: winner.c_symbol.clone(),
+        let resolved = match &winner.target {
+            OverloadTarget::Runtime { c_symbol } => ResolvedCall::RuntimeFn {
+                c_symbol: c_symbol.clone(),
             },
-        );
+            OverloadTarget::User { def } => ResolvedCall::UserDefined { def: *def },
+        };
+        self.resolved_calls.insert(call_id, resolved);
         winner.return_ty.clone()
+    }
+
+    /// If `node` is a bare identifier naming a *user* overload set, return its
+    /// symbol. A single (non-overloaded) function is not a set and resolves the
+    /// ordinary way; runtime command sets have no address (§7.4).
+    fn bare_user_overload_name(&mut self, node: NodeId) -> Option<Symbol> {
+        let (name_span, sigil) = match &self.arena[node] {
+            Node::Expr(Expr::Ident { name_span, sigil }) => (*name_span, *sigil),
+            _ => return None,
+        };
+        let name = self.intern_ident(name_span, sigil);
+        let is_user_set = self
+            .symbols
+            .lookup(self.current_scope, name)
+            .is_some_and(|d| {
+                matches!(&d.kind, DeclKind::OverloadSet { variants }
+                    if matches!(variants.first(), Some(v) if matches!(v.target, OverloadTarget::User { .. })))
+            });
+        is_user_set.then_some(name)
+    }
+
+    /// Type-check `node` as a value. When `expected` is a function-pointer type
+    /// and `node` is a bare overloaded name, the destination type selects one
+    /// overload (cb_syntax.md §7.4); otherwise this is plain `check_expr`.
+    fn check_value_with_expected(&mut self, node: NodeId, expected: Option<&Type>) -> Type {
+        if let Some(exp @ Type::FnPtr { .. }) = expected
+            && let Some(name) = self.bare_user_overload_name(node)
+        {
+            let exp = exp.clone();
+            return self.resolve_fn_ref(node, name, &exp);
+        }
+        self.check_expr(node)
+    }
+
+    /// Type each argument against the corresponding parameter type (no
+    /// expectation past the last parameter), so a bare overloaded name passed
+    /// to a function-pointer parameter resolves (cb_syntax.md §7.4).
+    fn check_args_typed(&mut self, args: &[NodeId], params: &[ParamInfo]) -> Vec<Type> {
+        args.iter()
+            .enumerate()
+            .map(|(i, &a)| self.check_value_with_expected(a, params.get(i).map(|p| &p.ty)))
+            .collect()
+    }
+
+    /// Select the overload of `name` whose signature *exactly* matches the
+    /// destination function-pointer type `expected` — equal parameter types and
+    /// the same return-ness (presence/absence of a return type discriminates a
+    /// function from a sub, cb_syntax.md §7.4). No implicit conversion or
+    /// variance is applied. Records the chosen definition in `resolved_fn_refs`.
+    fn resolve_fn_ref(&mut self, node: NodeId, name: Symbol, expected: &Type) -> Type {
+        let Type::FnPtr {
+            params: exp_params,
+            ret: exp_ret,
+        } = expected
+        else {
+            return self.check_expr(node);
+        };
+        let variants = match self.symbols.lookup(self.current_scope, name) {
+            Some(d) => match &d.kind {
+                DeclKind::OverloadSet { variants } => variants.clone(),
+                _ => return self.check_expr(node),
+            },
+            None => return self.check_expr(node),
+        };
+        let matches: Vec<&OverloadVariant> = variants
+            .iter()
+            .filter(|v| {
+                v.params.len() == exp_params.len()
+                    && v.params.iter().zip(exp_params).all(|(p, e)| p.ty == *e)
+                    && match exp_ret {
+                        None => v.return_ty == Type::Void,
+                        Some(t) => v.return_ty == **t,
+                    }
+            })
+            .collect();
+        let span = self.arena.span_of(node);
+        match matches.as_slice() {
+            [] => {
+                let n = self.interner.resolve(name).to_owned();
+                self.diagnostics.push(Diagnostic::error(
+                    E_NO_MATCHING_OVERLOAD,
+                    format!("no overload of `{n}` matches the function-pointer type"),
+                    Label::new(span),
+                ));
+                Type::Error
+            }
+            [one] => {
+                if let OverloadTarget::User { def } = one.target {
+                    self.resolved_fn_refs.insert(node, def);
+                }
+                self.types.insert(node, expected.clone());
+                expected.clone()
+            }
+            _ => {
+                let n = self.interner.resolve(name).to_owned();
+                self.diagnostics.push(Diagnostic::error(
+                    E_AMBIGUOUS_OVERLOAD,
+                    format!("ambiguous function-pointer reference to overloaded `{n}`"),
+                    Label::new(span),
+                ));
+                Type::Error
+            }
+        }
     }
 
     fn check_intrinsic_call(&mut self, name: &str, args: &[NodeId], span: Span) -> Option<Type> {
@@ -1597,14 +1779,21 @@ impl<'a> Checker<'a> {
                 self.check_assign(target, value);
             }
             Node::Stmt(Stmt::ExprStmt { expr }) => {
-                // A bare function/command name as a complete statement is a
-                // 0-arg call (CoolBasic paren-less sub-call syntax), matching
-                // `lower_stmt`. Route it through call-checking so it is validated
-                // as a call rather than mistaken for an address-of value (§7.4).
-                let bare_call =
-                    if let Node::Expr(Expr::Ident { name_span, sigil }) = &self.arena[expr] {
-                        let name = self.intern_ident(*name_span, *sigil);
-                        self.symbols
+                // A statement-position call discards its result, so it is checked
+                // with `value_required = false`: a sub-vs-function tie resolves to
+                // the sub (§7.2, decision 5). This covers a parenthesised call and
+                // a bare function/command name (CoolBasic paren-less sub call);
+                // the latter is routed through call-checking so it is validated as
+                // a call, not mistaken for an address-of value (§7.4).
+                let span = self.arena.span_of(expr);
+                match self.arena[expr].clone() {
+                    Node::Expr(Expr::Call { callee, args }) => {
+                        self.check_call(expr, callee, &args, span, false);
+                    }
+                    Node::Expr(Expr::Ident { name_span, sigil }) => {
+                        let name = self.intern_ident(name_span, sigil);
+                        let is_callable = self
+                            .symbols
                             .lookup(self.current_scope, name)
                             .is_some_and(|d| {
                                 matches!(
@@ -1613,15 +1802,16 @@ impl<'a> Checker<'a> {
                                         | DeclKind::RuntimeFn { .. }
                                         | DeclKind::OverloadSet { .. }
                                 )
-                            })
-                    } else {
-                        false
-                    };
-                if bare_call {
-                    let span = self.arena.span_of(expr);
-                    self.check_call(expr, expr, &[], span);
-                } else {
-                    self.check_expr(expr);
+                            });
+                        if is_callable {
+                            self.check_call(expr, expr, &[], span, false);
+                        } else {
+                            self.check_expr(expr);
+                        }
+                    }
+                    _ => {
+                        self.check_expr(expr);
+                    }
                 }
             }
             Node::Stmt(Stmt::VarDecl {
@@ -1735,7 +1925,7 @@ impl<'a> Checker<'a> {
                 return_ty,
                 body,
             }) => {
-                self.check_function(name_span, return_sigil, &params, return_ty, &body);
+                self.check_function(name_span, return_sigil, &params, return_ty, &body, id);
             }
             Node::Stmt(Stmt::Return { value }) => {
                 self.check_return(value, self.arena.span_of(id));
@@ -2032,7 +2222,9 @@ impl<'a> Checker<'a> {
             self.check_expr(target)
         };
 
-        let value_ty = self.check_expr(value);
+        // Pass the destination type so a bare overloaded name assigned to a
+        // declared `Function(...)` variable selects the matching overload (§7.4).
+        let value_ty = self.check_value_with_expected(value, Some(&target_ty));
         if !target_ty.is_error() && !value_ty.is_error() && target_ty != value_ty {
             self.coerce(value, &value_ty, &target_ty);
         }
@@ -2345,6 +2537,7 @@ impl<'a> Checker<'a> {
         params: &[NodeId],
         return_ty_node: Option<NodeId>,
         body: &[NodeId],
+        def: NodeId,
     ) {
         let top = self.current_scope;
         let fn_scope = self.symbols.push_scope(ScopeKind::Function, Some(top));
@@ -2352,7 +2545,8 @@ impl<'a> Checker<'a> {
         self.current_scope = fn_scope;
 
         let func_name = self.intern_span(name_span);
-        self.symbols.update_function_scope(top, func_name, fn_scope);
+        self.symbols
+            .update_function_scope(top, func_name, def, fn_scope);
 
         // Resolve return type for this function.
         let as_ret = return_ty_node.map(|tid| self.resolve_type_expr(tid));
@@ -2421,7 +2615,9 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 } else if let Some(val_id) = value {
-                    let val_ty = self.check_expr(val_id);
+                    // A bare overloaded name returned as a function pointer
+                    // resolves against this function's declared return type (§7.4).
+                    let val_ty = self.check_value_with_expected(val_id, Some(ret_ty));
                     self.coerce(val_id, &val_ty, ret_ty);
                 } else {
                     self.diagnostics.push(Diagnostic::error(
@@ -4113,6 +4309,144 @@ mod tests {
         ]);
         let result = analyze_with_catalog("abs(\"hello\")\n", &catalog);
         assert_eq!(error_codes(&result), vec!["E0324"]);
+    }
+
+    // ── user-function overloading (FD-056) ──────────────────────────────
+
+    #[test]
+    fn user_overload_by_param_type_ok() {
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As String) As Int\nReturn Len(a)\nEndFunction\n\
+             Dim x As Int\nx = f(3)\nDim y As Int\ny = f(\"hi\")\n",
+        );
+        assert!(
+            error_codes(&result).is_empty(),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn user_overload_distinct_signatures_not_duplicate() {
+        // Same name, different parameter types: not a redefinition.
+        let result = analyze_src(
+            "Function f(a As Int)\nEndFunction\n\
+             Function f(a As Float)\nEndFunction\n",
+        );
+        assert!(
+            error_codes(&result).is_empty(),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn user_overload_no_match_e0324() {
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As Float) As Int\nReturn 0\nEndFunction\n\
+             Dim r As Int\nr = f(\"hi\")\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0324"),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn user_overload_ambiguous_return_only_e0323() {
+        // Two functions identical but for return type, called for a value:
+        // the context cannot pick one, so the call is ambiguous.
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As Int) As Float\nReturn a\nEndFunction\n\
+             Dim r As Int\nr = f(3)\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0323"),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn sub_and_function_share_name_ok() {
+        // A sub and a function with the same signature coexist; a statement
+        // call selects the sub, an expression call selects the function.
+        let result = analyze_src(
+            "Function g(x As Int)\nEndFunction\n\
+             Function g(x As Int) As Int\nReturn x\nEndFunction\n\
+             g(5)\nDim v As Int\nv = g(5)\n",
+        );
+        assert!(
+            error_codes(&result).is_empty(),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn overload_address_of_untyped_e0329() {
+        // A bare overloaded name with no destination type cannot be resolved.
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As Float) As Float\nReturn a\nEndFunction\n\
+             x = f\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0329"),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn overload_address_of_typed_ok() {
+        // An explicit function-pointer destination selects the matching overload.
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As Float) As Float\nReturn a\nEndFunction\n\
+             Dim p As Function(Int) As Int\np = f\n",
+        );
+        assert!(
+            error_codes(&result).is_empty(),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn overload_address_of_typed_no_match_e0324() {
+        // A destination type matching no overload is rejected.
+        let result = analyze_src(
+            "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
+             Function f(a As Float) As Float\nReturn a\nEndFunction\n\
+             Dim p As Function(String) As Int\np = f\n",
+        );
+        assert!(
+            error_codes(&result).contains(&"E0324"),
+            "{:?}",
+            error_codes(&result)
+        );
+    }
+
+    #[test]
+    fn overload_fnptr_argument_ok() {
+        // A bare overloaded name passed to a function-pointer parameter resolves
+        // against the parameter type.
+        let result = analyze_src(
+            "Function inc(x As Int) As Int\nReturn x + 1\nEndFunction\n\
+             Function inc(x As Float) As Float\nReturn x + 1.0\nEndFunction\n\
+             Function apply(f As Function(Int) As Int, v As Int) As Int\nReturn f(v)\nEndFunction\n\
+             Dim r As Int\nr = apply(inc, 10)\n",
+        );
+        assert!(
+            error_codes(&result).is_empty(),
+            "{:?}",
+            error_codes(&result)
+        );
     }
 
     #[test]

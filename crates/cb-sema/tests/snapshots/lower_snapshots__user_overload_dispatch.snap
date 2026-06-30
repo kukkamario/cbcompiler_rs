@@ -1,0 +1,37 @@
+---
+source: crates/cb-sema/tests/lower_snapshots.rs
+assertion_line: 545
+expression: ir
+---
+fn f(Int) -> Int {
+  locals:
+    local0: a (Int, param)
+
+  bb0:
+    r0 = load_local local0
+    return r0
+}
+
+fn f(String) -> Int {
+  locals:
+    local0: a (String, param)
+
+  bb0:
+    r0 = const_int 0
+    return r0
+}
+
+fn @main() -> Void {
+  locals:
+    local0: x (Int)
+    local1: y (Int)
+
+  bb0:
+    r0 = const_int 1
+    r1 = call f, r0
+    store_local local0, r1
+    r2 = const_string "hi"
+    r3 = call f, r2
+    store_local local1, r3
+    return
+}
