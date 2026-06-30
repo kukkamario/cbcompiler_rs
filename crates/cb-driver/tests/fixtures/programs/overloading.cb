@@ -1,4 +1,4 @@
-// FD-056: user function overloading
+// User function overloading: same name, distinguished by signature.
 
 // Distinguished by parameter type and arity.
 Function area(s As Int) As Int

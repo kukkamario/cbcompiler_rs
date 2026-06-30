@@ -231,7 +231,7 @@ diff_tests! {
     fnptr_null_equality,
 }
 
-// User function overloading (FD-056): by-param-type/arity resolution,
+// User function overloading: by-param-type/arity resolution,
 // sub-vs-function sharing a name, and overloaded address-of into a typed
 // destination + function-pointer parameter.
 diff_tests! {

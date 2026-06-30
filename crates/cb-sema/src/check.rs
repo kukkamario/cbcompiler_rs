@@ -4311,7 +4311,7 @@ mod tests {
         assert_eq!(error_codes(&result), vec!["E0324"]);
     }
 
-    // ── user-function overloading (FD-056) ──────────────────────────────
+    // ── user-function overloading ───────────────────────────────────────
 
     #[test]
     fn user_overload_by_param_type_ok() {

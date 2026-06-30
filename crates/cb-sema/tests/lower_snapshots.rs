@@ -536,7 +536,7 @@ fn delete_field_and_index_are_rvalue() {
 #[test]
 fn user_overload_dispatch() {
     // Two same-named functions lower to distinct funcs; each call targets the
-    // matching overload (FD-056).
+    // matching overload.
     let ir = lower_src(
         "Function f(a As Int) As Int\nReturn a\nEndFunction\n\
          Function f(a As String) As Int\nReturn 0\nEndFunction\n\
