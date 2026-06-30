@@ -1,6 +1,7 @@
 # FD-056: User Function Overloading
 
-**Status:** Pending Verification
+**Status:** Complete
+**Completed:** 2026-06-30
 **Priority:** Medium
 **Effort:** High (> 4 hours)
 **Impact:** Lets a user define multiple `Function`s sharing a name, distinguished by parameter signature — the same way runtime commands are already overload sets.
